@@ -18,3 +18,4 @@ frontend/.turbo/
 frontend/out/
 frontend/.env
 frontend/.env.*
+!frontend/.env.local

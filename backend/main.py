@@ -113,10 +113,17 @@ search_logs_table.append_column(Column("searched_at", DateTime(timezone=True), n
 # ---------- 3) FastAPI app ----------
 app = FastAPI(title="RxBuddy API", version="0.1.0")
 
-# Allow your Next.js dev server (localhost:3000) to call the API from the browser.
+# Allow the frontend (Vercel + local dev) to call the API from the browser.
+# - Local dev: http://localhost:3000
+# - Vercel preview/prod: https://*.vercel.app (or your custom domain)
+cors_origins_env = os.getenv("CORS_ORIGINS", "").strip()
+cors_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+cors_origins += ["http://localhost:3000", "http://127.0.0.1:3000"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=cors_origins,
+    allow_origin_regex=r"^https://.*\.vercel\.app$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
