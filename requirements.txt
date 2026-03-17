@@ -7,3 +7,5 @@ python-dotenv
 fastapi
 uvicorn[standard]
 sentence-transformers
+streamlit
+plotly

@@ -238,6 +238,25 @@ def search(req: SearchRequest) -> SearchResponse:
             )
         )
 
+    # Log every search so the Streamlit dashboard has data.
+    # We store matched_question_id as the top result (if any).
+    try:
+        top_match_id = int(match_ids[0]) if match_ids else None
+        with engine.begin() as conn:
+            conn.execute(
+                search_logs_table.insert(),
+                {
+                    "query": user_query,
+                    "matched_question_id": top_match_id,
+                    "clicked": False,
+                    "session_id": None,
+                    "searched_at": _utc_now(),
+                },
+            )
+    except Exception:
+        # If logging fails, we still want search to work for the user.
+        pass
+
     return SearchResponse(query=user_query, results=results)
 
 
