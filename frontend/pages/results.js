@@ -157,6 +157,17 @@ export default function ResultsPage() {
                           <p className="mt-3 text-lg font-semibold leading-snug text-slate-900 group-hover:text-brand-700 transition-colors">
                             {r.question}
                           </p>
+
+                          {typeof r.answer === "string" && r.answer.trim().length > 0 && (
+                            <div className="mt-4 rounded-xl border border-brand-200/60 bg-brand-50/70 p-4">
+                              <p className="text-xs font-bold uppercase tracking-wider text-brand-700">
+                                💊 RxBuddy Answer
+                              </p>
+                              <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-slate-700">
+                                {r.answer}
+                              </p>
+                            </div>
+                          )}
                         </div>
                         {scorePct !== null && (
                           <div className="shrink-0 rounded-2xl bg-gradient-to-br from-brand-50 to-brand-100 px-4 py-3 text-center shadow-inner">
