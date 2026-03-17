@@ -1,0 +1,4 @@
+[phases.install]
+skip = true
+cmd = ["python -m pip install -r requirements-railway.txt"]
+

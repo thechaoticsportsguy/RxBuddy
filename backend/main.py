@@ -198,9 +198,16 @@ def search(req: SearchRequest) -> SearchResponse:
         match_ids = [m.id for m in matches]
         score_by_id = {m.id: float(m.score) for m in matches}
     elif engine_name == "knn":
-        matches2 = knn_search(user_query, top_k=top_k)
-        match_ids = [m.id for m in matches2]
-        score_by_id = {m.id: float(m.score) for m in matches2}
+        # KNN uses sentence-transformers. On Railway we may not install it (too large),
+        # so if it isn't available we gracefully fall back to TF-IDF.
+        try:
+            matches2 = knn_search(user_query, top_k=top_k)
+            match_ids = [m.id for m in matches2]
+            score_by_id = {m.id: float(m.score) for m in matches2}
+        except (ModuleNotFoundError, ImportError):
+            matches = tfidf_search(user_query, top_k=top_k)
+            match_ids = [m.id for m in matches]
+            score_by_id = {m.id: float(m.score) for m in matches}
     else:
         raise HTTPException(status_code=400, detail="engine must be 'tfidf' or 'knn'")
 
