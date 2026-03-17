@@ -1,0 +1,47 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv
+venv
+env
+
+# Frontend (not needed for backend deployment)
+frontend/
+frontend/node_modules/
+frontend/.next/
+
+# IDE
+.cursor
+.vscode
+*.swp
+*.swo
+
+# Environment files (Railway uses its own env vars)
+.env
+.env.local
+
+# Documentation
+*.md
+
+# Testing
+.pytest_cache
+tests/
+
+# Build configs (using Dockerfile instead)
+railpack.json
+nixpacks.toml
+
+# Data files that aren't needed at runtime
+data/questions.csv
+
+# Misc
+*.log
+.DS_Store
+Thumbs.db
