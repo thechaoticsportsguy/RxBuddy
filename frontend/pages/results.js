@@ -92,9 +92,147 @@ function parseClaudeAnswer(answer) {
   return { yesNo, lead: first, whatToDo, whatToAvoid, seeDoctorIf, parsedAnything: Boolean(parsedAnything), full: text };
 }
 
+/**
+ * Extract drug names and medical topics from user query for better PubMed search.
+ * Examples:
+ *   "can i take ibuprofen with food" → "ibuprofen food interaction"
+ *   "is tylenol safe during pregnancy" → "acetaminophen pregnancy safety"
+ */
+function buildPubMedQuery(query) {
+  const q = String(query || "").toLowerCase().trim();
+  if (!q) return "";
+
+  // Common drug name mappings (brand → generic for better PubMed results)
+  const drugMappings = {
+    tylenol: "acetaminophen",
+    advil: "ibuprofen",
+    motrin: "ibuprofen",
+    aleve: "naproxen",
+    bayer: "aspirin",
+    excedrin: "acetaminophen caffeine aspirin",
+    nyquil: "dextromethorphan doxylamine",
+    dayquil: "dextromethorphan phenylephrine",
+    mucinex: "guaifenesin",
+    benadryl: "diphenhydramine",
+    claritin: "loratadine",
+    zyrtec: "cetirizine",
+    allegra: "fexofenadine",
+    prilosec: "omeprazole",
+    nexium: "esomeprazole",
+    pepcid: "famotidine",
+    zantac: "ranitidine",
+    lipitor: "atorvastatin",
+    crestor: "rosuvastatin",
+    xanax: "alprazolam",
+    valium: "diazepam",
+    ambien: "zolpidem",
+    viagra: "sildenafil",
+    cialis: "tadalafil",
+  };
+
+  // Common generic drug names to detect
+  const genericDrugs = [
+    "ibuprofen", "acetaminophen", "aspirin", "naproxen", "amoxicillin",
+    "metformin", "lisinopril", "omeprazole", "gabapentin", "hydrocodone",
+    "oxycodone", "prednisone", "azithromycin", "ciprofloxacin", "metoprolol",
+    "losartan", "amlodipine", "sertraline", "fluoxetine", "escitalopram",
+    "tramadol", "morphine", "codeine", "warfarin", "insulin", "levothyroxine",
+  ];
+
+  // Medical topics to extract
+  const topics = {
+    pregnancy: "pregnancy safety",
+    pregnant: "pregnancy safety",
+    breastfeeding: "breastfeeding lactation",
+    nursing: "breastfeeding lactation",
+    alcohol: "alcohol interaction",
+    food: "food interaction",
+    eating: "food interaction",
+    "empty stomach": "food timing administration",
+    children: "pediatric dosing",
+    kids: "pediatric dosing",
+    elderly: "geriatric safety",
+    "side effect": "adverse effects",
+    "side effects": "adverse effects",
+    overdose: "overdose toxicity",
+    "too much": "overdose toxicity",
+    interaction: "drug interaction",
+    "mix with": "drug interaction",
+    "take with": "drug interaction combination",
+    allergy: "hypersensitivity allergic reaction",
+    allergic: "hypersensitivity allergic reaction",
+    liver: "hepatotoxicity liver",
+    kidney: "nephrotoxicity renal",
+    heart: "cardiovascular cardiac",
+    blood: "hematologic bleeding",
+    headache: "headache migraine",
+    pain: "analgesic pain relief",
+    fever: "antipyretic fever",
+    sleep: "sedation insomnia",
+    anxiety: "anxiolytic anxiety",
+    depression: "antidepressant",
+  };
+
+  // Extract drugs found in query
+  const foundDrugs = [];
+
+  // Check brand names first and convert to generic
+  for (const [brand, generic] of Object.entries(drugMappings)) {
+    if (q.includes(brand)) {
+      foundDrugs.push(generic);
+    }
+  }
+
+  // Check generic drug names
+  for (const drug of genericDrugs) {
+    if (q.includes(drug) && !foundDrugs.includes(drug)) {
+      foundDrugs.push(drug);
+    }
+  }
+
+  // Extract topics
+  const foundTopics = [];
+  for (const [keyword, topic] of Object.entries(topics)) {
+    if (q.includes(keyword)) {
+      foundTopics.push(topic);
+    }
+  }
+
+  // Build optimized PubMed search term
+  let searchParts = [];
+
+  // Add drugs
+  if (foundDrugs.length > 0) {
+    searchParts.push(...foundDrugs);
+  }
+
+  // Add topics
+  if (foundTopics.length > 0) {
+    // Only add first 2 topics to avoid over-filtering
+    searchParts.push(...foundTopics.slice(0, 2));
+  }
+
+  // If we found drugs/topics, use them; otherwise fall back to cleaned query
+  if (searchParts.length > 0) {
+    return searchParts.join(" ");
+  }
+
+  // Fallback: remove common filler words and use cleaned query
+  const fillerWords = ["can", "i", "is", "it", "the", "a", "an", "to", "with", "my", "me", "if", "or", "and", "of", "for", "on", "in", "at", "this", "that", "what", "how", "does", "do", "should", "would", "could", "will", "be", "am", "are", "was", "were", "been", "being", "have", "has", "had", "having", "take", "taking", "use", "using", "safe", "okay", "ok"];
+  const words = q.split(/\s+/).filter(w => w.length > 2 && !fillerWords.includes(w));
+  return words.slice(0, 5).join(" ");
+}
+
 async function fetchPubMedArticles(query) {
-  const term = String(query || "").trim();
+  const rawQuery = String(query || "").trim();
+  if (!rawQuery) return [];
+
+  // Build optimized search term for PubMed
+  const term = buildPubMedQuery(rawQuery);
   if (!term) return [];
+
+  console.log("[PubMed] Original query:", rawQuery);
+  console.log("[PubMed] Optimized search:", term);
 
   const esearch = new URL("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi");
   esearch.searchParams.set("db", "pubmed");

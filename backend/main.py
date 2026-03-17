@@ -366,8 +366,9 @@ def _truncate_words(text: str, max_words: int) -> str:
 
 def _generate_ai_answer(question: str) -> str:
     """
-    Generate a short, friendly, plain-English answer using Anthropic Claude.
-    Output is kept under ~150 words.
+    Generate a specific, actionable answer using Anthropic Claude.
+    The answer is tailored to the exact question asked.
+    Output is kept under ~200 words.
     """
     api_key = _anthropic_api_key()
     if not api_key:
@@ -381,17 +382,26 @@ def _generate_ai_answer(question: str) -> str:
     try:
         client = anthropic.Anthropic(api_key=api_key)
 
-        prompt = (
-            "You are a friendly pharmacist assistant. Answer this patient question "
-            "in plain English under 150 words. Include: what to do, what to avoid, "
-            f"and when to see a doctor. Question: {question}"
-        )
+        prompt = f"""You are a licensed pharmacist answering this SPECIFIC patient question. 
+Give a DIRECT, SPECIFIC answer to exactly what they asked. Do NOT give generic medication advice.
+
+Patient Question: {question}
+
+Instructions:
+1. Start with a clear YES/NO or direct answer to their specific question
+2. Explain WHY with specific reasoning related to their question
+3. Give 2-3 specific "What to Do" points for their situation
+4. Give 2-3 specific "What to Avoid" points for their situation  
+5. Give 1-2 "See a Doctor If" warning signs specific to their concern
+
+Keep your answer under 200 words. Be specific to the drugs, conditions, or situations they mentioned.
+Do not give generic advice like "follow package directions" - give actionable guidance for their exact question."""
 
         logger.info("[Claude] Sending question to claude-sonnet-4-20250514: %.80s...", question)
 
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=300,
+            max_tokens=400,
             messages=[{"role": "user", "content": prompt}],
         )
 
@@ -406,7 +416,7 @@ def _generate_ai_answer(question: str) -> str:
             logger.warning("[Claude] Empty text in response for question: %.80s", question)
             raise RuntimeError("Claude returned an empty response.")
 
-        answer = _truncate_words(text, 150)
+        answer = _truncate_words(text, 200)
         logger.info("[Claude] SUCCESS! Generated answer (%d words): %.200s", len(answer.split()), answer)
         print(f"[Claude] ANSWER: {answer}")  # Also print to stdout for Railway logs
         return answer
