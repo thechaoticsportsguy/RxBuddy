@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import os
-import re
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -122,6 +121,11 @@ def health_check() -> dict[str, str]:
 # ---------- 4) Request/response models ----------
 class SearchRequest(BaseModel):
     query: str = Field(..., min_length=1, description="What the user typed or spoke")
+    engine: str = Field(
+        "tfidf",
+        description="Which search engine to use: 'tfidf' (fast) or 'knn' (transformer embeddings).",
+    )
+    top_k: int = Field(5, ge=1, le=10, description="How many results to return (1 to 10).")
 
 
 class QuestionMatch(BaseModel):
@@ -129,6 +133,7 @@ class QuestionMatch(BaseModel):
     question: str
     category: Optional[str] = None
     tags: list[str] = []
+    score: Optional[float] = None
 
 
 class SearchResponse(BaseModel):
@@ -148,36 +153,10 @@ class LogResponse(BaseModel):
     log_id: int
 
 
-# ---------- 5) Simple search logic ----------
-_word_re = re.compile(r"[a-z0-9]+", re.IGNORECASE)
-
-
-def _tokens(text: str) -> list[str]:
-    return [t.lower() for t in _word_re.findall(text or "") if len(t) >= 2]
-
-
-def _score(query: str, candidate_question: str) -> float:
-    """
-    Very simple scoring:
-    - Token overlap (how many words in common)
-    - Bonus if query is a substring of the candidate
-    """
-    q = query.strip().lower()
-    c = (candidate_question or "").strip().lower()
-    if not c:
-        return 0.0
-
-    qt = set(_tokens(q))
-    ct = set(_tokens(c))
-    overlap = len(qt & ct)
-    score = float(overlap)
-
-    if q and q in c:
-        score += 2.0
-
-    # Tiny length normalization so very long questions don’t dominate.
-    score += min(len(q), 60) / 100.0
-    return score
+# ---------- 5) ML search ----------
+# TF-IDF search is a great baseline: fast, simple, and works well on FAQs.
+from ml.tfidf_search import search as tfidf_search
+from ml.knn_search import search as knn_search
 
 
 @app.post("/search", response_model=SearchResponse)
@@ -186,66 +165,58 @@ def search(req: SearchRequest) -> SearchResponse:
     Takes a user query and returns the top 5 matching questions.
 
     How it works (simple version):
-    1) Pull a small set of candidate rows from Postgres using ILIKE on tokens
-    2) Score candidates in Python
-    3) Return the best 5
+    1) Use TF-IDF + cosine similarity to find the best matching question IDs
+    2) Fetch those rows from Postgres (so the API always reflects the database)
+    3) Return the top 5
     """
     user_query = req.query.strip()
     if not user_query:
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
-    toks = _tokens(user_query)
-    if not toks:
-        raise HTTPException(status_code=400, detail="Query must contain letters or numbers.")
+    engine_name = (req.engine or "tfidf").strip().lower()
+    top_k = int(req.top_k)
 
-    # Build an OR filter like:
-    # question ILIKE %token1% OR question ILIKE %token2% ...
-    # This keeps it beginner-friendly and works for our 532-row dataset.
-    conditions = []
-    for t in toks[:8]:  # limit tokens so we don’t build a huge query
-        conditions.append(questions_table.c.question.ilike(f"%{t}%"))
+    if engine_name == "tfidf":
+        matches = tfidf_search(user_query, top_k=top_k)
+        match_ids = [m.id for m in matches]
+        score_by_id = {m.id: float(m.score) for m in matches}
+    elif engine_name == "knn":
+        matches2 = knn_search(user_query, top_k=top_k)
+        match_ids = [m.id for m in matches2]
+        score_by_id = {m.id: float(m.score) for m in matches2}
+    else:
+        raise HTTPException(status_code=400, detail="engine must be 'tfidf' or 'knn'")
 
-    stmt = select(
-        questions_table.c.id,
-        questions_table.c.question,
-        questions_table.c.category,
-        questions_table.c.tags,
-    )
-    for cond in conditions:
-        stmt = stmt.where(cond) if stmt._where_criteria == () else stmt.where(cond)  # type: ignore[attr-defined]
-
-    # The above would AND conditions; we want OR. So do it properly:
-    from sqlalchemy import or_
-
-    stmt = select(
-        questions_table.c.id,
-        questions_table.c.question,
-        questions_table.c.category,
-        questions_table.c.tags,
-    ).where(or_(*conditions))
-
-    # Grab a limited candidate set; we’ll rank in Python.
-    stmt = stmt.limit(200)
+    if not match_ids:
+        return SearchResponse(query=user_query, results=[])
 
     try:
         with engine.connect() as conn:
-            rows = conn.execute(stmt).mappings().all()
+            rows = (
+                conn.execute(
+                    select(
+                        questions_table.c.id,
+                        questions_table.c.question,
+                        questions_table.c.category,
+                        questions_table.c.tags,
+                    ).where(questions_table.c.id.in_(match_ids))
+                )
+                .mappings()
+                .all()
+            )
     except Exception as e:  # pragma: no cover
         raise HTTPException(
             status_code=500,
             detail=f"Database error while searching. Did you run `python data/seed_db.py`? ({e})",
         )
 
-    scored: list[tuple[float, dict[str, Any]]] = []
-    for r in rows:
-        s = _score(user_query, r["question"])
-        scored.append((s, dict(r)))
-
-    scored.sort(key=lambda x: x[0], reverse=True)
-    top = [item for item in scored if item[0] > 0][:5]
+    row_by_id = {int(r["id"]): dict(r) for r in rows}
 
     results: list[QuestionMatch] = []
-    for _, r in top:
+    for qid in match_ids:
+        r = row_by_id.get(int(qid))
+        if not r:
+            continue
         tags = r.get("tags") or []
         results.append(
             QuestionMatch(
@@ -253,6 +224,7 @@ def search(req: SearchRequest) -> SearchResponse:
                 question=str(r["question"]),
                 category=r.get("category"),
                 tags=[str(t) for t in tags],
+                score=score_by_id.get(int(qid)),
             )
         )
 

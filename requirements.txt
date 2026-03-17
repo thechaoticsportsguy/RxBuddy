@@ -6,3 +6,4 @@ psycopg[binary]
 python-dotenv
 fastapi
 uvicorn[standard]
+sentence-transformers
