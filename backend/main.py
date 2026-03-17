@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime, timezone
 from typing import Optional
 
 from dotenv import load_dotenv
+
+logger = logging.getLogger("rxbuddy")
+logging.basicConfig(level=logging.INFO)
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -39,9 +43,13 @@ def _database_url() -> str:
     return url
 
 
-def _gemini_api_key() -> str | None:
-    key = os.getenv("GEMINI_API_KEY", "").strip()
+def _anthropic_api_key() -> str | None:
+    key = os.getenv("ANTHROPIC_API_KEY", "").strip()
     return key or None
+
+
+_has_anthropic_key = bool(_anthropic_api_key())
+logger.info("ANTHROPIC_API_KEY configured: %s", _has_anthropic_key)
 
 
 def _truncate_words(text: str, max_words: int) -> str:
@@ -51,48 +59,41 @@ def _truncate_words(text: str, max_words: int) -> str:
     return (" ".join(words[:max_words])).strip()
 
 
-def _generate_gemini_answer(question: str) -> str:
+def _generate_ai_answer(question: str) -> str:
     """
-    Generate a short, friendly, plain-English answer using Google Gemini.
-    Uses the new google-genai SDK with gemini-2.0-flash model.
-    Output is kept under ~150 words and follows the requested format.
+    Generate a short, friendly, plain-English answer using Anthropic Claude.
+    Output is kept under ~150 words.
     """
-    api_key = _gemini_api_key()
+    api_key = _anthropic_api_key()
     if not api_key:
-        raise RuntimeError("GEMINI_API_KEY is missing.")
+        raise RuntimeError("ANTHROPIC_API_KEY is missing.")
 
-    from google import genai
-    from google.genai import types
+    import anthropic
 
-    client = genai.Client(api_key=api_key)
+    client = anthropic.Anthropic(api_key=api_key)
 
-    prompt = f"""
-You are RxBuddy, a helpful pharmacist-style assistant for everyday patients (not clinicians).
-Write a plain-English answer in UNDER 150 WORDS.
-Use exactly these 4 headings and keep each section short:
-
-What it is:
-What to do:
-What to avoid:
-When to see a doctor:
-
-Question: {question}
-""".strip()
-
-    resp = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            temperature=0.4,
-            max_output_tokens=220,
-        ),
+    prompt = (
+        "You are a friendly pharmacist assistant. Answer this patient question "
+        "in plain English under 150 words. Include: what to do, what to avoid, "
+        f"and when to see a doctor. Question: {question}"
     )
 
-    text = (resp.text or "").strip()
-    if not text:
-        raise RuntimeError("Gemini returned an empty response.")
+    logger.info("[Claude] Sending question to claude-opus-4-5: %.80s...", question)
 
-    return _truncate_words(text, 150)
+    response = client.messages.create(
+        model="claude-opus-4-5",
+        max_tokens=300,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    text = (response.content[0].text or "").strip()
+    if not text:
+        logger.warning("[Claude] Empty response for question: %.80s", question)
+        raise RuntimeError("Claude returned an empty response.")
+
+    answer = _truncate_words(text, 150)
+    logger.info("[Claude] Generated answer (%d words): %.100s...", len(answer.split()), answer)
+    return answer
 
 
 # ---------- 2) Connect to PostgreSQL with SQLAlchemy ----------
@@ -244,11 +245,11 @@ def answer(req: AnswerRequest) -> AnswerResponse:
         raise HTTPException(status_code=400, detail="question cannot be empty")
 
     try:
-        a = _generate_gemini_answer(q)
+        a = _generate_ai_answer(q)
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Gemini error while generating answer. Make sure GEMINI_API_KEY is set. ({e})",
+            detail=f"Claude error while generating answer. Make sure ANTHROPIC_API_KEY is set. ({e})",
         )
 
     return AnswerResponse(question=q, answer=a)
@@ -333,14 +334,12 @@ def search(req: SearchRequest) -> SearchResponse:
         existing_answer = r.get("answer")
         answer_text: str | None = str(existing_answer).strip() if existing_answer else None
 
-        # If Gemini key is available and we don't already have an answer cached in DB,
-        # generate one and save it so next time it's instant.
-        if not answer_text and _gemini_api_key():
+        if not answer_text and _anthropic_api_key():
             try:
-                answer_text = _generate_gemini_answer(str(r["question"]))
+                answer_text = _generate_ai_answer(str(r["question"]))
                 generated_answers[int(r["id"])] = answer_text
-            except Exception:
-                # Don't break search if Gemini fails; just return results without answers.
+            except Exception as exc:
+                logger.error("[Claude] Failed to generate answer for Q#%s: %s", r["id"], exc, exc_info=True)
                 answer_text = None
 
         results.append(
@@ -364,8 +363,9 @@ def search(req: SearchRequest) -> SearchResponse:
                         .where(questions_table.c.id == int(qid))
                         .values(answer=ans)
                     )
-        except Exception:
-            pass
+            logger.info("[DB] Cached %d new Claude answers to questions table", len(generated_answers))
+        except Exception as exc:
+            logger.error("[DB] Failed to cache Claude answers: %s", exc, exc_info=True)
 
     # Log every search so the Streamlit dashboard has data.
     # We store matched_question_id as the top result (if any).

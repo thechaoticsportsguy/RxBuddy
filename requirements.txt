@@ -9,4 +9,4 @@ uvicorn[standard]
 sentence-transformers
 streamlit
 plotly
-google-genai
+anthropic
