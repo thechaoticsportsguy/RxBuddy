@@ -10,3 +10,11 @@ venv/
 
 .DS_Store
 Thumbs.db
+
+# Next.js / frontend
+frontend/node_modules/
+frontend/.next/
+frontend/.turbo/
+frontend/out/
+frontend/.env
+frontend/.env.*

@@ -6,6 +6,7 @@ from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy import Boolean, DateTime, Integer, MetaData, Table, Text, create_engine, select
 from sqlalchemy.dialects.postgresql import ARRAY, VARCHAR
@@ -111,6 +112,15 @@ search_logs_table.append_column(Column("searched_at", DateTime(timezone=True), n
 
 # ---------- 3) FastAPI app ----------
 app = FastAPI(title="RxBuddy API", version="0.1.0")
+
+# Allow your Next.js dev server (localhost:3000) to call the API from the browser.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/")
