@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -50,6 +51,79 @@ def _anthropic_api_key() -> str | None:
 
 _has_anthropic_key = bool(_anthropic_api_key())
 logger.info("ANTHROPIC_API_KEY configured: %s", _has_anthropic_key)
+
+
+# ---------- Slang normalization (zero API calls, runs before every search) ----------
+SPELLING_FIXES = {
+    "tynenol": "tylenol",
+    "ibrofen": "ibuprofen",
+    "ibuprofin": "ibuprofen",
+    "amoxicilin": "amoxicillin",
+    "motrin": "ibuprofen",
+    "advil": "ibuprofen",
+    "aleve": "naproxen",
+    "nyquil": "dextromethorphan",
+}
+
+SLANG_MAP = {
+    "drunk": "alcohol",
+    "wasted": "alcohol",
+    "booze": "alcohol",
+    "drinking": "alcohol",
+    "cooked": "dangerous reaction",
+    "meds": "medication",
+    "pills": "medication",
+    "xanny": "xanax",
+    "addy": "adderall",
+    "molly": "MDMA",
+    "high": "intoxicated",
+    "stoned": "cannabis",
+    "head is killing me": "headache",
+    "stomach is killing me": "stomach pain",
+    "throwing up": "vomiting",
+    "threw up": "vomiting",
+    "feel sick": "nausea",
+    "heart racing": "palpitations",
+    "can't sleep": "insomnia",
+    "knocked out": "sedated",
+}
+
+FILLER_WORDS = frozenset({"like", "um", "basically", "literally", "yo", "bro", "hey"})
+
+
+def normalize_query(query: str) -> tuple[str, str]:
+    """
+    Preprocess user query for better search: fix misspellings, replace slang,
+    remove filler words. Zero API calls.
+
+    Returns (original_query, cleaned_query).
+    Show original to user; search with cleaned.
+    """
+    original = (query or "").strip()
+    if not original:
+        return original, original
+
+    q = original.lower()
+
+    # 1) Replace slang phrases first (longer matches before shorter)
+    for slang, medical in sorted(SLANG_MAP.items(), key=lambda x: -len(x[0])):
+        # Word-boundary aware: replace whole words/phrases
+        pattern = r"\b" + re.escape(slang) + r"\b"
+        q = re.sub(pattern, medical, q, flags=re.IGNORECASE)
+
+    # 2) Fix drug misspellings
+    for misspelling, correct in SPELLING_FIXES.items():
+        pattern = r"\b" + re.escape(misspelling) + r"\b"
+        q = re.sub(pattern, correct, q, flags=re.IGNORECASE)
+
+    # 3) Remove filler words
+    words = q.split()
+    words = [w for w in words if w.lower() not in FILLER_WORDS]
+
+    # 4) Normalize whitespace
+    cleaned = " ".join(words).strip()
+
+    return original, cleaned if cleaned else original
 
 
 def _truncate_words(text: str, max_words: int) -> str:
@@ -285,26 +359,30 @@ def search(req: SearchRequest) -> SearchResponse:
     Takes a user query and returns the top 5 matching questions.
 
     How it works (simple version):
-    1) Use TF-IDF + cosine similarity to find the best matching question IDs
-    2) Fetch those rows from Postgres (so the API always reflects the database)
-    3) Return the top 5
+    1) Normalize query (fix misspellings, slang, filler words) — zero API calls
+    2) Use TF-IDF + cosine similarity to find the best matching question IDs
+    3) Fetch those rows from Postgres (so the API always reflects the database)
+    4) Return the top 5 (show original query to user; search used cleaned version)
     """
     user_query = req.query.strip()
     if not user_query:
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
+    original_query, cleaned_query = normalize_query(user_query)
+    search_query = cleaned_query if cleaned_query else user_query
+
     engine_name = (req.engine or "tfidf").strip().lower()
     top_k = int(req.top_k)
 
     if engine_name == "tfidf":
-        matches = tfidf_search(user_query, top_k=top_k)
+        matches = tfidf_search(search_query, top_k=top_k)
         match_ids = [m.id for m in matches]
         score_by_id = {m.id: float(m.score) for m in matches}
     elif engine_name == "knn":
         # KNN uses sentence-transformers. On Railway we may not install it (too large),
         # so if it isn't available we gracefully fall back to TF-IDF.
         try:
-            matches2 = knn_search(user_query, top_k=top_k)
+            matches2 = knn_search(search_query, top_k=top_k)
             match_ids = [m.id for m in matches2]
             score_by_id = {m.id: float(m.score) for m in matches2}
         except (ModuleNotFoundError, ImportError):
@@ -315,7 +393,7 @@ def search(req: SearchRequest) -> SearchResponse:
         raise HTTPException(status_code=400, detail="engine must be 'tfidf' or 'knn'")
 
     if not match_ids:
-        return SearchResponse(query=user_query, results=[])
+        return SearchResponse(query=original_query, results=[])
 
     try:
         with engine.connect() as conn:
@@ -404,7 +482,7 @@ def search(req: SearchRequest) -> SearchResponse:
         # If logging fails, we still want search to work for the user.
         pass
 
-    return SearchResponse(query=user_query, results=results)
+    return SearchResponse(query=original_query, results=results)
 
 
 @app.post("/log", response_model=LogResponse)

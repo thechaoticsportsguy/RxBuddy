@@ -3,9 +3,11 @@ Build RxBuddy mega database (6,000+ questions) using free APIs.
 
 Step 1: Fetch top 300 drugs from OpenFDA (drugs with most labels) or RxNorm fallback
 Step 2: For each drug, fetch FDA label from OpenFDA
-Step 3: For each drug, fetch DailyMed SPL metadata (optional)
-Step 4: Generate 20 questions per drug from FDA data
-Step 5: Save to data/mega_questions.csv and seed into PostgreSQL
+Step 3: For each drug, fetch DailyMed full FDA label (dosage, storage, counseling, pregnancy)
+Step 4: For each drug, fetch RxNorm brand names and synonyms
+Step 5: Generate 20 questions per drug from FDA + 5 from DailyMed + 3 from brand names
+Step 6: Add brand name tags to questions; skip drugs that already have questions in DB
+Step 7: Append new questions to data/mega_questions.csv and seed into PostgreSQL
 
 Run: python data/build_mega_database.py
 Requires: DATABASE_URL in .env for PostgreSQL seeding
@@ -20,6 +22,7 @@ import os
 import re
 import time
 from pathlib import Path
+
 import requests
 from dotenv import load_dotenv
 
@@ -27,10 +30,14 @@ from dotenv import load_dotenv
 # Configuration
 # ---------------------------------------------------------------------------
 MAX_DRUGS = 300  # Limit: stop after processing this many drugs
-RXNORM_URL = "https://rxnav.nlm.nih.gov/REST/allconcepts.json"
+RXNORM_ALL_URL = "https://rxnav.nlm.nih.gov/REST/allconcepts.json"
+RXNORM_DRUGS_URL = "https://rxnav.nlm.nih.gov/REST/drugs.json"
 OPENFDA_URL = "https://api.fda.gov/drug/label.json"
-DAILYMED_URL = "https://dailymed.nlm.nih.gov/dailymed/services/v2/spls.json"
+DAILYMED_SPLS_URL = "https://dailymed.nlm.nih.gov/dailymed/services/v2/spls.json"
+DAILYMED_SPL_URL = "https://dailymed.nlm.nih.gov/dailymed/services/v2/spls"  # /{setid}.xml
 QUESTIONS_PER_DRUG = 20
+DAILYMED_QUESTIONS_PER_DRUG = 5
+BRAND_QUESTIONS_PER_DRUG = 3
 DELAY_SECONDS = 0.5
 USER_AGENT = "RxBuddy/1.0 (educational project; contact@example.com)"
 
@@ -69,7 +76,7 @@ def fetch_drug_names(limit: int = MAX_DRUGS) -> list[str]:
     # Fallback: RxNorm ingredients
     params = {"tty": "IN"}
     headers = {"User-Agent": USER_AGENT}
-    resp = requests.get(RXNORM_URL, params=params, headers=headers, timeout=30)
+    resp = requests.get(RXNORM_ALL_URL, params=params, headers=headers, timeout=30)
     resp.raise_for_status()
     data = resp.json()
     group = data.get("minConceptGroup") or data.get("rxnormdata", {}).get("minConceptGroup", {})
@@ -136,34 +143,199 @@ def fetch_openfda_label(drug_name: str) -> dict[str, str] | None:
 
 
 # ---------------------------------------------------------------------------
-# Step 3: Fetch DailyMed SPL metadata
+# Step 3: Fetch DailyMed full FDA label (dosage, storage, counseling, pregnancy)
 # ---------------------------------------------------------------------------
 
 
 def fetch_dailymed_spls(drug_name: str) -> list[dict] | None:
     """Fetch DailyMed SPL list for a drug. Returns list of SPL metadata or None."""
     try:
-        params = {"drug_name": drug_name, "pagesize": 5}
+        params = {"drug_name": drug_name, "pagesize": 1}
         headers = {"User-Agent": USER_AGENT}
-        resp = requests.get(DAILYMED_URL, params=params, headers=headers, timeout=30)
+        resp = requests.get(DAILYMED_SPLS_URL, params=params, headers=headers, timeout=30)
         resp.raise_for_status()
         data = resp.json()
         items = data.get("data", [])
         return items if items else None
     except Exception:
-        return None  # DailyMed is optional; skip on any error
+        return None
 
 
-# ---------------------------------------------------------------------------
-# Step 4: Generate 20 questions per drug from FDA data
-# ---------------------------------------------------------------------------
-
-
-def generate_questions(drug_name: str, fda_data: dict[str, str]) -> list[dict]:
+def fetch_dailymed_full_label(drug_name: str) -> dict[str, str] | None:
     """
-    Generate 20 patient-style questions from FDA label data.
+    Fetch full FDA label from DailyMed for a drug.
+    Returns dict with: dosage_instructions, storage_requirements,
+    patient_counseling_info, pregnancy_warnings
+    """
+    spls = fetch_dailymed_spls(drug_name)
+    if not spls:
+        return None
+    setid = spls[0].get("setid")
+    if not setid:
+        return None
+    url = f"{DAILYMED_SPL_URL}/{setid}.xml"
+    try:
+        resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=45)
+        resp.raise_for_status()
+        xml_text = resp.text
+    except Exception:
+        return None
+
+    out = {
+        "dosage_instructions": "",
+        "storage_requirements": "",
+        "patient_counseling_info": "",
+        "pregnancy_warnings": "",
+    }
+
+    # SPL XML uses <section> with <title> and <text>. Extract by section title.
+    # Regex: find <title>...</title> followed by <text>...</text>
+    section_pattern = re.compile(
+        r"<title[^>]*>([^<]+)</title>.*?<text[^>]*>([^<]*)</text>",
+        re.DOTALL | re.IGNORECASE,
+    )
+    for m in section_pattern.finditer(xml_text):
+        title = (m.group(1) or "").upper()
+        text_content = re.sub(r"\s+", " ", (m.group(2) or "").strip())[:2000]
+        if not text_content:
+            continue
+        if "DOSAGE" in title and "ADMINISTRATION" in title:
+            out["dosage_instructions"] = text_content
+        elif "STORAGE" in title or "HANDLING" in title:
+            out["storage_requirements"] = text_content
+        elif "PATIENT COUNSELING" in title or "COUNSELING INFORMATION" in title:
+            out["patient_counseling_info"] = text_content
+        elif "PREGNANCY" in title or "LACTATION" in title or "NURSING MOTHERS" in title:
+            out["pregnancy_warnings"] = text_content
+
+    return out if any(out.values()) else None
+
+
+# ---------------------------------------------------------------------------
+# Step 4: Fetch RxNorm brand names and synonyms
+# ---------------------------------------------------------------------------
+
+
+def fetch_rxnorm_brand_names(drug_name: str) -> list[str]:
+    """
+    Fetch brand names for a drug from RxNorm drugs.json.
+    Returns list of brand names (e.g. Advil, Motrin for ibuprofen).
+    """
+    try:
+        params = {"name": drug_name}
+        headers = {"User-Agent": USER_AGENT}
+        resp = requests.get(RXNORM_DRUGS_URL, params=params, headers=headers, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        return []
+
+    brands = []
+    drug_group = data.get("drugGroup", {})
+    concept_groups = drug_group.get("conceptGroup", [])
+    if not isinstance(concept_groups, list):
+        concept_groups = [concept_groups] if concept_groups else []
+
+    for group in concept_groups:
+        if group.get("tty") != "SBD":
+            continue
+        props = group.get("conceptProperties", [])
+        if not isinstance(props, list):
+            props = [props] if props else []
+        for p in props:
+            name = p.get("name") or p.get("synonym") or ""
+            # Format: "ibuprofen 200 MG Oral Tablet [Advil]" -> extract Advil
+            match = re.search(r"\[([^\]]+)\]", name)
+            if match:
+                brand = match.group(1).strip()
+                if brand and brand not in brands:
+                    brands.append(brand)
+
+    return brands[:10]  # Limit to 10 brands per drug
+
+
+# ---------------------------------------------------------------------------
+# Step 5: Generate questions from FDA + DailyMed + brand names
+# ---------------------------------------------------------------------------
+
+
+def generate_dailymed_questions(drug_name: str, dailymed_data: dict[str, str], base_tags: str) -> list[dict]:
+    """Generate 5 questions from DailyMed label data."""
+    qs = []
+    dos = dailymed_data.get("dosage_instructions") or ""
+    storage = dailymed_data.get("storage_requirements") or ""
+    counseling = dailymed_data.get("patient_counseling_info") or ""
+    preg = dailymed_data.get("pregnancy_warnings") or ""
+
+    if dos:
+        qs.append({
+            "question": f"What are the dosage instructions for {drug_name}?",
+            "category": "Dosage",
+            "tags": base_tags + ";dosage;dailymed",
+        })
+    if storage:
+        qs.append({
+            "question": f"How should I store {drug_name}?",
+            "category": "Storage",
+            "tags": base_tags + ";storage;dailymed",
+        })
+    if counseling:
+        qs.append({
+            "question": f"What should I know before taking {drug_name}?",
+            "category": "Patient Counseling",
+            "tags": base_tags + ";counseling;dailymed",
+        })
+    if preg:
+        qs.append({
+            "question": f"Can I take {drug_name} while pregnant or breastfeeding?",
+            "category": "Pregnancy",
+            "tags": base_tags + ";pregnancy;dailymed",
+        })
+    if len(qs) < DAILYMED_QUESTIONS_PER_DRUG:
+        qs.append({
+            "question": f"Where can I find patient information for {drug_name}?",
+            "category": "Patient Information",
+            "tags": base_tags + ";dailymed",
+        })
+
+    return qs[:DAILYMED_QUESTIONS_PER_DRUG]
+
+
+def generate_brand_questions(drug_name: str, brand_names: list[str], base_tags: str) -> list[dict]:
+    """Generate 3 questions using brand names (e.g. Can I take Advil with...)."""
+    if not brand_names:
+        return []
+    templates = [
+        ("Can I take {brand} with other medications?", "Drug Interactions"),
+        ("What are the side effects of {brand}?", "Adverse Reactions"),
+        ("How should I take {brand}?", "Dosage"),
+    ]
+    qs = []
+    for i, (tpl, cat) in enumerate(templates[:BRAND_QUESTIONS_PER_DRUG]):
+        brand = brand_names[i % len(brand_names)]  # Rotate brands if needed
+        tags = base_tags + f";{brand.lower()};brand"
+        qs.append({
+            "question": tpl.format(brand=brand),
+            "category": cat,
+            "tags": tags,
+        })
+    return qs
+
+
+def generate_questions(
+    drug_name: str,
+    fda_data: dict[str, str],
+    dailymed_data: dict[str, str] | None = None,
+    brand_names: list[str] | None = None,
+) -> list[dict]:
+    """
+    Generate 20 patient-style questions from FDA + 5 from DailyMed + 3 from brand names.
+    Adds brand name tags to all questions.
     Returns list of dicts with keys: question, category, tags
     """
+    brand_names = brand_names or []
+    dailymed_data = dailymed_data or {}
+
     questions = []
     w = fda_data.get("warnings") or ""
     di = fda_data.get("drug_interactions") or ""
@@ -184,7 +356,11 @@ def generate_questions(drug_name: str, fda_data: dict[str, str]) -> list[dict]:
                 out.append(w)
         return ";".join(out[:5]) if out else drug_name.lower()
 
+    # Base tags: drug name + brand names (for search) + fda;label
+    brand_tag = ";".join(b.lower() for b in brand_names[:5]) if brand_names else ""
     base_tags = f"{drug_name.lower()};fda;label"
+    if brand_tag:
+        base_tags += ";" + brand_tag
 
     # Warnings
     if w:
@@ -292,26 +468,92 @@ def generate_questions(drug_name: str, fda_data: dict[str, str]) -> list[dict]:
         if len(questions) >= QUESTIONS_PER_DRUG:
             break
 
-    return questions[:QUESTIONS_PER_DRUG]
+    # Add 5 questions from DailyMed
+    if dailymed_data and any(dailymed_data.values()):
+        questions.extend(generate_dailymed_questions(drug_name, dailymed_data, base_tags))
+
+    # Add 3 questions using brand names
+    if brand_names:
+        questions.extend(generate_brand_questions(drug_name, brand_names, base_tags))
+
+    return questions
 
 
 # ---------------------------------------------------------------------------
-# Step 5: Save CSV and seed PostgreSQL
+# Step 6: Get drugs that already have questions in DB (skip these)
 # ---------------------------------------------------------------------------
 
 
-def save_csv(rows: list[dict], path: Path) -> None:
-    """Write questions to CSV with columns: id, question, category, tags."""
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=["id", "question", "category", "tags"])
-        writer.writeheader()
-        for i, r in enumerate(rows, start=1):
-            writer.writerow({
-                "id": i,
-                "question": r["question"],
-                "category": r.get("category", "General"),
-                "tags": r.get("tags", ""),
-            })
+# Stoplist: common tags that are not drug names
+_TAG_STOPLIST = frozenset(
+    "fda label warnings interactions dosage storage brand side effects contraindications "
+    "pregnancy adverse reactions nsaid alcohol food overdose pediatric kidney liver "
+    "counseling dailymed expiration missed dose".split()
+)
+
+
+def get_drugs_with_questions() -> set[str]:
+    """Return set of drug names (lowercase) that already have questions in PostgreSQL."""
+    load_dotenv()
+    url = os.getenv("DATABASE_URL", "").strip()
+    if not url:
+        return set()
+    if "+psycopg" not in url:
+        url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+    from sqlalchemy import create_engine, text
+
+    try:
+        engine = create_engine(url, future=True, pool_pre_ping=True)
+        with engine.connect() as conn:
+            r = conn.execute(text("SELECT tags FROM questions WHERE tags IS NOT NULL"))
+            rows = r.fetchall()
+    except Exception:
+        return set()
+
+    drugs = set()
+    for (tags,) in rows:
+        if not tags:
+            continue
+        for t in tags:
+            t = str(t).strip().lower()
+            if t and t not in _TAG_STOPLIST and len(t) > 2 and t.replace("-", "").isalnum():
+                drugs.add(t)
+    return drugs
+
+
+# ---------------------------------------------------------------------------
+# Step 7: Save CSV and seed PostgreSQL
+# ---------------------------------------------------------------------------
+
+
+def save_csv(rows: list[dict], path: Path, append: bool = False) -> None:
+    """Write questions to CSV. If append=True, append to existing file."""
+    if append and path.exists():
+        with open(path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            existing = list(reader)
+        start_id = len(existing) + 1
+        with open(path, "a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=["id", "question", "category", "tags"])
+            for i, r in enumerate(rows, start=start_id):
+                writer.writerow({
+                    "id": i,
+                    "question": r["question"],
+                    "category": r.get("category", "General"),
+                    "tags": r.get("tags", ""),
+                })
+    else:
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=["id", "question", "category", "tags"])
+            writer.writeheader()
+            for i, r in enumerate(rows, start=1):
+                writer.writerow({
+                    "id": i,
+                    "question": r["question"],
+                    "category": r.get("category", "General"),
+                    "tags": r.get("tags", ""),
+                })
 
 
 def seed_postgres(rows: list[dict]) -> None:
@@ -387,15 +629,24 @@ def main() -> None:
     drugs = fetch_drug_names(limit=MAX_DRUGS)
     print(f"  Got {len(drugs)} drugs")
 
+    print("Step 2: Checking which drugs already have questions in database...")
+    drugs_with_questions = get_drugs_with_questions()
+    print(f"  Found {len(drugs_with_questions)} drugs already in DB (will skip)")
+
     all_questions = []
     skipped = 0
-    drugs_to_process = drugs[:MAX_DRUGS]  # Stop after MAX_DRUGS
+    skipped_existing = 0
+    drugs_to_process = drugs[:MAX_DRUGS]
 
     for i, drug in enumerate(drugs_to_process, start=1):
         print(f"\n[{i}/{len(drugs_to_process)}] {drug}...")
 
-        time.sleep(DELAY_SECONDS)
+        if drug.lower() in drugs_with_questions:
+            print(f"  SKIP: {drug} already has questions in database")
+            skipped_existing += 1
+            continue
 
+        time.sleep(DELAY_SECONDS)
         fda_data = fetch_openfda_label(drug)
         if not fda_data or not any(fda_data.values()):
             print(f"  SKIP: No FDA data for {drug}")
@@ -403,25 +654,34 @@ def main() -> None:
             continue
 
         time.sleep(DELAY_SECONDS)
-        dailymed = fetch_dailymed_spls(drug)
-        # DailyMed optional; we use FDA data for questions
+        dailymed_data = fetch_dailymed_full_label(drug)
 
-        qs = generate_questions(drug, fda_data)
+        time.sleep(DELAY_SECONDS)
+        brand_names = fetch_rxnorm_brand_names(drug)
+        if brand_names:
+            print(f"  Brand names: {', '.join(brand_names[:5])}{'...' if len(brand_names) > 5 else ''}")
+
+        qs = generate_questions(drug, fda_data, dailymed_data, brand_names)
         all_questions.extend(qs)
         print(f"  Generated {len(qs)} questions (total: {len(all_questions)})")
 
     if not all_questions:
-        print("\nNo questions generated. Exiting.")
+        print("\nNo new questions generated. Exiting.")
         return
 
     csv_path = here / "mega_questions.csv"
-    print(f"\nStep 5: Saving {len(all_questions)} questions to {csv_path}")
-    save_csv(all_questions, csv_path)
+    append = csv_path.exists()
+    print(f"\nStep 7: Saving {len(all_questions)} questions to {csv_path} ({'append' if append else 'new'})")
+    save_csv(all_questions, csv_path, append=append)
 
     print("Seeding PostgreSQL...")
     seed_postgres(all_questions)
 
-    print(f"\nDone. {len(all_questions)} questions | {len(drugs_to_process) - skipped} drugs with data | {skipped} skipped")
+    print(
+        f"\nDone. {len(all_questions)} new questions | "
+        f"{len(drugs_to_process) - skipped - skipped_existing} drugs processed | "
+        f"{skipped} skipped (no data) | {skipped_existing} skipped (already in DB)"
+    )
 
 
 if __name__ == "__main__":
