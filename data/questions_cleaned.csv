@@ -1,0 +1,533 @@
+id,question,category,tags,tags_list,question_lower
+1,Can I take ibuprofen with my blood pressure medication?,Drug Interactions,ibuprofen;blood pressure;interaction;otc,"['ibuprofen', 'blood pressure', 'interaction', 'otc']",can i take ibuprofen with my blood pressure medication?
+2,Is it safe to take acetaminophen (Tylenol) with ibuprofen?,Drug Interactions,acetaminophen;ibuprofen;interaction;pain,"['acetaminophen', 'ibuprofen', 'interaction', 'pain']",is it safe to take acetaminophen (tylenol) with ibuprofen?
+3,Can I take naproxen (Aleve) with aspirin?,Drug Interactions,naproxen;aspirin;nsaid;interaction,"['naproxen', 'aspirin', 'nsaid', 'interaction']",can i take naproxen (aleve) with aspirin?
+4,Can I take ibuprofen if I’m on a blood thinner like warfarin?,Drug Interactions,ibuprofen;warfarin;blood thinner;bleeding risk,"['ibuprofen', 'warfarin', 'blood thinner', 'bleeding risk']",can i take ibuprofen if i’m on a blood thinner like warfarin?
+5,Is it okay to take aspirin with a blood thinner?,Drug Interactions,aspirin;blood thinner;bleeding risk;interaction,"['aspirin', 'blood thinner', 'bleeding risk', 'interaction']",is it okay to take aspirin with a blood thinner?
+6,Can I take cold medicine while on a beta blocker?,Drug Interactions,cold medicine;beta blocker;decongestant;interaction,"['cold medicine', 'beta blocker', 'decongestant', 'interaction']",can i take cold medicine while on a beta blocker?
+7,Do decongestants interact with high blood pressure meds?,Drug Interactions,decongestant;phenylephrine;pseudoephedrine;hypertension,"['decongestant', 'phenylephrine', 'pseudoephedrine', 'hypertension']",do decongestants interact with high blood pressure meds?
+8,Can I take pseudoephedrine with my anxiety medication?,Drug Interactions,pseudoephedrine;anxiety;stimulant;interaction,"['pseudoephedrine', 'anxiety', 'stimulant', 'interaction']",can i take pseudoephedrine with my anxiety medication?
+9,Can I take antihistamines with antidepressants?,Drug Interactions,antihistamine;antidepressant;drowsiness;interaction,"['antihistamine', 'antidepressant', 'drowsiness', 'interaction']",can i take antihistamines with antidepressants?
+10,Is it safe to mix Benadryl with alcohol?,Drug Interactions,diphenhydramine;alcohol;drowsiness;safety,"['diphenhydramine', 'alcohol', 'drowsiness', 'safety']",is it safe to mix benadryl with alcohol?
+11,Can I take melatonin with SSRIs?,Drug Interactions,melatonin;ssri;sleep;interaction,"['melatonin', 'ssri', 'sleep', 'interaction']",can i take melatonin with ssris?
+12,Can I take melatonin with blood pressure medication?,Drug Interactions,melatonin;blood pressure;interaction;sleep,"['melatonin', 'blood pressure', 'interaction', 'sleep']",can i take melatonin with blood pressure medication?
+13,Can I take omeprazole with levothyroxine?,Drug Interactions,omeprazole;levothyroxine;thyroid;timing,"['omeprazole', 'levothyroxine', 'thyroid', 'timing']",can i take omeprazole with levothyroxine?
+14,Do antacids affect how antibiotics work?,Drug Interactions,antacid;antibiotic;absorption;timing,"['antacid', 'antibiotic', 'absorption', 'timing']",do antacids affect how antibiotics work?
+15,Can calcium supplements interfere with my medication?,Drug Interactions,calcium;supplement;absorption;interaction,"['calcium', 'supplement', 'absorption', 'interaction']",can calcium supplements interfere with my medication?
+16,Can I take iron pills with my thyroid medicine?,Drug Interactions,iron;levothyroxine;absorption;timing,"['iron', 'levothyroxine', 'absorption', 'timing']",can i take iron pills with my thyroid medicine?
+17,Can I take magnesium with doxycycline?,Drug Interactions,magnesium;doxycycline;antibiotic;absorption,"['magnesium', 'doxycycline', 'antibiotic', 'absorption']",can i take magnesium with doxycycline?
+18,Can I take grapefruit juice with my cholesterol medication?,Drug Interactions,grapefruit;statin;interaction;CYP3A4,"['grapefruit', 'statin', 'interaction', 'cyp3a4']",can i take grapefruit juice with my cholesterol medication?
+19,Can I take St. John’s wort with antidepressants?,Drug Interactions,st johns wort;antidepressant;serotonin;interaction,"['st johns wort', 'antidepressant', 'serotonin', 'interaction']",can i take st. john’s wort with antidepressants?
+20,Can I take cough syrup with my antidepressant?,Drug Interactions,dextromethorphan;antidepressant;serotonin;interaction,"['dextromethorphan', 'antidepressant', 'serotonin', 'interaction']",can i take cough syrup with my antidepressant?
+21,Does dextromethorphan interact with MAO inhibitors?,Drug Interactions,dextromethorphan;mao inhibitor;danger;serotonin,"['dextromethorphan', 'mao inhibitor', 'danger', 'serotonin']",does dextromethorphan interact with mao inhibitors?
+22,Can I take NSAIDs if I have kidney disease?,Drug Interactions,nsaid;kidney;contraindication;safety,"['nsaid', 'kidney', 'contraindication', 'safety']",can i take nsaids if i have kidney disease?
+23,Is it safe to take ibuprofen with diabetes medication?,Drug Interactions,ibuprofen;diabetes;metformin;interaction,"['ibuprofen', 'diabetes', 'metformin', 'interaction']",is it safe to take ibuprofen with diabetes medication?
+24,Can I take acetaminophen with liver disease?,Drug Interactions,acetaminophen;liver;dose limit;safety,"['acetaminophen', 'liver', 'dose limit', 'safety']",can i take acetaminophen with liver disease?
+25,Can I take antacids with metformin?,Drug Interactions,antacid;metformin;stomach;interaction,"['antacid', 'metformin', 'stomach', 'interaction']",can i take antacids with metformin?
+26,Can I take probiotics with antibiotics?,Drug Interactions,probiotic;antibiotic;timing;gut,"['probiotic', 'antibiotic', 'timing', 'gut']",can i take probiotics with antibiotics?
+27,Can I take a multivitamin with antibiotics?,Drug Interactions,multivitamin;antibiotic;minerals;timing,"['multivitamin', 'antibiotic', 'minerals', 'timing']",can i take a multivitamin with antibiotics?
+28,Do sleep medicines interact with opioids?,Drug Interactions,sleep aid;opioid;respiratory depression;danger,"['sleep aid', 'opioid', 'respiratory depression', 'danger']",do sleep medicines interact with opioids?
+29,Can I take antihistamines with opioid pain medicine?,Drug Interactions,antihistamine;opioid;drowsiness;interaction,"['antihistamine', 'opioid', 'drowsiness', 'interaction']",can i take antihistamines with opioid pain medicine?
+30,Can I take ibuprofen with prednisone?,Drug Interactions,ibuprofen;prednisone;stomach bleed;interaction,"['ibuprofen', 'prednisone', 'stomach bleed', 'interaction']",can i take ibuprofen with prednisone?
+31,Can I take aspirin with prednisone?,Drug Interactions,aspirin;prednisone;bleeding;interaction,"['aspirin', 'prednisone', 'bleeding', 'interaction']",can i take aspirin with prednisone?
+32,Can I take allergy medicine with high blood pressure meds?,Drug Interactions,allergy;antihistamine;hypertension;interaction,"['allergy', 'antihistamine', 'hypertension', 'interaction']",can i take allergy medicine with high blood pressure meds?
+33,Can I take famotidine (Pepcid) with omeprazole?,Drug Interactions,famotidine;omeprazole;acid reflux;timing,"['famotidine', 'omeprazole', 'acid reflux', 'timing']",can i take famotidine (pepcid) with omeprazole?
+34,Can I take loperamide (Imodium) with antibiotics?,Drug Interactions,loperamide;antibiotic;diarrhea;safety,"['loperamide', 'antibiotic', 'diarrhea', 'safety']",can i take loperamide (imodium) with antibiotics?
+35,Can I take ibuprofen with a diuretic?,Drug Interactions,ibuprofen;diuretic;kidney;interaction,"['ibuprofen', 'diuretic', 'kidney', 'interaction']",can i take ibuprofen with a diuretic?
+36,Can I take ibuprofen with an ACE inhibitor?,Drug Interactions,ibuprofen;ace inhibitor;kidney;interaction,"['ibuprofen', 'ace inhibitor', 'kidney', 'interaction']",can i take ibuprofen with an ace inhibitor?
+37,Can I take naproxen with an SSRI?,Drug Interactions,naproxen;ssri;bleeding risk;interaction,"['naproxen', 'ssri', 'bleeding risk', 'interaction']",can i take naproxen with an ssri?
+38,Can I take aspirin with an SSRI?,Drug Interactions,aspirin;ssri;bleeding risk;interaction,"['aspirin', 'ssri', 'bleeding risk', 'interaction']",can i take aspirin with an ssri?
+39,Can I take fluconazole with my cholesterol medicine?,Drug Interactions,fluconazole;statin;interaction;CYP,"['fluconazole', 'statin', 'interaction', 'cyp']",can i take fluconazole with my cholesterol medicine?
+40,Can I take antibiotics with birth control pills?,Drug Interactions,antibiotic;birth control;pregnancy prevention;interaction,"['antibiotic', 'birth control', 'pregnancy prevention', 'interaction']",can i take antibiotics with birth control pills?
+41,What cold medicine is safe if I have high blood pressure?,Cold & Flu,cold;hypertension;decongestant;safe options,"['cold', 'hypertension', 'decongestant', 'safe options']",what cold medicine is safe if i have high blood pressure?
+42,What can I take for a stuffy nose without raising blood pressure?,Cold & Flu,stuffy nose;hypertension;saline;decongestant,"['stuffy nose', 'hypertension', 'saline', 'decongestant']",what can i take for a stuffy nose without raising blood pressure?
+43,Can I take DayQuil and NyQuil on the same day?,Cold & Flu,dayquil;nyquil;acetaminophen;dosing,"['dayquil', 'nyquil', 'acetaminophen', 'dosing']",can i take dayquil and nyquil on the same day?
+44,How do I know if my cold medicine contains acetaminophen?,Cold & Flu,acetaminophen;labels;overdose;ingredients,"['acetaminophen', 'labels', 'overdose', 'ingredients']",how do i know if my cold medicine contains acetaminophen?
+45,Is it okay to take Mucinex (guaifenesin) with other cold meds?,Cold & Flu,guaifenesin;mucinex;combination;cold,"['guaifenesin', 'mucinex', 'combination', 'cold']",is it okay to take mucinex (guaifenesin) with other cold meds?
+46,What helps a dry cough at night?,Cold & Flu,dry cough;night;dextromethorphan;honey,"['dry cough', 'night', 'dextromethorphan', 'honey']",what helps a dry cough at night?
+47,What helps a wet cough with mucus?,Cold & Flu,productive cough;guaifenesin;hydration;cough,"['productive cough', 'guaifenesin', 'hydration', 'cough']",what helps a wet cough with mucus?
+48,Can I take cough medicine while pregnant?,Cold & Flu,pregnancy;cough;safety;otc,"['pregnancy', 'cough', 'safety', 'otc']",can i take cough medicine while pregnant?
+49,What cold medicine is safe while breastfeeding?,Cold & Flu,breastfeeding;cold;safety;otc,"['breastfeeding', 'cold', 'safety', 'otc']",what cold medicine is safe while breastfeeding?
+50,Can kids take adult cold medicine?,Cold & Flu,children;cold medicine;dose;safety,"['children', 'cold medicine', 'dose', 'safety']",can kids take adult cold medicine?
+51,What’s the difference between a cold and the flu?,Cold & Flu,cold;flu;symptoms;when to see doctor,"['cold', 'flu', 'symptoms', 'when to see doctor']",what’s the difference between a cold and the flu?
+52,When should I see a doctor for flu symptoms?,Cold & Flu,flu;warning signs;fever;care,"['flu', 'warning signs', 'fever', 'care']",when should i see a doctor for flu symptoms?
+53,How long is the flu contagious?,Cold & Flu,flu;contagious;timeline;prevention,"['flu', 'contagious', 'timeline', 'prevention']",how long is the flu contagious?
+54,Does Tamiflu help if I start it late?,Cold & Flu,oseltamivir;tamiflu;timing;flu,"['oseltamivir', 'tamiflu', 'timing', 'flu']",does tamiflu help if i start it late?
+55,Can I take ibuprofen for fever?,Cold & Flu,fever;ibuprofen;dosing;otc,"['fever', 'ibuprofen', 'dosing', 'otc']",can i take ibuprofen for fever?
+56,Can I take acetaminophen for fever?,Cold & Flu,fever;acetaminophen;dosing;otc,"['fever', 'acetaminophen', 'dosing', 'otc']",can i take acetaminophen for fever?
+57,Is it okay to alternate acetaminophen and ibuprofen for fever?,Cold & Flu,fever;alternate;acetaminophen;ibuprofen,"['fever', 'alternate', 'acetaminophen', 'ibuprofen']",is it okay to alternate acetaminophen and ibuprofen for fever?
+58,What can I do for sore throat pain?,Cold & Flu,sore throat;lozenges;salt water;pain,"['sore throat', 'lozenges', 'salt water', 'pain']",what can i do for sore throat pain?
+59,Are throat sprays safe to use every day?,Cold & Flu,throat spray;benzocaine;frequency;safety,"['throat spray', 'benzocaine', 'frequency', 'safety']",are throat sprays safe to use every day?
+60,Do I need antibiotics for a sinus infection?,Cold & Flu,sinus infection;antibiotics;viral;bacterial,"['sinus infection', 'antibiotics', 'viral', 'bacterial']",do i need antibiotics for a sinus infection?
+61,What helps sinus pressure and congestion?,Cold & Flu,sinus pressure;congestion;saline;steam,"['sinus pressure', 'congestion', 'saline', 'steam']",what helps sinus pressure and congestion?
+62,Is pseudoephedrine better than phenylephrine?,Cold & Flu,pseudoephedrine;phenylephrine;decongestant;compare,"['pseudoephedrine', 'phenylephrine', 'decongestant', 'compare']",is pseudoephedrine better than phenylephrine?
+63,How can I treat a runny nose?,Cold & Flu,runny nose;antihistamine;saline;care,"['runny nose', 'antihistamine', 'saline', 'care']",how can i treat a runny nose?
+64,What can I take for post-nasal drip?,Cold & Flu,post nasal drip;cough;saline;antihistamine,"['post nasal drip', 'cough', 'saline', 'antihistamine']",what can i take for post-nasal drip?
+65,How do I relieve ear pressure from a cold?,Cold & Flu,ear pressure;cold;swallowing;decongestant,"['ear pressure', 'cold', 'swallowing', 'decongestant']",how do i relieve ear pressure from a cold?
+66,Can I use nasal spray every day?,Cold & Flu,nasal spray;oxymetazoline;rebound congestion;safety,"['nasal spray', 'oxymetazoline', 'rebound congestion', 'safety']",can i use nasal spray every day?
+67,How many days can I use Afrin?,Cold & Flu,afrin;oxymetazoline;3 days;rebound,"['afrin', 'oxymetazoline', '3 days', 'rebound']",how many days can i use afrin?
+68,Does zinc help a cold?,Cold & Flu,zinc;cold;evidence;supplement,"['zinc', 'cold', 'evidence', 'supplement']",does zinc help a cold?
+69,Does vitamin C prevent colds?,Cold & Flu,vitamin C;cold;prevention;evidence,"['vitamin c', 'cold', 'prevention', 'evidence']",does vitamin c prevent colds?
+70,Is it safe to take elderberry for colds?,Cold & Flu,elderberry;cold;supplement;safety,"['elderberry', 'cold', 'supplement', 'safety']",is it safe to take elderberry for colds?
+71,What should I take for body aches with a cold?,Cold & Flu,body aches;acetaminophen;ibuprofen;care,"['body aches', 'acetaminophen', 'ibuprofen', 'care']",what should i take for body aches with a cold?
+72,Can I take NyQuil if I have asthma?,Cold & Flu,nyquil;asthma;cough suppressant;safety,"['nyquil', 'asthma', 'cough suppressant', 'safety']",can i take nyquil if i have asthma?
+73,Is it normal to have green mucus?,Cold & Flu,mucus;color;infection;myths,"['mucus', 'color', 'infection', 'myths']",is it normal to have green mucus?
+74,How can I sleep better with a bad cold?,Cold & Flu,sleep;cold;congestion;tips,"['sleep', 'cold', 'congestion', 'tips']",how can i sleep better with a bad cold?
+75,What’s the best way to measure a fever at home?,Cold & Flu,fever;thermometer;accuracy;home,"['fever', 'thermometer', 'accuracy', 'home']",what’s the best way to measure a fever at home?
+76,When can I go back to work after the flu?,Cold & Flu,flu;return to work;fever free;contagious,"['flu', 'return to work', 'fever free', 'contagious']",when can i go back to work after the flu?
+77,Can I take cough drops if I have diabetes?,Cold & Flu,cough drops;diabetes;sugar free;safe,"['cough drops', 'diabetes', 'sugar free', 'safe']",can i take cough drops if i have diabetes?
+78,What cold medicines should I avoid with diabetes?,Cold & Flu,diabetes;cold meds;sugar;decongestant,"['diabetes', 'cold meds', 'sugar', 'decongestant']",what cold medicines should i avoid with diabetes?
+79,Can I take cough syrup if I’m on blood pressure meds?,Cold & Flu,cough syrup;hypertension;decongestant;interaction,"['cough syrup', 'hypertension', 'decongestant', 'interaction']",can i take cough syrup if i’m on blood pressure meds?
+80,What can I do for chills and fever at home?,Cold & Flu,chills;fever;hydration;rest,"['chills', 'fever', 'hydration', 'rest']",what can i do for chills and fever at home?
+81,How much acetaminophen can I take in a day?,Pain Relief,acetaminophen;max daily dose;liver;safety,"['acetaminophen', 'max daily dose', 'liver', 'safety']",how much acetaminophen can i take in a day?
+82,How much ibuprofen can I take in a day?,Pain Relief,ibuprofen;max daily dose;nsaid;safety,"['ibuprofen', 'max daily dose', 'nsaid', 'safety']",how much ibuprofen can i take in a day?
+83,How often can I take ibuprofen for pain?,Pain Relief,ibuprofen;dosing interval;otc;pain,"['ibuprofen', 'dosing interval', 'otc', 'pain']",how often can i take ibuprofen for pain?
+84,How often can I take acetaminophen for pain?,Pain Relief,acetaminophen;dosing interval;otc;pain,"['acetaminophen', 'dosing interval', 'otc', 'pain']",how often can i take acetaminophen for pain?
+85,Is Tylenol or ibuprofen better for headaches?,Pain Relief,headache;tylenol;ibuprofen;compare,"['headache', 'tylenol', 'ibuprofen', 'compare']",is tylenol or ibuprofen better for headaches?
+86,What can I take for a migraine?,Pain Relief,migraine;otc;triggers;when to see doctor,"['migraine', 'otc', 'triggers', 'when to see doctor']",what can i take for a migraine?
+87,Can I take pain medicine on an empty stomach?,Pain Relief,pain medicine;stomach upset;safety;food,"['pain medicine', 'stomach upset', 'safety', 'food']",can i take pain medicine on an empty stomach?
+88,What helps back pain without prescription meds?,Pain Relief,back pain;heat;stretching;otc,"['back pain', 'heat', 'stretching', 'otc']",what helps back pain without prescription meds?
+89,What can I take for tooth pain until I see a dentist?,Pain Relief,tooth pain;ibuprofen;acetaminophen;temporary,"['tooth pain', 'ibuprofen', 'acetaminophen', 'temporary']",what can i take for tooth pain until i see a dentist?
+90,Is it safe to use topical pain creams?,Pain Relief,topical;menthol;capsaicin;safety,"['topical', 'menthol', 'capsaicin', 'safety']",is it safe to use topical pain creams?
+91,Can I use Voltaren gel with ibuprofen tablets?,Pain Relief,diclofenac;voltaren;nsaid;combination,"['diclofenac', 'voltaren', 'nsaid', 'combination']",can i use voltaren gel with ibuprofen tablets?
+92,What helps muscle soreness after exercise?,Pain Relief,muscle soreness;ice;heat;recovery,"['muscle soreness', 'ice', 'heat', 'recovery']",what helps muscle soreness after exercise?
+93,What can I take for period cramps?,Pain Relief,period cramps;nsaid;ibuprofen;dosing,"['period cramps', 'nsaid', 'ibuprofen', 'dosing']",what can i take for period cramps?
+94,Can I take ibuprofen for arthritis pain?,Pain Relief,arthritis;ibuprofen;nsaid;safety,"['arthritis', 'ibuprofen', 'nsaid', 'safety']",can i take ibuprofen for arthritis pain?
+95,What’s the safest pain reliever if I have stomach ulcers?,Pain Relief,ulcer;acetaminophen;nsaid risk;safety,"['ulcer', 'acetaminophen', 'nsaid risk', 'safety']",what’s the safest pain reliever if i have stomach ulcers?
+96,What’s the safest pain reliever if I have kidney problems?,Pain Relief,kidney;pain relief;avoid nsaid;safe,"['kidney', 'pain relief', 'avoid nsaid', 'safe']",what’s the safest pain reliever if i have kidney problems?
+97,What’s the safest pain reliever if I have liver problems?,Pain Relief,liver;acetaminophen;dose limit;safety,"['liver', 'acetaminophen', 'dose limit', 'safety']",what’s the safest pain reliever if i have liver problems?
+98,Can I take ibuprofen if I have asthma?,Pain Relief,asthma;ibuprofen;nsaid sensitivity;safety,"['asthma', 'ibuprofen', 'nsaid sensitivity', 'safety']",can i take ibuprofen if i have asthma?
+99,Can I take aspirin for pain?,Pain Relief,aspirin;pain relief;bleeding risk;safety,"['aspirin', 'pain relief', 'bleeding risk', 'safety']",can i take aspirin for pain?
+100,How do I reduce swelling from an injury?,Pain Relief,swelling;RICE;ice;elevation,"['swelling', 'rice', 'ice', 'elevation']",how do i reduce swelling from an injury?
+101,How long can I take ibuprofen safely?,Pain Relief,ibuprofen;duration;side effects;safety,"['ibuprofen', 'duration', 'side effects', 'safety']",how long can i take ibuprofen safely?
+102,How long can I take naproxen safely?,Pain Relief,naproxen;duration;side effects;safety,"['naproxen', 'duration', 'side effects', 'safety']",how long can i take naproxen safely?
+103,What are signs I took too much acetaminophen?,Pain Relief,acetaminophen;overdose;warning signs;liver,"['acetaminophen', 'overdose', 'warning signs', 'liver']",what are signs i took too much acetaminophen?
+104,What are signs I took too much ibuprofen?,Pain Relief,ibuprofen;overdose;warning signs;stomach,"['ibuprofen', 'overdose', 'warning signs', 'stomach']",what are signs i took too much ibuprofen?
+105,Can I take pain relievers while pregnant?,Pain Relief,pregnancy;pain relief;acetaminophen;safety,"['pregnancy', 'pain relief', 'acetaminophen', 'safety']",can i take pain relievers while pregnant?
+106,Can I take ibuprofen while breastfeeding?,Pain Relief,breastfeeding;ibuprofen;safety;otc,"['breastfeeding', 'ibuprofen', 'safety', 'otc']",can i take ibuprofen while breastfeeding?
+107,What can I take for joint pain?,Pain Relief,joint pain;otc;topical;exercise,"['joint pain', 'otc', 'topical', 'exercise']",what can i take for joint pain?
+108,What helps a sprained ankle pain?,Pain Relief,sprain;ankle;ice;ibuprofen,"['sprain', 'ankle', 'ice', 'ibuprofen']",what helps a sprained ankle pain?
+109,Is it safe to use heating pads for pain?,Pain Relief,heat;heating pad;burn risk;safety,"['heat', 'heating pad', 'burn risk', 'safety']",is it safe to use heating pads for pain?
+110,Is it safe to use ice packs for pain?,Pain Relief,ice;ice pack;frostbite;safety,"['ice', 'ice pack', 'frostbite', 'safety']",is it safe to use ice packs for pain?
+111,Can I take acetaminophen with alcohol?,Pain Relief,acetaminophen;alcohol;liver risk;safety,"['acetaminophen', 'alcohol', 'liver risk', 'safety']",can i take acetaminophen with alcohol?
+112,Is it okay to take ibuprofen after drinking alcohol?,Pain Relief,ibuprofen;alcohol;stomach bleed;safety,"['ibuprofen', 'alcohol', 'stomach bleed', 'safety']",is it okay to take ibuprofen after drinking alcohol?
+113,What can I take for nerve pain over the counter?,Pain Relief,nerve pain;otc;limitations;when to see doctor,"['nerve pain', 'otc', 'limitations', 'when to see doctor']",what can i take for nerve pain over the counter?
+114,Does turmeric help with pain?,Pain Relief,turmeric;inflammation;supplement;evidence,"['turmeric', 'inflammation', 'supplement', 'evidence']",does turmeric help with pain?
+115,Can I take fish oil with pain relievers?,Pain Relief,fish oil;bleeding risk;interaction;safety,"['fish oil', 'bleeding risk', 'interaction', 'safety']",can i take fish oil with pain relievers?
+116,What should I do if pain medicine upsets my stomach?,Pain Relief,stomach upset;nsaid;food;tips,"['stomach upset', 'nsaid', 'food', 'tips']",what should i do if pain medicine upsets my stomach?
+117,What’s the difference between ibuprofen and naproxen?,Pain Relief,ibuprofen;naproxen;nsaid;compare,"['ibuprofen', 'naproxen', 'nsaid', 'compare']",what’s the difference between ibuprofen and naproxen?
+118,Can I take two different NSAIDs together?,Pain Relief,nsaid;ibuprofen;naproxen;avoid,"['nsaid', 'ibuprofen', 'naproxen', 'avoid']",can i take two different nsaids together?
+119,Can I take acetaminophen and naproxen together?,Pain Relief,acetaminophen;naproxen;combination;safety,"['acetaminophen', 'naproxen', 'combination', 'safety']",can i take acetaminophen and naproxen together?
+120,Can I take acetaminophen and ibuprofen together?,Pain Relief,acetaminophen;ibuprofen;combination;safety,"['acetaminophen', 'ibuprofen', 'combination', 'safety']",can i take acetaminophen and ibuprofen together?
+121,What can I take for heartburn fast?,Acid Reflux,heartburn;fast relief;antacid;tips,"['heartburn', 'fast relief', 'antacid', 'tips']",what can i take for heartburn fast?
+122,What’s the difference between antacids and acid reducers?,Acid Reflux,antacid;famotidine;omeprazole;compare,"['antacid', 'famotidine', 'omeprazole', 'compare']",what’s the difference between antacids and acid reducers?
+123,How should I take omeprazole for best results?,Acid Reflux,omeprazole;ppi;timing;before meals,"['omeprazole', 'ppi', 'timing', 'before meals']",how should i take omeprazole for best results?
+124,How long does it take omeprazole to work?,Acid Reflux,omeprazole;ppi;onset;expectations,"['omeprazole', 'ppi', 'onset', 'expectations']",how long does it take omeprazole to work?
+125,Can I take famotidine and omeprazole together?,Acid Reflux,famotidine;omeprazole;combination;timing,"['famotidine', 'omeprazole', 'combination', 'timing']",can i take famotidine and omeprazole together?
+126,Is it safe to take antacids every day?,Acid Reflux,antacid;daily use;side effects;rebound,"['antacid', 'daily use', 'side effects', 'rebound']",is it safe to take antacids every day?
+127,Can I take Tums if I’m pregnant?,Acid Reflux,pregnancy;calcium carbonate;tums;safety,"['pregnancy', 'calcium carbonate', 'tums', 'safety']",can i take tums if i’m pregnant?
+128,What heartburn medicine is safe during pregnancy?,Acid Reflux,pregnancy;heartburn;safety;otc,"['pregnancy', 'heartburn', 'safety', 'otc']",what heartburn medicine is safe during pregnancy?
+129,Can children take heartburn medicine?,Acid Reflux,children;heartburn;famotidine;dose,"['children', 'heartburn', 'famotidine', 'dose']",can children take heartburn medicine?
+130,What foods trigger acid reflux?,Acid Reflux,diet;triggers;reflux;avoid,"['diet', 'triggers', 'reflux', 'avoid']",what foods trigger acid reflux?
+131,What can I do for reflux without medicine?,Acid Reflux,lifestyle;reflux;raise head;avoid late meals,"['lifestyle', 'reflux', 'raise head', 'avoid late meals']",what can i do for reflux without medicine?
+132,Can I take omeprazole long term?,Acid Reflux,omeprazole;long term;risks;doctor,"['omeprazole', 'long term', 'risks', 'doctor']",can i take omeprazole long term?
+133,Is it safe to take Pepto-Bismol for stomach upset?,Acid Reflux,pepto bismol;bismuth;stomach upset;safety,"['pepto bismol', 'bismuth', 'stomach upset', 'safety']",is it safe to take pepto-bismol for stomach upset?
+134,Can I take Pepto-Bismol if I’m on blood thinners?,Acid Reflux,bismuth;blood thinner;bleeding risk;interaction,"['bismuth', 'blood thinner', 'bleeding risk', 'interaction']",can i take pepto-bismol if i’m on blood thinners?
+135,What helps nausea from reflux?,Acid Reflux,nausea;reflux;ginger;small meals,"['nausea', 'reflux', 'ginger', 'small meals']",what helps nausea from reflux?
+136,Can I take ginger supplements for nausea?,Acid Reflux,ginger;nausea;supplement;safety,"['ginger', 'nausea', 'supplement', 'safety']",can i take ginger supplements for nausea?
+137,What’s the difference between GERD and heartburn?,Acid Reflux,gerd;heartburn;symptoms;definition,"['gerd', 'heartburn', 'symptoms', 'definition']",what’s the difference between gerd and heartburn?
+138,When should I see a doctor for heartburn?,Acid Reflux,heartburn;warning signs;chest pain;doctor,"['heartburn', 'warning signs', 'chest pain', 'doctor']",when should i see a doctor for heartburn?
+139,Can reflux cause a cough?,Acid Reflux,reflux;cough;laryngopharyngeal;symptoms,"['reflux', 'cough', 'laryngopharyngeal', 'symptoms']",can reflux cause a cough?
+140,Does drinking milk help heartburn?,Acid Reflux,milk;heartburn;myths;temporary,"['milk', 'heartburn', 'myths', 'temporary']",does drinking milk help heartburn?
+141,What allergy medicine is non-drowsy?,Allergies,allergy;non drowsy;loratadine;cetirizine,"['allergy', 'non drowsy', 'loratadine', 'cetirizine']",what allergy medicine is non-drowsy?
+142,Which antihistamine is best for itchy eyes?,Allergies,itchy eyes;antihistamine;eye drops;allergy,"['itchy eyes', 'antihistamine', 'eye drops', 'allergy']",which antihistamine is best for itchy eyes?
+143,Can I take allergy medicine every day?,Allergies,antihistamine;daily use;safety;seasonal,"['antihistamine', 'daily use', 'safety', 'seasonal']",can i take allergy medicine every day?
+144,How long does cetirizine (Zyrtec) take to work?,Allergies,cetirizine;onset;allergy;timing,"['cetirizine', 'onset', 'allergy', 'timing']",how long does cetirizine (zyrtec) take to work?
+145,How long does loratadine (Claritin) take to work?,Allergies,loratadine;onset;allergy;timing,"['loratadine', 'onset', 'allergy', 'timing']",how long does loratadine (claritin) take to work?
+146,Can I switch from Claritin to Zyrtec?,Allergies,claritin;zyrtec;switching;safety,"['claritin', 'zyrtec', 'switching', 'safety']",can i switch from claritin to zyrtec?
+147,Is it safe to take Benadryl every night?,Allergies,benadryl;diphenhydramine;daily;risks,"['benadryl', 'diphenhydramine', 'daily', 'risks']",is it safe to take benadryl every night?
+148,What can I do for nasal allergies without pills?,Allergies,nasal allergy;saline;nasal steroid;tips,"['nasal allergy', 'saline', 'nasal steroid', 'tips']",what can i do for nasal allergies without pills?
+149,How do nasal steroid sprays work?,Allergies,fluticasone;nasal steroid;how it works;allergy,"['fluticasone', 'nasal steroid', 'how it works', 'allergy']",how do nasal steroid sprays work?
+150,How long does Flonase take to work?,Allergies,fluticasone;flonase;onset;days,"['fluticasone', 'flonase', 'onset', 'days']",how long does flonase take to work?
+151,Can I use Flonase every day?,Allergies,flonase;daily use;safety;nasal,"['flonase', 'daily use', 'safety', 'nasal']",can i use flonase every day?
+152,What can I take for hives?,Allergies,hives;urticaria;antihistamine;safety,"['hives', 'urticaria', 'antihistamine', 'safety']",what can i take for hives?
+153,When is an allergic reaction an emergency?,Allergies,anaphylaxis;emergency;swelling;911,"['anaphylaxis', 'emergency', 'swelling', '911']",when is an allergic reaction an emergency?
+154,Can I take allergy meds while pregnant?,Allergies,pregnancy;allergy;loratadine;safety,"['pregnancy', 'allergy', 'loratadine', 'safety']",can i take allergy meds while pregnant?
+155,Can I take allergy meds while breastfeeding?,Allergies,breastfeeding;allergy;safety;antihistamine,"['breastfeeding', 'allergy', 'safety', 'antihistamine']",can i take allergy meds while breastfeeding?
+156,What allergy medicine is safe for children?,Allergies,children;allergy;dosing;safety,"['children', 'allergy', 'dosing', 'safety']",what allergy medicine is safe for children?
+157,Can I give my child Benadryl?,Allergies,children;benadryl;dosing;doctor,"['children', 'benadryl', 'dosing', 'doctor']",can i give my child benadryl?
+158,What helps seasonal allergies naturally?,Allergies,seasonal;allergy;avoidance;HEPA,"['seasonal', 'allergy', 'avoidance', 'hepa']",what helps seasonal allergies naturally?
+159,Do air purifiers help allergies?,Allergies,air purifier;allergy;HEPA;home,"['air purifier', 'allergy', 'hepa', 'home']",do air purifiers help allergies?
+160,Can allergies cause a sore throat?,Allergies,allergy;sore throat;post nasal drip;symptoms,"['allergy', 'sore throat', 'post nasal drip', 'symptoms']",can allergies cause a sore throat?
+161,What can I do for insomnia without prescription meds?,Sleep,insomnia;sleep hygiene;routine;tips,"['insomnia', 'sleep hygiene', 'routine', 'tips']",what can i do for insomnia without prescription meds?
+162,Is melatonin safe to take every night?,Sleep,melatonin;daily use;safety;habit,"['melatonin', 'daily use', 'safety', 'habit']",is melatonin safe to take every night?
+163,What dose of melatonin should I start with?,Sleep,melatonin;starting dose;beginner;safety,"['melatonin', 'starting dose', 'beginner', 'safety']",what dose of melatonin should i start with?
+164,How long does melatonin take to work?,Sleep,melatonin;onset;timing;sleep,"['melatonin', 'onset', 'timing', 'sleep']",how long does melatonin take to work?
+165,Can I take melatonin if I’m pregnant?,Sleep,melatonin;pregnancy;safety;doctor,"['melatonin', 'pregnancy', 'safety', 'doctor']",can i take melatonin if i’m pregnant?
+166,Can I take melatonin while breastfeeding?,Sleep,melatonin;breastfeeding;safety;doctor,"['melatonin', 'breastfeeding', 'safety', 'doctor']",can i take melatonin while breastfeeding?
+167,Is it safe to take Benadryl as a sleep aid?,Sleep,benadryl;sleep aid;diphenhydramine;risks,"['benadryl', 'sleep aid', 'diphenhydramine', 'risks']",is it safe to take benadryl as a sleep aid?
+168,What’s the difference between melatonin and sleep medicines?,Sleep,melatonin;sleep aid;compare;otc,"['melatonin', 'sleep aid', 'compare', 'otc']",what’s the difference between melatonin and sleep medicines?
+169,Can I take magnesium for sleep?,Sleep,magnesium;sleep;supplement;safety,"['magnesium', 'sleep', 'supplement', 'safety']",can i take magnesium for sleep?
+170,Can I take valerian root for sleep?,Sleep,valerian;sleep;supplement;interaction,"['valerian', 'sleep', 'supplement', 'interaction']",can i take valerian root for sleep?
+171,Why do I wake up in the middle of the night?,Sleep,middle of night;insomnia;causes;tips,"['middle of night', 'insomnia', 'causes', 'tips']",why do i wake up in the middle of the night?
+172,Does caffeine affect sleep even if I drink it early?,Sleep,caffeine;sleep;half life;timing,"['caffeine', 'sleep', 'half life', 'timing']",does caffeine affect sleep even if i drink it early?
+173,How late is too late for caffeine?,Sleep,caffeine;timing;sleep;cutoff,"['caffeine', 'timing', 'sleep', 'cutoff']",how late is too late for caffeine?
+174,What can I do if my mind won’t shut off at night?,Sleep,anxiety;sleep;relaxation;breathing,"['anxiety', 'sleep', 'relaxation', 'breathing']",what can i do if my mind won’t shut off at night?
+175,Is it safe to take sleep gummies?,Sleep,sleep gummy;melatonin;supplement;safety,"['sleep gummy', 'melatonin', 'supplement', 'safety']",is it safe to take sleep gummies?
+176,Can teenagers take melatonin?,Sleep,teen;melatonin;safety;dose,"['teen', 'melatonin', 'safety', 'dose']",can teenagers take melatonin?
+177,Can children take melatonin?,Sleep,children;melatonin;safety;doctor,"['children', 'melatonin', 'safety', 'doctor']",can children take melatonin?
+178,How can I reset my sleep schedule?,Sleep,sleep schedule;routine;light exposure;tips,"['sleep schedule', 'routine', 'light exposure', 'tips']",how can i reset my sleep schedule?
+179,Does blue light from phones affect sleep?,Sleep,blue light;sleep;screen;habit,"['blue light', 'sleep', 'screen', 'habit']",does blue light from phones affect sleep?
+180,What’s a good bedtime routine?,Sleep,bedtime routine;sleep hygiene;consistent;tips,"['bedtime routine', 'sleep hygiene', 'consistent', 'tips']",what’s a good bedtime routine?
+181,How do I know the correct dose for OTC medicine?,Dosage,dose;label;otc;instructions,"['dose', 'label', 'otc', 'instructions']",how do i know the correct dose for otc medicine?
+182,What does 'take with food' mean?,Dosage,with food;instructions;stomach;meds,"['with food', 'instructions', 'stomach', 'meds']",what does 'take with food' mean?
+183,What does 'take on an empty stomach' mean?,Dosage,empty stomach;instructions;timing;meds,"['empty stomach', 'instructions', 'timing', 'meds']",what does 'take on an empty stomach' mean?
+184,How many hours apart should I take doses?,Dosage,dosing interval;hours;label;safe,"['dosing interval', 'hours', 'label', 'safe']",how many hours apart should i take doses?
+185,What should I do if I miss a dose?,Dosage,missed dose;what to do;safety;guidance,"['missed dose', 'what to do', 'safety', 'guidance']",what should i do if i miss a dose?
+186,Can I split tablets in half?,Dosage,tablet splitting;scored;extended release;safe,"['tablet splitting', 'scored', 'extended release', 'safe']",can i split tablets in half?
+187,Can I crush my medicine and mix it with food?,Dosage,crush tablets;capsules;extended release;danger,"['crush tablets', 'capsules', 'extended release', 'danger']",can i crush my medicine and mix it with food?
+188,What’s the difference between extended-release and regular tablets?,Dosage,extended release;ER;XR;difference,"['extended release', 'er', 'xr', 'difference']",what’s the difference between extended-release and regular tablets?
+189,How do I measure liquid medicine correctly?,Dosage,liquid medicine;measuring spoon;syringe;accuracy,"['liquid medicine', 'measuring spoon', 'syringe', 'accuracy']",how do i measure liquid medicine correctly?
+190,Can I use a kitchen spoon for liquid medicine?,Dosage,kitchen spoon;liquid medicine;accuracy;avoid,"['kitchen spoon', 'liquid medicine', 'accuracy', 'avoid']",can i use a kitchen spoon for liquid medicine?
+191,What does mg mean on a medicine label?,Dosage,mg;milligrams;label;understanding,"['mg', 'milligrams', 'label', 'understanding']",what does mg mean on a medicine label?
+192,What does mL mean on a liquid medicine label?,Dosage,mL;milliliters;liquid;label,"['ml', 'milliliters', 'liquid', 'label']",what does ml mean on a liquid medicine label?
+193,How do I convert teaspoons to mL?,Dosage,teaspoon;ml;conversion;liquid,"['teaspoon', 'ml', 'conversion', 'liquid']",how do i convert teaspoons to ml?
+194,How do I know if I took too much medicine?,Dosage,overdose;warning signs;poison control;safety,"['overdose', 'warning signs', 'poison control', 'safety']",how do i know if i took too much medicine?
+195,Should I take medicine at the same time every day?,Dosage,same time;routine;adherence;tips,"['same time', 'routine', 'adherence', 'tips']",should i take medicine at the same time every day?
+196,Can I take vitamins and medicines at the same time?,Dosage,vitamin;timing;interaction;spacing,"['vitamin', 'timing', 'interaction', 'spacing']",can i take vitamins and medicines at the same time?
+197,Is it okay to double up if I missed a dose?,Dosage,missed dose;double dose;avoid;safety,"['missed dose', 'double dose', 'avoid', 'safety']",is it okay to double up if i missed a dose?
+198,What’s the best way to keep track of doses?,Dosage,pill box;reminder;adherence;tips,"['pill box', 'reminder', 'adherence', 'tips']",what’s the best way to keep track of doses?
+199,Do I need to finish the full course of antibiotics?,Dosage,antibiotics;finish course;resistance;guidance,"['antibiotics', 'finish course', 'resistance', 'guidance']",do i need to finish the full course of antibiotics?
+200,How soon can I take another dose if I vomit?,Dosage,vomit;redose;timing;safety,"['vomit', 'redose', 'timing', 'safety']",how soon can i take another dose if i vomit?
+201,How should I store my medicines at home?,Storage,storage;cool dry place;humidity;safety,"['storage', 'cool dry place', 'humidity', 'safety']",how should i store my medicines at home?
+202,Can I store medicine in the bathroom?,Storage,bathroom;humidity;storage;avoid,"['bathroom', 'humidity', 'storage', 'avoid']",can i store medicine in the bathroom?
+203,Is it okay to store medicine in the car?,Storage,car;heat;cold;storage,"['car', 'heat', 'cold', 'storage']",is it okay to store medicine in the car?
+204,What temperature is 'room temperature' for medicines?,Storage,room temperature;range;storage;label,"['room temperature', 'range', 'storage', 'label']",what temperature is 'room temperature' for medicines?
+205,Do medicines expire? What happens if I take expired medicine?,Storage,expired;expiration date;potency;safety,"['expired', 'expiration date', 'potency', 'safety']",do medicines expire? what happens if i take expired medicine?
+206,How should I dispose of old medicines?,Storage,disposal;take back;trash;FDA,"['disposal', 'take back', 'trash', 'fda']",how should i dispose of old medicines?
+207,Can I flush medicines down the toilet?,Storage,flush;disposal;environment;safety,"['flush', 'disposal', 'environment', 'safety']",can i flush medicines down the toilet?
+208,How do I store insulin?,Storage,insulin;refrigeration;storage;diabetes,"['insulin', 'refrigeration', 'storage', 'diabetes']",how do i store insulin?
+209,How do I store eye drops?,Storage,eye drops;storage;contamination;expiry,"['eye drops', 'storage', 'contamination', 'expiry']",how do i store eye drops?
+210,How do I store antibiotics after mixing?,Storage,antibiotic suspension;refrigerate;storage;children,"['antibiotic suspension', 'refrigerate', 'storage', 'children']",how do i store antibiotics after mixing?
+211,How do I store probiotics?,Storage,probiotic;refrigerate;storage;supplement,"['probiotic', 'refrigerate', 'storage', 'supplement']",how do i store probiotics?
+212,Do gummy vitamins go bad?,Storage,gummy vitamins;storage;melting;expiration,"['gummy vitamins', 'storage', 'melting', 'expiration']",do gummy vitamins go bad?
+213,Can I keep medicines in a pill organizer?,Storage,pill organizer;stability;light;humidity,"['pill organizer', 'stability', 'light', 'humidity']",can i keep medicines in a pill organizer?
+214,How should I store inhalers?,Storage,inhaler;heat;storage;asthma,"['inhaler', 'heat', 'storage', 'asthma']",how should i store inhalers?
+215,What should I do if medicine changed color or smell?,Storage,medicine change;color;smell;discard,"['medicine change', 'color', 'smell', 'discard']",what should i do if medicine changed color or smell?
+216,How should I store creams and ointments?,Storage,cream;ointment;storage;heat,"['cream', 'ointment', 'storage', 'heat']",how should i store creams and ointments?
+217,How do I store nitroglycerin tablets?,Storage,nitroglycerin;original bottle;light;heat,"['nitroglycerin', 'original bottle', 'light', 'heat']",how do i store nitroglycerin tablets?
+218,Can I store medicine in the fridge?,Storage,refrigerator;storage;which meds;labels,"['refrigerator', 'storage', 'which meds', 'labels']",can i store medicine in the fridge?
+219,How do I keep medicines away from children?,Storage,child safety;lock box;poison;prevention,"['child safety', 'lock box', 'poison', 'prevention']",how do i keep medicines away from children?
+220,How do I travel with medicines safely?,Storage,travel;medicine;carry on;temperature,"['travel', 'medicine', 'carry on', 'temperature']",how do i travel with medicines safely?
+221,What medicines are safe during pregnancy for pain?,Pregnancy,pregnancy;pain;acetaminophen;safety,"['pregnancy', 'pain', 'acetaminophen', 'safety']",what medicines are safe during pregnancy for pain?
+222,What cold medicine is safe during pregnancy?,Pregnancy,pregnancy;cold;safety;otc,"['pregnancy', 'cold', 'safety', 'otc']",what cold medicine is safe during pregnancy?
+223,What allergy medicine is safe during pregnancy?,Pregnancy,pregnancy;allergy;loratadine;cetirizine,"['pregnancy', 'allergy', 'loratadine', 'cetirizine']",what allergy medicine is safe during pregnancy?
+224,Can I take ibuprofen in the first trimester?,Pregnancy,pregnancy;ibuprofen;trimester;safety,"['pregnancy', 'ibuprofen', 'trimester', 'safety']",can i take ibuprofen in the first trimester?
+225,Can I take ibuprofen in the third trimester?,Pregnancy,pregnancy;ibuprofen;third trimester;avoid,"['pregnancy', 'ibuprofen', 'third trimester', 'avoid']",can i take ibuprofen in the third trimester?
+226,Can I take antacids while pregnant?,Pregnancy,pregnancy;heartburn;antacid;safety,"['pregnancy', 'heartburn', 'antacid', 'safety']",can i take antacids while pregnant?
+227,Can I take omeprazole while pregnant?,Pregnancy,pregnancy;omeprazole;ppi;safety,"['pregnancy', 'omeprazole', 'ppi', 'safety']",can i take omeprazole while pregnant?
+228,Is Pepto-Bismol safe during pregnancy?,Pregnancy,pregnancy;pepto bismol;bismuth;avoid,"['pregnancy', 'pepto bismol', 'bismuth', 'avoid']",is pepto-bismol safe during pregnancy?
+229,Can I take melatonin during pregnancy?,Pregnancy,pregnancy;melatonin;safety;doctor,"['pregnancy', 'melatonin', 'safety', 'doctor']",can i take melatonin during pregnancy?
+230,What should I avoid taking while pregnant?,Pregnancy,pregnancy;avoid;otc;herbal,"['pregnancy', 'avoid', 'otc', 'herbal']",what should i avoid taking while pregnant?
+231,What pain medicine is safe for babies?,Children,baby;pain;acetaminophen;ibuprofen,"['baby', 'pain', 'acetaminophen', 'ibuprofen']",what pain medicine is safe for babies?
+232,How do I dose liquid medicine for my child?,Children,children;liquid dosing;syringe;weight,"['children', 'liquid dosing', 'syringe', 'weight']",how do i dose liquid medicine for my child?
+233,Can I give my child ibuprofen?,Children,children;ibuprofen;age;dose,"['children', 'ibuprofen', 'age', 'dose']",can i give my child ibuprofen?
+234,Can I give my child acetaminophen?,Children,children;acetaminophen;age;dose,"['children', 'acetaminophen', 'age', 'dose']",can i give my child acetaminophen?
+235,What fever is too high for a child?,Children,child;fever;warning signs;doctor,"['child', 'fever', 'warning signs', 'doctor']",what fever is too high for a child?
+236,Can I alternate Tylenol and ibuprofen for my child?,Children,child;fever;alternate;dosing,"['child', 'fever', 'alternate', 'dosing']",can i alternate tylenol and ibuprofen for my child?
+237,What cold medicine is safe for toddlers?,Children,toddler;cold;avoid;cough,"['toddler', 'cold', 'avoid', 'cough']",what cold medicine is safe for toddlers?
+238,Are cough syrups safe for young children?,Children,children;cough syrup;safety;age,"['children', 'cough syrup', 'safety', 'age']",are cough syrups safe for young children?
+239,What should I do if my child took too much medicine?,Children,children;overdose;poison control;emergency,"['children', 'overdose', 'poison control', 'emergency']",what should i do if my child took too much medicine?
+240,Can teething gels be used safely?,Children,teething;benzocaine;warning;safety,"['teething', 'benzocaine', 'warning', 'safety']",can teething gels be used safely?
+241,Do I need to take vitamins every day?,Vitamins,vitamin;daily;diet;need,"['vitamin', 'daily', 'diet', 'need']",do i need to take vitamins every day?
+242,What’s the difference between vitamin D2 and D3?,Vitamins,vitamin D;D2;D3;difference,"['vitamin d', 'd2', 'd3', 'difference']",what’s the difference between vitamin d2 and d3?
+243,How much vitamin D should I take?,Vitamins,vitamin D;dose;safe;lab,"['vitamin d', 'dose', 'safe', 'lab']",how much vitamin d should i take?
+244,Can I take vitamin D with food?,Vitamins,vitamin D;fat soluble;with food;absorption,"['vitamin d', 'fat soluble', 'with food', 'absorption']",can i take vitamin d with food?
+245,Can I take vitamin C every day?,Vitamins,vitamin C;daily;side effects;dose,"['vitamin c', 'daily', 'side effects', 'dose']",can i take vitamin c every day?
+246,Can I take too much vitamin C?,Vitamins,vitamin C;overdose;diarrhea;kidney stones,"['vitamin c', 'overdose', 'diarrhea', 'kidney stones']",can i take too much vitamin c?
+247,Is it safe to take iron supplements?,Vitamins,iron;supplement;constipation;dose,"['iron', 'supplement', 'constipation', 'dose']",is it safe to take iron supplements?
+248,What helps constipation from iron pills?,Vitamins,iron;constipation;stool softener;tips,"['iron', 'constipation', 'stool softener', 'tips']",what helps constipation from iron pills?
+249,Can I take a multivitamin with my medications?,Vitamins,multivitamin;interaction;timing;minerals,"['multivitamin', 'interaction', 'timing', 'minerals']",can i take a multivitamin with my medications?
+250,Do gummy vitamins work as well as pills?,Vitamins,gummy vitamins;compare;dose;sugar,"['gummy vitamins', 'compare', 'dose', 'sugar']",do gummy vitamins work as well as pills?
+251,What should I use for dry skin?,Skin,dry skin;moisturizer;ceramides;tips,"['dry skin', 'moisturizer', 'ceramides', 'tips']",what should i use for dry skin?
+252,What’s the best treatment for acne over the counter?,Skin,acne;benzoyl peroxide;salicylic acid;otc,"['acne', 'benzoyl peroxide', 'salicylic acid', 'otc']",what’s the best treatment for acne over the counter?
+253,How do I use benzoyl peroxide safely?,Skin,benzoyl peroxide;acne;irritation;usage,"['benzoyl peroxide', 'acne', 'irritation', 'usage']",how do i use benzoyl peroxide safely?
+254,How do I use adapalene (Differin) gel?,Skin,adapalene;differin;retinoid;usage,"['adapalene', 'differin', 'retinoid', 'usage']",how do i use adapalene (differin) gel?
+255,What helps itchy skin from eczema?,Skin,eczema;itch;moisturizer;hydrocortisone,"['eczema', 'itch', 'moisturizer', 'hydrocortisone']",what helps itchy skin from eczema?
+256,Can I use hydrocortisone cream on my face?,Skin,hydrocortisone;face;thin skin;safety,"['hydrocortisone', 'face', 'thin skin', 'safety']",can i use hydrocortisone cream on my face?
+257,How long can I use hydrocortisone cream?,Skin,hydrocortisone;duration;safety;skin,"['hydrocortisone', 'duration', 'safety', 'skin']",how long can i use hydrocortisone cream?
+258,What can I do for a mild burn at home?,Skin,burn;first aid;cool water;care,"['burn', 'first aid', 'cool water', 'care']",what can i do for a mild burn at home?
+259,What helps sunburn pain?,Skin,sunburn;aloe;ibuprofen;hydration,"['sunburn', 'aloe', 'ibuprofen', 'hydration']",what helps sunburn pain?
+260,How do I treat athlete’s foot?,Skin,athletes foot;antifungal;terbinafine;care,"['athletes foot', 'antifungal', 'terbinafine', 'care']",how do i treat athlete’s foot?
+261,What eye drops help dry eyes?,Eyes & Ears,dry eyes;artificial tears;eye drops;safe,"['dry eyes', 'artificial tears', 'eye drops', 'safe']",what eye drops help dry eyes?
+262,How often can I use artificial tears?,Eyes & Ears,artificial tears;frequency;preservative free;dry eye,"['artificial tears', 'frequency', 'preservative free', 'dry eye']",how often can i use artificial tears?
+263,Can I use redness-relief eye drops every day?,Eyes & Ears,redness drops;rebound;tetrahydrozoline;safety,"['redness drops', 'rebound', 'tetrahydrozoline', 'safety']",can i use redness-relief eye drops every day?
+264,What helps itchy allergy eyes?,Eyes & Ears,allergy eyes;antihistamine drops;itch;relief,"['allergy eyes', 'antihistamine drops', 'itch', 'relief']",what helps itchy allergy eyes?
+265,What should I do for earwax buildup?,Eyes & Ears,earwax;carbamide peroxide;safe;avoid q-tips,"['earwax', 'carbamide peroxide', 'safe', 'avoid q-tips']",what should i do for earwax buildup?
+266,Is it safe to use Q-tips in my ears?,Eyes & Ears,q tips;ear;injury;avoid,"['q tips', 'ear', 'injury', 'avoid']",is it safe to use q-tips in my ears?
+267,What helps swimmer’s ear?,Eyes & Ears,swimmers ear;ear drops;pain;doctor,"['swimmers ear', 'ear drops', 'pain', 'doctor']",what helps swimmer’s ear?
+268,When should I see a doctor for ear pain?,Eyes & Ears,ear pain;warning signs;fever;doctor,"['ear pain', 'warning signs', 'fever', 'doctor']",when should i see a doctor for ear pain?
+269,Can I use old eye drops?,Eyes & Ears,eye drops;expiration;contamination;safety,"['eye drops', 'expiration', 'contamination', 'safety']",can i use old eye drops?
+270,How do I clean contact lenses safely?,Eyes & Ears,contacts;cleaning;solution;infection prevention,"['contacts', 'cleaning', 'solution', 'infection prevention']",how do i clean contact lenses safely?
+271,What over-the-counter medicines are safe with diabetes?,Diabetes,diabetes;otc;sugar free;safe,"['diabetes', 'otc', 'sugar free', 'safe']",what over-the-counter medicines are safe with diabetes?
+272,What cold medicines should I avoid with diabetes?,Diabetes,diabetes;cold medicine;decongestant;sugar,"['diabetes', 'cold medicine', 'decongestant', 'sugar']",what cold medicines should i avoid with diabetes?
+273,Can cough syrup raise blood sugar?,Diabetes,cough syrup;sugar;blood glucose;diabetes,"['cough syrup', 'sugar', 'blood glucose', 'diabetes']",can cough syrup raise blood sugar?
+274,Are sugar-free cough drops safe for diabetes?,Diabetes,diabetes;sugar free;cough drops;safe,"['diabetes', 'sugar free', 'cough drops', 'safe']",are sugar-free cough drops safe for diabetes?
+275,What pain reliever is safest with diabetes?,Diabetes,diabetes;pain relief;acetaminophen;safety,"['diabetes', 'pain relief', 'acetaminophen', 'safety']",what pain reliever is safest with diabetes?
+276,How should I store insulin when traveling?,Diabetes,insulin;travel;temperature;storage,"['insulin', 'travel', 'temperature', 'storage']",how should i store insulin when traveling?
+277,Can I take metformin with food?,Diabetes,metformin;with food;stomach;tips,"['metformin', 'with food', 'stomach', 'tips']",can i take metformin with food?
+278,What should I do if metformin upsets my stomach?,Diabetes,metformin;stomach upset;slow titration;tips,"['metformin', 'stomach upset', 'slow titration', 'tips']",what should i do if metformin upsets my stomach?
+279,Can I take vitamins with diabetes medications?,Diabetes,diabetes;vitamins;interaction;timing,"['diabetes', 'vitamins', 'interaction', 'timing']",can i take vitamins with diabetes medications?
+280,What are signs of low blood sugar?,Diabetes,hypoglycemia;signs;shaky;sweaty,"['hypoglycemia', 'signs', 'shaky', 'sweaty']",what are signs of low blood sugar?
+281,What cold medicine is safe if I have heart disease?,Heart,heart disease;cold medicine;decongestant;avoid,"['heart disease', 'cold medicine', 'decongestant', 'avoid']",what cold medicine is safe if i have heart disease?
+282,Can I take decongestants if I have high blood pressure?,Heart,hypertension;decongestant;avoid;safety,"['hypertension', 'decongestant', 'avoid', 'safety']",can i take decongestants if i have high blood pressure?
+283,What pain reliever is safest if I have heart disease?,Heart,heart disease;pain relief;acetaminophen;nsaid risk,"['heart disease', 'pain relief', 'acetaminophen', 'nsaid risk']",what pain reliever is safest if i have heart disease?
+284,Is aspirin safe to take every day?,Heart,aspirin;daily;prevention;doctor,"['aspirin', 'daily', 'prevention', 'doctor']",is aspirin safe to take every day?
+285,What should I do if I miss my blood pressure pill?,Heart,blood pressure;missed dose;what to do;adherence,"['blood pressure', 'missed dose', 'what to do', 'adherence']",what should i do if i miss my blood pressure pill?
+286,Can I take ibuprofen with blood pressure meds?,Heart,ibuprofen;blood pressure;interaction;otc,"['ibuprofen', 'blood pressure', 'interaction', 'otc']",can i take ibuprofen with blood pressure meds?
+287,Can I drink coffee with high blood pressure?,Heart,coffee;caffeine;blood pressure;tips,"['coffee', 'caffeine', 'blood pressure', 'tips']",can i drink coffee with high blood pressure?
+288,What are warning signs of a heart attack?,Heart,heart attack;chest pain;emergency;911,"['heart attack', 'chest pain', 'emergency', '911']",what are warning signs of a heart attack?
+289,Can acid reflux feel like chest pain?,Heart,reflux;chest pain;difference;doctor,"['reflux', 'chest pain', 'difference', 'doctor']",can acid reflux feel like chest pain?
+290,Can anxiety cause chest tightness?,Heart,anxiety;chest tightness;panic;doctor,"['anxiety', 'chest tightness', 'panic', 'doctor']",can anxiety cause chest tightness?
+291,Can antidepressants cause nausea?,Mental Health,antidepressant;nausea;side effect;tips,"['antidepressant', 'nausea', 'side effect', 'tips']",can antidepressants cause nausea?
+292,How long do SSRI side effects last?,Mental Health,ssri;side effects;timeline;expectations,"['ssri', 'side effects', 'timeline', 'expectations']",how long do ssri side effects last?
+293,Can I drink alcohol while taking antidepressants?,Mental Health,antidepressant;alcohol;interaction;safety,"['antidepressant', 'alcohol', 'interaction', 'safety']",can i drink alcohol while taking antidepressants?
+294,Can I take melatonin with anxiety medication?,Mental Health,anxiety;melatonin;interaction;sleep,"['anxiety', 'melatonin', 'interaction', 'sleep']",can i take melatonin with anxiety medication?
+295,Can I take Benadryl for anxiety?,Mental Health,benadryl;anxiety;not recommended;drowsiness,"['benadryl', 'anxiety', 'not recommended', 'drowsiness']",can i take benadryl for anxiety?
+296,What over-the-counter options help mild anxiety?,Mental Health,anxiety;otc;limitations;when to see doctor,"['anxiety', 'otc', 'limitations', 'when to see doctor']",what over-the-counter options help mild anxiety?
+297,Can caffeine make anxiety worse?,Mental Health,caffeine;anxiety;panic;triggers,"['caffeine', 'anxiety', 'panic', 'triggers']",can caffeine make anxiety worse?
+298,What should I do if I feel a panic attack coming on?,Mental Health,panic attack;breathing;grounding;tips,"['panic attack', 'breathing', 'grounding', 'tips']",what should i do if i feel a panic attack coming on?
+299,Can I stop my antidepressant suddenly?,Mental Health,antidepressant;stopping;withdrawal;taper,"['antidepressant', 'stopping', 'withdrawal', 'taper']",can i stop my antidepressant suddenly?
+300,When should I get help for depression symptoms?,Mental Health,depression;help;warning signs;crisis,"['depression', 'help', 'warning signs', 'crisis']",when should i get help for depression symptoms?
+301,Can I take ibuprofen with lisinopril?,Drug Interactions,ibuprofen;lisinopril;ace inhibitor;kidney,"['ibuprofen', 'lisinopril', 'ace inhibitor', 'kidney']",can i take ibuprofen with lisinopril?
+302,Can I take ibuprofen with losartan?,Drug Interactions,ibuprofen;losartan;arb;kidney,"['ibuprofen', 'losartan', 'arb', 'kidney']",can i take ibuprofen with losartan?
+303,Can I take ibuprofen with hydrochlorothiazide?,Drug Interactions,ibuprofen;diuretic;kidney;interaction,"['ibuprofen', 'diuretic', 'kidney', 'interaction']",can i take ibuprofen with hydrochlorothiazide?
+304,Can I take naproxen with blood pressure medication?,Drug Interactions,naproxen;blood pressure;interaction;nsaid,"['naproxen', 'blood pressure', 'interaction', 'nsaid']",can i take naproxen with blood pressure medication?
+305,Can I take ibuprofen with metoprolol?,Drug Interactions,ibuprofen;metoprolol;beta blocker;interaction,"['ibuprofen', 'metoprolol', 'beta blocker', 'interaction']",can i take ibuprofen with metoprolol?
+306,Can I take pseudoephedrine with blood pressure meds?,Drug Interactions,pseudoephedrine;blood pressure;avoid;decongestant,"['pseudoephedrine', 'blood pressure', 'avoid', 'decongestant']",can i take pseudoephedrine with blood pressure meds?
+307,Can I take phenylephrine with blood pressure meds?,Drug Interactions,phenylephrine;blood pressure;avoid;decongestant,"['phenylephrine', 'blood pressure', 'avoid', 'decongestant']",can i take phenylephrine with blood pressure meds?
+308,Can I take Benadryl with a sleeping pill?,Drug Interactions,diphenhydramine;sleeping pill;drowsiness;danger,"['diphenhydramine', 'sleeping pill', 'drowsiness', 'danger']",can i take benadryl with a sleeping pill?
+309,Can I take melatonin with a sleeping pill?,Drug Interactions,melatonin;sleeping pill;sedation;interaction,"['melatonin', 'sleeping pill', 'sedation', 'interaction']",can i take melatonin with a sleeping pill?
+310,Can I take ibuprofen with clopidogrel (Plavix)?,Drug Interactions,ibuprofen;clopidogrel;bleeding risk;interaction,"['ibuprofen', 'clopidogrel', 'bleeding risk', 'interaction']",can i take ibuprofen with clopidogrel (plavix)?
+311,Can I take aspirin with clopidogrel?,Drug Interactions,aspirin;clopidogrel;bleeding risk;doctor,"['aspirin', 'clopidogrel', 'bleeding risk', 'doctor']",can i take aspirin with clopidogrel?
+312,Can I take omeprazole with clopidogrel?,Drug Interactions,omeprazole;clopidogrel;interaction;CYP2C19,"['omeprazole', 'clopidogrel', 'interaction', 'cyp2c19']",can i take omeprazole with clopidogrel?
+313,Can I take famotidine with clopidogrel?,Drug Interactions,famotidine;clopidogrel;acid reducer;safe,"['famotidine', 'clopidogrel', 'acid reducer', 'safe']",can i take famotidine with clopidogrel?
+314,Can I take antacids with levothyroxine?,Drug Interactions,antacid;levothyroxine;spacing;absorption,"['antacid', 'levothyroxine', 'spacing', 'absorption']",can i take antacids with levothyroxine?
+315,Can I take calcium with levothyroxine?,Drug Interactions,calcium;levothyroxine;spacing;absorption,"['calcium', 'levothyroxine', 'spacing', 'absorption']",can i take calcium with levothyroxine?
+316,Can I take iron with levothyroxine?,Drug Interactions,iron;levothyroxine;spacing;absorption,"['iron', 'levothyroxine', 'spacing', 'absorption']",can i take iron with levothyroxine?
+317,Can I take vitamin C with iron pills?,Drug Interactions,vitamin c;iron;absorption;timing,"['vitamin c', 'iron', 'absorption', 'timing']",can i take vitamin c with iron pills?
+318,Can I take metformin with omeprazole?,Drug Interactions,metformin;omeprazole;stomach;interaction,"['metformin', 'omeprazole', 'stomach', 'interaction']",can i take metformin with omeprazole?
+319,Can I take ibuprofen with sertraline (Zoloft)?,Drug Interactions,ibuprofen;sertraline;ssri;bleeding,"['ibuprofen', 'sertraline', 'ssri', 'bleeding']",can i take ibuprofen with sertraline (zoloft)?
+320,Can I take naproxen with sertraline (Zoloft)?,Drug Interactions,naproxen;sertraline;ssri;bleeding,"['naproxen', 'sertraline', 'ssri', 'bleeding']",can i take naproxen with sertraline (zoloft)?
+321,Can I take Tylenol for a sore throat?,Cold & Flu,sore throat;acetaminophen;pain;otc,"['sore throat', 'acetaminophen', 'pain', 'otc']",can i take tylenol for a sore throat?
+322,Can I take ibuprofen for a sore throat?,Cold & Flu,sore throat;ibuprofen;pain;otc,"['sore throat', 'ibuprofen', 'pain', 'otc']",can i take ibuprofen for a sore throat?
+323,What helps a cough without medicine?,Cold & Flu,cough;home remedies;honey;steam,"['cough', 'home remedies', 'honey', 'steam']",what helps a cough without medicine?
+324,What can I do for congestion at night?,Cold & Flu,congestion;night;saline;humidifier,"['congestion', 'night', 'saline', 'humidifier']",what can i do for congestion at night?
+325,Can I use a humidifier for a cold?,Cold & Flu,humidifier;cold;congestion;home,"['humidifier', 'cold', 'congestion', 'home']",can i use a humidifier for a cold?
+326,Can I take cold medicine if I have glaucoma?,Cold & Flu,glaucoma;decongestant;antihistamine;safety,"['glaucoma', 'decongestant', 'antihistamine', 'safety']",can i take cold medicine if i have glaucoma?
+327,Can I take cold medicine if I have thyroid problems?,Cold & Flu,thyroid;cold medicine;decongestant;safety,"['thyroid', 'cold medicine', 'decongestant', 'safety']",can i take cold medicine if i have thyroid problems?
+328,Can I take cold medicine if I have prostate problems?,Cold & Flu,BPH;decongestant;urination;safety,"['bph', 'decongestant', 'urination', 'safety']",can i take cold medicine if i have prostate problems?
+329,What medicine helps sneezing and runny nose?,Cold & Flu,sneezing;runny nose;antihistamine;cold,"['sneezing', 'runny nose', 'antihistamine', 'cold']",what medicine helps sneezing and runny nose?
+330,What can I take for sinus headache?,Cold & Flu,sinus headache;ibuprofen;saline;care,"['sinus headache', 'ibuprofen', 'saline', 'care']",what can i take for sinus headache?
+331,What helps knee pain?,Pain Relief,knee pain;ice;acetaminophen;topical,"['knee pain', 'ice', 'acetaminophen', 'topical']",what helps knee pain?
+332,What helps shoulder pain?,Pain Relief,shoulder pain;heat;stretch;otc,"['shoulder pain', 'heat', 'stretch', 'otc']",what helps shoulder pain?
+333,What helps neck pain?,Pain Relief,neck pain;posture;heat;otc,"['neck pain', 'posture', 'heat', 'otc']",what helps neck pain?
+334,Is it safe to take ibuprofen every day?,Pain Relief,ibuprofen;daily use;risks;doctor,"['ibuprofen', 'daily use', 'risks', 'doctor']",is it safe to take ibuprofen every day?
+335,Is it safe to take acetaminophen every day?,Pain Relief,acetaminophen;daily use;liver;doctor,"['acetaminophen', 'daily use', 'liver', 'doctor']",is it safe to take acetaminophen every day?
+336,What pain reliever is safest with high blood pressure?,Pain Relief,hypertension;pain relief;acetaminophen;nsaid,"['hypertension', 'pain relief', 'acetaminophen', 'nsaid']",what pain reliever is safest with high blood pressure?
+337,What pain reliever is safest with stomach acid reflux?,Pain Relief,reflux;pain relief;nsaid;stomach,"['reflux', 'pain relief', 'nsaid', 'stomach']",what pain reliever is safest with stomach acid reflux?
+338,Can I take ibuprofen if I have acid reflux?,Pain Relief,ibuprofen;reflux;stomach;safety,"['ibuprofen', 'reflux', 'stomach', 'safety']",can i take ibuprofen if i have acid reflux?
+339,How do I treat heartburn at night?,Acid Reflux,night heartburn;raise head;avoid late meals;antacid,"['night heartburn', 'raise head', 'avoid late meals', 'antacid']",how do i treat heartburn at night?
+340,Can spicy food cause reflux?,Acid Reflux,spicy food;reflux;trigger;diet,"['spicy food', 'reflux', 'trigger', 'diet']",can spicy food cause reflux?
+341,Can stress make reflux worse?,Acid Reflux,stress;reflux;trigger;management,"['stress', 'reflux', 'trigger', 'management']",can stress make reflux worse?
+342,Can I take antacids with antibiotics?,Acid Reflux,antacid;antibiotic;spacing;absorption,"['antacid', 'antibiotic', 'spacing', 'absorption']",can i take antacids with antibiotics?
+343,Can I take allergy medicine with asthma inhalers?,Allergies,allergy;asthma;inhaler;safe,"['allergy', 'asthma', 'inhaler', 'safe']",can i take allergy medicine with asthma inhalers?
+344,What helps itchy throat from allergies?,Allergies,itchy throat;allergy;post nasal drip;relief,"['itchy throat', 'allergy', 'post nasal drip', 'relief']",what helps itchy throat from allergies?
+345,Can allergies cause ear pressure?,Allergies,allergy;ear pressure;Eustachian tube;relief,"['allergy', 'ear pressure', 'eustachian tube', 'relief']",can allergies cause ear pressure?
+346,What’s the difference between allergies and a cold?,Allergies,allergy;cold;difference;symptoms,"['allergy', 'cold', 'difference', 'symptoms']",what’s the difference between allergies and a cold?
+347,Can I take two antihistamines together?,Allergies,antihistamine;double;avoid;safety,"['antihistamine', 'double', 'avoid', 'safety']",can i take two antihistamines together?
+348,Can I take Zyrtec in the morning and Benadryl at night?,Allergies,zyrtec;benadryl;drowsiness;combination,"['zyrtec', 'benadryl', 'drowsiness', 'combination']",can i take zyrtec in the morning and benadryl at night?
+349,What helps sleep when I’m congested?,Sleep,sleep;congestion;humidifier;saline,"['sleep', 'congestion', 'humidifier', 'saline']",what helps sleep when i’m congested?
+350,Can I take melatonin and magnesium together?,Sleep,melatonin;magnesium;combination;safety,"['melatonin', 'magnesium', 'combination', 'safety']",can i take melatonin and magnesium together?
+351,What does 'do not exceed' mean on a label?,Dosage,label;do not exceed;max dose;safety,"['label', 'do not exceed', 'max dose', 'safety']",what does 'do not exceed' mean on a label?
+352,What should I do if I took two doses by mistake?,Dosage,double dose;mistake;poison control;safety,"['double dose', 'mistake', 'poison control', 'safety']",what should i do if i took two doses by mistake?
+353,Can I take medicine with coffee?,Dosage,coffee;caffeine;absorption;timing,"['coffee', 'caffeine', 'absorption', 'timing']",can i take medicine with coffee?
+354,Can I take medicine with milk?,Dosage,milk;calcium;absorption;antibiotics,"['milk', 'calcium', 'absorption', 'antibiotics']",can i take medicine with milk?
+355,Can I take medicine with grapefruit juice?,Dosage,grapefruit;interaction;CYP3A4;avoid,"['grapefruit', 'interaction', 'cyp3a4', 'avoid']",can i take medicine with grapefruit juice?
+356,How can I tell if a medicine is extended-release?,Dosage,extended release;XR;ER;label,"['extended release', 'xr', 'er', 'label']",how can i tell if a medicine is extended-release?
+357,Should I store medicines in their original bottles?,Storage,original bottle;labels;childproof;safety,"['original bottle', 'labels', 'childproof', 'safety']",should i store medicines in their original bottles?
+358,What’s the best way to dispose of needles safely?,Storage,sharps;needle disposal;container;safety,"['sharps', 'needle disposal', 'container', 'safety']",what’s the best way to dispose of needles safely?
+359,How do I store vitamins to keep them fresh?,Storage,vitamins;storage;heat;humidity,"['vitamins', 'storage', 'heat', 'humidity']",how do i store vitamins to keep them fresh?
+360,What can I take for nausea during pregnancy?,Pregnancy,pregnancy;nausea;ginger;vitamin B6,"['pregnancy', 'nausea', 'ginger', 'vitamin b6']",what can i take for nausea during pregnancy?
+361,Is it safe to take vitamin B6 for nausea in pregnancy?,Pregnancy,pregnancy;vitamin b6;nausea;safety,"['pregnancy', 'vitamin b6', 'nausea', 'safety']",is it safe to take vitamin b6 for nausea in pregnancy?
+362,Is doxylamine safe for morning sickness?,Pregnancy,pregnancy;doxylamine;nausea;safety,"['pregnancy', 'doxylamine', 'nausea', 'safety']",is doxylamine safe for morning sickness?
+363,What cold medicines should I avoid during pregnancy?,Pregnancy,pregnancy;avoid;cold medicine;decongestant,"['pregnancy', 'avoid', 'cold medicine', 'decongestant']",what cold medicines should i avoid during pregnancy?
+364,Can I use acne medicine while pregnant?,Pregnancy,pregnancy;acne;retinoids;avoid,"['pregnancy', 'acne', 'retinoids', 'avoid']",can i use acne medicine while pregnant?
+365,Can I give my child cough drops?,Children,children;cough drops;choking hazard;age,"['children', 'cough drops', 'choking hazard', 'age']",can i give my child cough drops?
+366,Can I give my child adult ibuprofen tablets?,Children,children;ibuprofen;tablet;dose,"['children', 'ibuprofen', 'tablet', 'dose']",can i give my child adult ibuprofen tablets?
+367,Can I give my child adult acetaminophen tablets?,Children,children;acetaminophen;tablet;dose,"['children', 'acetaminophen', 'tablet', 'dose']",can i give my child adult acetaminophen tablets?
+368,How do I treat diaper rash?,Children,diaper rash;zinc oxide;barrier;care,"['diaper rash', 'zinc oxide', 'barrier', 'care']",how do i treat diaper rash?
+369,What sunscreen is safe for children?,Children,children;sunscreen;SPF;mineral,"['children', 'sunscreen', 'spf', 'mineral']",what sunscreen is safe for children?
+370,Can kids take gummy vitamins?,Children,children;gummy vitamins;choking;sugar,"['children', 'gummy vitamins', 'choking', 'sugar']",can kids take gummy vitamins?
+371,Can I take a multivitamin while pregnant?,Vitamins,pregnancy;prenatal;multivitamin;folic acid,"['pregnancy', 'prenatal', 'multivitamin', 'folic acid']",can i take a multivitamin while pregnant?
+372,How much folic acid do I need?,Vitamins,folic acid;pregnancy;dose;neural tube,"['folic acid', 'pregnancy', 'dose', 'neural tube']",how much folic acid do i need?
+373,What’s the difference between prenatal vitamins and multivitamins?,Vitamins,prenatal;multivitamin;iron;folate,"['prenatal', 'multivitamin', 'iron', 'folate']",what’s the difference between prenatal vitamins and multivitamins?
+374,Can I take biotin for hair and nails?,Vitamins,biotin;hair;nails;supplement,"['biotin', 'hair', 'nails', 'supplement']",can i take biotin for hair and nails?
+375,Can vitamins cause nausea?,Vitamins,vitamins;nausea;with food;iron,"['vitamins', 'nausea', 'with food', 'iron']",can vitamins cause nausea?
+376,What moisturizer is best for eczema?,Skin,eczema;moisturizer;fragrance free;ceramides,"['eczema', 'moisturizer', 'fragrance free', 'ceramides']",what moisturizer is best for eczema?
+377,Can I use antibiotic ointment on cuts?,Skin,antibiotic ointment;cuts;infection;safety,"['antibiotic ointment', 'cuts', 'infection', 'safety']",can i use antibiotic ointment on cuts?
+378,How do I treat a blister?,Skin,blister;do not pop;care;bandage,"['blister', 'do not pop', 'care', 'bandage']",how do i treat a blister?
+379,What helps poison ivy itching?,Skin,poison ivy;itch;calamine;hydrocortisone,"['poison ivy', 'itch', 'calamine', 'hydrocortisone']",what helps poison ivy itching?
+380,How do I treat dandruff?,Skin,dandruff;ketoconazole;shampoo;scalp,"['dandruff', 'ketoconazole', 'shampoo', 'scalp']",how do i treat dandruff?
+381,Can I use ear drops if I have a hole in my eardrum?,Eyes & Ears,ear drops;perforated eardrum;doctor;safety,"['ear drops', 'perforated eardrum', 'doctor', 'safety']",can i use ear drops if i have a hole in my eardrum?
+382,What should I do if I get something in my eye?,Eyes & Ears,eye;foreign body;flush;doctor,"['eye', 'foreign body', 'flush', 'doctor']",what should i do if i get something in my eye?
+383,Can I use contact lens solution as eye drops?,Eyes & Ears,contacts;solution;eye drops;avoid,"['contacts', 'solution', 'eye drops', 'avoid']",can i use contact lens solution as eye drops?
+384,What can I take for motion sickness?,Eyes & Ears,motion sickness;meclizine;drowsiness;tips,"['motion sickness', 'meclizine', 'drowsiness', 'tips']",what can i take for motion sickness?
+385,Can I take meclizine and Benadryl together?,Eyes & Ears,meclizine;benadryl;drowsiness;avoid,"['meclizine', 'benadryl', 'drowsiness', 'avoid']",can i take meclizine and benadryl together?
+386,Can I take cough medicine if I have diabetes?,Diabetes,diabetes;cough medicine;sugar free;safe,"['diabetes', 'cough medicine', 'sugar free', 'safe']",can i take cough medicine if i have diabetes?
+387,Can I take decongestants if I have diabetes?,Diabetes,diabetes;decongestant;blood pressure;safe,"['diabetes', 'decongestant', 'blood pressure', 'safe']",can i take decongestants if i have diabetes?
+388,What should I do if I have diarrhea and diabetes?,Diabetes,diabetes;diarrhea;hydration;ketones,"['diabetes', 'diarrhea', 'hydration', 'ketones']",what should i do if i have diarrhea and diabetes?
+389,What should I do if I’m sick and my blood sugar is high?,Diabetes,sick day;high blood sugar;ketones;doctor,"['sick day', 'high blood sugar', 'ketones', 'doctor']",what should i do if i’m sick and my blood sugar is high?
+390,Can I take antacids if I have diabetes?,Diabetes,diabetes;antacid;safety;otc,"['diabetes', 'antacid', 'safety', 'otc']",can i take antacids if i have diabetes?
+391,Can high blood pressure meds cause cough?,Heart,ace inhibitor;cough;side effect;doctor,"['ace inhibitor', 'cough', 'side effect', 'doctor']",can high blood pressure meds cause cough?
+392,Can heartburn medicine affect my heart meds?,Heart,heartburn;interaction;clopidogrel;omeprazole,"['heartburn', 'interaction', 'clopidogrel', 'omeprazole']",can heartburn medicine affect my heart meds?
+393,What cold medicine is safest with atrial fibrillation?,Heart,afib;cold medicine;decongestant;avoid,"['afib', 'cold medicine', 'decongestant', 'avoid']",what cold medicine is safest with atrial fibrillation?
+394,Can I take ibuprofen if I have heart failure?,Heart,heart failure;ibuprofen;fluid retention;avoid,"['heart failure', 'ibuprofen', 'fluid retention', 'avoid']",can i take ibuprofen if i have heart failure?
+395,What should I do if my blood pressure is very high?,Heart,very high bp;warning signs;emergency;care,"['very high bp', 'warning signs', 'emergency', 'care']",what should i do if my blood pressure is very high?
+396,Can I take supplements with antidepressants?,Mental Health,supplements;antidepressant;interaction;serotonin,"['supplements', 'antidepressant', 'interaction', 'serotonin']",can i take supplements with antidepressants?
+397,Is St. John’s wort safe for depression?,Mental Health,st johns wort;depression;interaction;ssri,"['st johns wort', 'depression', 'interaction', 'ssri']",is st. john’s wort safe for depression?
+398,Can antihistamines make anxiety worse?,Mental Health,antihistamine;anxiety;side effects;drowsiness,"['antihistamine', 'anxiety', 'side effects', 'drowsiness']",can antihistamines make anxiety worse?
+399,Can decongestants make anxiety worse?,Mental Health,decongestant;anxiety;palpitations;stimulant,"['decongestant', 'anxiety', 'palpitations', 'stimulant']",can decongestants make anxiety worse?
+400,What should I do if I feel suicidal?,Mental Health,suicidal;crisis;988;emergency,"['suicidal', 'crisis', '988', 'emergency']",what should i do if i feel suicidal?
+401,Can I take ibuprofen with amlodipine?,Drug Interactions,ibuprofen;amlodipine;blood pressure;interaction,"['ibuprofen', 'amlodipine', 'blood pressure', 'interaction']",can i take ibuprofen with amlodipine?
+402,Can I take naproxen with amlodipine?,Drug Interactions,naproxen;amlodipine;blood pressure;interaction,"['naproxen', 'amlodipine', 'blood pressure', 'interaction']",can i take naproxen with amlodipine?
+403,Can I take ibuprofen with insulin?,Drug Interactions,ibuprofen;insulin;diabetes;interaction,"['ibuprofen', 'insulin', 'diabetes', 'interaction']",can i take ibuprofen with insulin?
+404,Can I take acetaminophen with warfarin?,Drug Interactions,acetaminophen;warfarin;INR;interaction,"['acetaminophen', 'warfarin', 'inr', 'interaction']",can i take acetaminophen with warfarin?
+405,Can I take ibuprofen with warfarin?,Drug Interactions,ibuprofen;warfarin;bleeding risk;avoid,"['ibuprofen', 'warfarin', 'bleeding risk', 'avoid']",can i take ibuprofen with warfarin?
+406,Can I take aspirin with warfarin?,Drug Interactions,aspirin;warfarin;bleeding risk;doctor,"['aspirin', 'warfarin', 'bleeding risk', 'doctor']",can i take aspirin with warfarin?
+407,Can I take herbal teas with blood thinners?,Drug Interactions,herbal;blood thinner;interaction;safety,"['herbal', 'blood thinner', 'interaction', 'safety']",can i take herbal teas with blood thinners?
+408,Can I take antibiotics with probiotics at the same time?,Drug Interactions,antibiotic;probiotic;timing;spacing,"['antibiotic', 'probiotic', 'timing', 'spacing']",can i take antibiotics with probiotics at the same time?
+409,Can I take loperamide (Imodium) with SSRIs?,Drug Interactions,loperamide;ssri;QT risk;interaction,"['loperamide', 'ssri', 'qt risk', 'interaction']",can i take loperamide (imodium) with ssris?
+410,Can I take ibuprofen with lithium?,Drug Interactions,ibuprofen;lithium;toxicity;interaction,"['ibuprofen', 'lithium', 'toxicity', 'interaction']",can i take ibuprofen with lithium?
+411,Can I take naproxen with lithium?,Drug Interactions,naproxen;lithium;toxicity;interaction,"['naproxen', 'lithium', 'toxicity', 'interaction']",can i take naproxen with lithium?
+412,Can I take antacids with iron supplements?,Drug Interactions,antacid;iron;absorption;timing,"['antacid', 'iron', 'absorption', 'timing']",can i take antacids with iron supplements?
+413,Can I take calcium and iron together?,Drug Interactions,calcium;iron;absorption;spacing,"['calcium', 'iron', 'absorption', 'spacing']",can i take calcium and iron together?
+414,Can I take magnesium and calcium together?,Drug Interactions,magnesium;calcium;supplement;timing,"['magnesium', 'calcium', 'supplement', 'timing']",can i take magnesium and calcium together?
+415,Can I take vitamin K with warfarin?,Drug Interactions,vitamin K;warfarin;INR;diet,"['vitamin k', 'warfarin', 'inr', 'diet']",can i take vitamin k with warfarin?
+416,Can I take omega-3 fish oil with blood thinners?,Drug Interactions,fish oil;blood thinner;bleeding risk;interaction,"['fish oil', 'blood thinner', 'bleeding risk', 'interaction']",can i take omega-3 fish oil with blood thinners?
+417,Can I take ibuprofen with alcohol occasionally?,Drug Interactions,ibuprofen;alcohol;stomach bleed;safety,"['ibuprofen', 'alcohol', 'stomach bleed', 'safety']",can i take ibuprofen with alcohol occasionally?
+418,Can I take sleep medicine with alcohol?,Drug Interactions,sleep aid;alcohol;danger;sedation,"['sleep aid', 'alcohol', 'danger', 'sedation']",can i take sleep medicine with alcohol?
+419,Can I take cough medicine with alcohol?,Drug Interactions,cough medicine;alcohol;drowsiness;interaction,"['cough medicine', 'alcohol', 'drowsiness', 'interaction']",can i take cough medicine with alcohol?
+420,Can I take antihistamines with alcohol?,Drug Interactions,antihistamine;alcohol;drowsiness;interaction,"['antihistamine', 'alcohol', 'drowsiness', 'interaction']",can i take antihistamines with alcohol?
+421,What can I take for a mild fever?,Cold & Flu,fever;mild;acetaminophen;ibuprofen,"['fever', 'mild', 'acetaminophen', 'ibuprofen']",what can i take for a mild fever?
+422,Is it okay to take cold medicine for more than a week?,Cold & Flu,cold medicine;duration;safety;doctor,"['cold medicine', 'duration', 'safety', 'doctor']",is it okay to take cold medicine for more than a week?
+423,Can I take cough medicine before bed?,Cold & Flu,cough medicine;bedtime;drowsiness;safety,"['cough medicine', 'bedtime', 'drowsiness', 'safety']",can i take cough medicine before bed?
+424,What can I do for a hoarse voice?,Cold & Flu,hoarse voice;rest;hydration;throat,"['hoarse voice', 'rest', 'hydration', 'throat']",what can i do for a hoarse voice?
+425,What helps a lingering cough after a cold?,Cold & Flu,lingering cough;post viral;when to see doctor;tips,"['lingering cough', 'post viral', 'when to see doctor', 'tips']",what helps a lingering cough after a cold?
+426,What are signs of pneumonia?,Cold & Flu,pneumonia;warning signs;doctor;fever,"['pneumonia', 'warning signs', 'doctor', 'fever']",what are signs of pneumonia?
+427,Can I take antibiotics for a cold?,Cold & Flu,antibiotics;cold;viral;not needed,"['antibiotics', 'cold', 'viral', 'not needed']",can i take antibiotics for a cold?
+428,Do I need antibiotics for bronchitis?,Cold & Flu,bronchitis;antibiotics;viral;doctor,"['bronchitis', 'antibiotics', 'viral', 'doctor']",do i need antibiotics for bronchitis?
+429,What helps chest congestion?,Cold & Flu,chest congestion;guaifenesin;hydration;steam,"['chest congestion', 'guaifenesin', 'hydration', 'steam']",what helps chest congestion?
+430,What can I do for a stuffy nose in a child?,Cold & Flu,child;stuffy nose;saline;suction,"['child', 'stuffy nose', 'saline', 'suction']",what can i do for a stuffy nose in a child?
+431,What helps inflammation pain?,Pain Relief,inflammation;nsaid;ice;rest,"['inflammation', 'nsaid', 'ice', 'rest']",what helps inflammation pain?
+432,Can I use lidocaine patches for pain?,Pain Relief,lidocaine;patch;topical;pain,"['lidocaine', 'patch', 'topical', 'pain']",can i use lidocaine patches for pain?
+433,What can I do for sciatica pain at home?,Pain Relief,sciatica;stretching;heat;doctor,"['sciatica', 'stretching', 'heat', 'doctor']",what can i do for sciatica pain at home?
+434,What helps jaw pain?,Pain Relief,jaw pain;TMJ;ice;doctor,"['jaw pain', 'tmj', 'ice', 'doctor']",what helps jaw pain?
+435,What can I take for gout pain?,Pain Relief,gout;pain;NSAID;doctor,"['gout', 'pain', 'nsaid', 'doctor']",what can i take for gout pain?
+436,Can I take ibuprofen with acid reflux meds?,Acid Reflux,ibuprofen;ppi;stomach;safety,"['ibuprofen', 'ppi', 'stomach', 'safety']",can i take ibuprofen with acid reflux meds?
+437,Can I take antacids and famotidine together?,Acid Reflux,antacid;famotidine;timing;reflux,"['antacid', 'famotidine', 'timing', 'reflux']",can i take antacids and famotidine together?
+438,What helps gas and bloating?,Acid Reflux,gas;bloating;simethicone;diet,"['gas', 'bloating', 'simethicone', 'diet']",what helps gas and bloating?
+439,Is Gas-X (simethicone) safe?,Acid Reflux,simethicone;gas;safe;otc,"['simethicone', 'gas', 'safe', 'otc']",is gas-x (simethicone) safe?
+440,Is it safe to take probiotics for bloating?,Acid Reflux,probiotic;bloating;evidence;safety,"['probiotic', 'bloating', 'evidence', 'safety']",is it safe to take probiotics for bloating?
+441,Can I take allergy meds if I have high blood pressure?,Allergies,allergy;hypertension;decongestant;safe,"['allergy', 'hypertension', 'decongestant', 'safe']",can i take allergy meds if i have high blood pressure?
+442,What allergy medicine is safest with high blood pressure?,Allergies,hypertension;allergy;antihistamine;safe,"['hypertension', 'allergy', 'antihistamine', 'safe']",what allergy medicine is safest with high blood pressure?
+443,Can I use decongestant nasal sprays with high blood pressure?,Allergies,hypertension;nasal spray;oxymetazoline;caution,"['hypertension', 'nasal spray', 'oxymetazoline', 'caution']",can i use decongestant nasal sprays with high blood pressure?
+444,Can I take melatonin with high blood pressure?,Sleep,melatonin;hypertension;safety;doctor,"['melatonin', 'hypertension', 'safety', 'doctor']",can i take melatonin with high blood pressure?
+445,Does magnesium glycinate help sleep?,Sleep,magnesium glycinate;sleep;supplement;evidence,"['magnesium glycinate', 'sleep', 'supplement', 'evidence']",does magnesium glycinate help sleep?
+446,Is it safe to take sleep aids every night?,Sleep,sleep aid;daily use;dependence;safety,"['sleep aid', 'daily use', 'dependence', 'safety']",is it safe to take sleep aids every night?
+447,What should I avoid before bed to sleep better?,Sleep,sleep hygiene;avoid;caffeine;alcohol,"['sleep hygiene', 'avoid', 'caffeine', 'alcohol']",what should i avoid before bed to sleep better?
+448,Can I take cough medicine and melatonin together?,Sleep,cough medicine;melatonin;drowsiness;safety,"['cough medicine', 'melatonin', 'drowsiness', 'safety']",can i take cough medicine and melatonin together?
+449,How do I know my child's dose based on weight?,Dosage,children;weight based dosing;mg per kg;safety,"['children', 'weight based dosing', 'mg per kg', 'safety']",how do i know my child's dose based on weight?
+450,What does 'as needed' mean on a prescription?,Dosage,prn;as needed;instructions;understanding,"['prn', 'as needed', 'instructions', 'understanding']",what does 'as needed' mean on a prescription?
+451,How should I store liquid antibiotics for kids?,Storage,liquid antibiotic;refrigerate;shake;expiry,"['liquid antibiotic', 'refrigerate', 'shake', 'expiry']",how should i store liquid antibiotics for kids?
+452,How long are eye drops good after opening?,Storage,eye drops;after opening;discard;infection,"['eye drops', 'after opening', 'discard', 'infection']",how long are eye drops good after opening?
+453,How long is insulin good after opening?,Storage,insulin;after opening;days;storage,"['insulin', 'after opening', 'days', 'storage']",how long is insulin good after opening?
+454,Can I keep medicine in a hot room?,Storage,heat;medicine;potency;storage,"['heat', 'medicine', 'potency', 'storage']",can i keep medicine in a hot room?
+455,Can I take antihistamines during pregnancy?,Pregnancy,pregnancy;antihistamine;safety;doctor,"['pregnancy', 'antihistamine', 'safety', 'doctor']",can i take antihistamines during pregnancy?
+456,Can I take NSAIDs during pregnancy?,Pregnancy,pregnancy;NSAID;avoid;trimester,"['pregnancy', 'nsaid', 'avoid', 'trimester']",can i take nsaids during pregnancy?
+457,What vitamins are important during pregnancy?,Pregnancy,pregnancy;vitamins;folate;iron,"['pregnancy', 'vitamins', 'folate', 'iron']",what vitamins are important during pregnancy?
+458,What’s safe for heartburn during pregnancy?,Pregnancy,pregnancy;heartburn;tums;famotidine,"['pregnancy', 'heartburn', 'tums', 'famotidine']",what’s safe for heartburn during pregnancy?
+459,What can I use for a diaper rash?,Children,diaper rash;zinc oxide;barrier;care,"['diaper rash', 'zinc oxide', 'barrier', 'care']",what can i use for a diaper rash?
+460,What can I do for a child's eczema?,Children,child;eczema;moisturizer;hydrocortisone,"['child', 'eczema', 'moisturizer', 'hydrocortisone']",what can i do for a child's eczema?
+461,Can I give my child antihistamines?,Children,children;antihistamine;dose;age,"['children', 'antihistamine', 'dose', 'age']",can i give my child antihistamines?
+462,What should I do if my child has an allergic reaction?,Children,child;allergic reaction;hives;emergency,"['child', 'allergic reaction', 'hives', 'emergency']",what should i do if my child has an allergic reaction?
+463,Can I take vitamin D with calcium?,Vitamins,vitamin D;calcium;bone health;timing,"['vitamin d', 'calcium', 'bone health', 'timing']",can i take vitamin d with calcium?
+464,Can I take magnesium with vitamin D?,Vitamins,magnesium;vitamin D;supplement;timing,"['magnesium', 'vitamin d', 'supplement', 'timing']",can i take magnesium with vitamin d?
+465,How do I choose a safe supplement brand?,Vitamins,supplements;quality;USP;NSF,"['supplements', 'quality', 'usp', 'nsf']",how do i choose a safe supplement brand?
+466,"What helps dry, cracked lips?",Skin,chapped lips;petrolatum;hydration;care,"['chapped lips', 'petrolatum', 'hydration', 'care']","what helps dry, cracked lips?"
+467,What can I do for a cold sore?,Skin,cold sore;docosanol;antiviral;care,"['cold sore', 'docosanol', 'antiviral', 'care']",what can i do for a cold sore?
+468,Can I use hydrocortisone on a bug bite?,Skin,bug bite;hydrocortisone;itch;relief,"['bug bite', 'hydrocortisone', 'itch', 'relief']",can i use hydrocortisone on a bug bite?
+469,What helps pink eye symptoms?,Eyes & Ears,pink eye;conjunctivitis;hygiene;doctor,"['pink eye', 'conjunctivitis', 'hygiene', 'doctor']",what helps pink eye symptoms?
+470,When should I see a doctor for eye redness?,Eyes & Ears,eye redness;warning signs;pain;doctor,"['eye redness', 'warning signs', 'pain', 'doctor']",when should i see a doctor for eye redness?
+471,Can I take sugar-free medicines with diabetes?,Diabetes,diabetes;sugar free;labels;otc,"['diabetes', 'sugar free', 'labels', 'otc']",can i take sugar-free medicines with diabetes?
+472,What should I check on labels if I have diabetes?,Diabetes,diabetes;labels;sugar;carbs,"['diabetes', 'labels', 'sugar', 'carbs']",what should i check on labels if i have diabetes?
+473,Can I take NSAIDs if I have heart disease?,Heart,heart disease;NSAID;risk;avoid,"['heart disease', 'nsaid', 'risk', 'avoid']",can i take nsaids if i have heart disease?
+474,Can I take decongestants if I have heart disease?,Heart,heart disease;decongestant;avoid;palpitations,"['heart disease', 'decongestant', 'avoid', 'palpitations']",can i take decongestants if i have heart disease?
+475,Can I take antihistamines if I have heart disease?,Heart,heart disease;antihistamine;safety;caution,"['heart disease', 'antihistamine', 'safety', 'caution']",can i take antihistamines if i have heart disease?
+476,Can anxiety medicine make me sleepy?,Mental Health,anxiety meds;drowsiness;side effect;safety,"['anxiety meds', 'drowsiness', 'side effect', 'safety']",can anxiety medicine make me sleepy?
+477,Can I take antihistamines with anxiety meds?,Mental Health,antihistamine;anxiety meds;drowsiness;interaction,"['antihistamine', 'anxiety meds', 'drowsiness', 'interaction']",can i take antihistamines with anxiety meds?
+478,Can I take decongestants with anxiety meds?,Mental Health,decongestant;anxiety meds;palpitations;interaction,"['decongestant', 'anxiety meds', 'palpitations', 'interaction']",can i take decongestants with anxiety meds?
+479,What are common side effects of antidepressants?,Mental Health,antidepressant;side effects;nausea;sleep,"['antidepressant', 'side effects', 'nausea', 'sleep']",what are common side effects of antidepressants?
+480,When should I call my doctor about medication side effects?,Mental Health,side effects;when to call;warning signs;doctor,"['side effects', 'when to call', 'warning signs', 'doctor']",when should i call my doctor about medication side effects?
+481,Can I take ibuprofen with antibiotics?,Drug Interactions,ibuprofen;antibiotic;interaction;safety,"['ibuprofen', 'antibiotic', 'interaction', 'safety']",can i take ibuprofen with antibiotics?
+482,Can I take acetaminophen with antibiotics?,Drug Interactions,acetaminophen;antibiotic;interaction;safety,"['acetaminophen', 'antibiotic', 'interaction', 'safety']",can i take acetaminophen with antibiotics?
+483,Can I take antihistamines with antibiotics?,Drug Interactions,antihistamine;antibiotic;interaction;safety,"['antihistamine', 'antibiotic', 'interaction', 'safety']",can i take antihistamines with antibiotics?
+484,Can I take antacids with doxycycline?,Drug Interactions,antacid;doxycycline;absorption;spacing,"['antacid', 'doxycycline', 'absorption', 'spacing']",can i take antacids with doxycycline?
+485,Can I take antacids with ciprofloxacin?,Drug Interactions,antacid;ciprofloxacin;absorption;spacing,"['antacid', 'ciprofloxacin', 'absorption', 'spacing']",can i take antacids with ciprofloxacin?
+486,Can I take calcium with ciprofloxacin?,Drug Interactions,calcium;ciprofloxacin;absorption;spacing,"['calcium', 'ciprofloxacin', 'absorption', 'spacing']",can i take calcium with ciprofloxacin?
+487,Can I take iron with ciprofloxacin?,Drug Interactions,iron;ciprofloxacin;absorption;spacing,"['iron', 'ciprofloxacin', 'absorption', 'spacing']",can i take iron with ciprofloxacin?
+488,Can I take magnesium with ciprofloxacin?,Drug Interactions,magnesium;ciprofloxacin;absorption;spacing,"['magnesium', 'ciprofloxacin', 'absorption', 'spacing']",can i take magnesium with ciprofloxacin?
+489,Can I take omeprazole with antibiotics?,Drug Interactions,omeprazole;antibiotic;interaction;safety,"['omeprazole', 'antibiotic', 'interaction', 'safety']",can i take omeprazole with antibiotics?
+490,Can I take probiotics after antibiotics?,Drug Interactions,probiotic;after antibiotics;gut;timing,"['probiotic', 'after antibiotics', 'gut', 'timing']",can i take probiotics after antibiotics?
+491,What can I do for sore throat without antibiotics?,Cold & Flu,sore throat;viral;supportive care;tips,"['sore throat', 'viral', 'supportive care', 'tips']",what can i do for sore throat without antibiotics?
+492,What helps runny nose and sneezing?,Cold & Flu,runny nose;sneezing;antihistamine;care,"['runny nose', 'sneezing', 'antihistamine', 'care']",what helps runny nose and sneezing?
+493,What helps fever and chills?,Cold & Flu,fever;chills;acetaminophen;hydration,"['fever', 'chills', 'acetaminophen', 'hydration']",what helps fever and chills?
+494,What can I take for sinus congestion?,Cold & Flu,sinus congestion;saline;decongestant;steam,"['sinus congestion', 'saline', 'decongestant', 'steam']",what can i take for sinus congestion?
+495,What can I take for a headache with a cold?,Cold & Flu,headache;cold;acetaminophen;ibuprofen,"['headache', 'cold', 'acetaminophen', 'ibuprofen']",what can i take for a headache with a cold?
+496,What’s the best OTC option for mild pain?,Pain Relief,mild pain;otc;acetaminophen;ibuprofen,"['mild pain', 'otc', 'acetaminophen', 'ibuprofen']",what’s the best otc option for mild pain?
+497,What can I take for stomach pain from reflux?,Acid Reflux,stomach pain;reflux;antacid;doctor,"['stomach pain', 'reflux', 'antacid', 'doctor']",what can i take for stomach pain from reflux?
+498,What helps itchy nose from allergies?,Allergies,itchy nose;allergy;nasal steroid;antihistamine,"['itchy nose', 'allergy', 'nasal steroid', 'antihistamine']",what helps itchy nose from allergies?
+499,What can I do for trouble falling asleep?,Sleep,falling asleep;insomnia;routine;tips,"['falling asleep', 'insomnia', 'routine', 'tips']",what can i do for trouble falling asleep?
+500,What should I do if I took medicine with expired date?,Storage,expired;medicine;what to do;safety,"['expired', 'medicine', 'what to do', 'safety']",what should i do if i took medicine with expired date?
+501,What can I take for heartburn if I’m on other medications?,Acid Reflux,heartburn;interaction;antacid;timing,"['heartburn', 'interaction', 'antacid', 'timing']",what can i take for heartburn if i’m on other medications?
+502,Can I take allergy meds if I’m also taking cold medicine?,Allergies,allergy;cold medicine;double ingredients;safety,"['allergy', 'cold medicine', 'double ingredients', 'safety']",can i take allergy meds if i’m also taking cold medicine?
+503,Can I take NyQuil if I already took Tylenol?,Cold & Flu,nyquil;tylenol;acetaminophen;overdose,"['nyquil', 'tylenol', 'acetaminophen', 'overdose']",can i take nyquil if i already took tylenol?
+504,Can I take two medicines that both have acetaminophen?,Dosage,acetaminophen;duplicate;overdose;label,"['acetaminophen', 'duplicate', 'overdose', 'label']",can i take two medicines that both have acetaminophen?
+505,How can I tell if two OTC products have the same ingredients?,Dosage,otc;ingredients;labels;duplicate,"['otc', 'ingredients', 'labels', 'duplicate']",how can i tell if two otc products have the same ingredients?
+506,Can I take ibuprofen and naproxen on the same day?,Pain Relief,ibuprofen;naproxen;nsaid;avoid,"['ibuprofen', 'naproxen', 'nsaid', 'avoid']",can i take ibuprofen and naproxen on the same day?
+507,Can I take aspirin and ibuprofen together?,Pain Relief,aspirin;ibuprofen;timing;interaction,"['aspirin', 'ibuprofen', 'timing', 'interaction']",can i take aspirin and ibuprofen together?
+508,Can I take omeprazole and antacids on the same day?,Acid Reflux,omeprazole;antacid;timing;reflux,"['omeprazole', 'antacid', 'timing', 'reflux']",can i take omeprazole and antacids on the same day?
+509,Can I take Zyrtec and Claritin together?,Allergies,zyrtec;claritin;double antihistamine;avoid,"['zyrtec', 'claritin', 'double antihistamine', 'avoid']",can i take zyrtec and claritin together?
+510,Can I take melatonin and Benadryl together?,Sleep,melatonin;benadryl;drowsiness;avoid,"['melatonin', 'benadryl', 'drowsiness', 'avoid']",can i take melatonin and benadryl together?
+511,Can I store medicine in a weekly pill box for a long time?,Storage,pill box;stability;humidity;safety,"['pill box', 'stability', 'humidity', 'safety']",can i store medicine in a weekly pill box for a long time?
+512,What should I do if my medicine froze?,Storage,frozen;medicine;stability;what to do,"['frozen', 'medicine', 'stability', 'what to do']",what should i do if my medicine froze?
+513,What should I do if my medicine got too hot?,Storage,heat;medicine;potency;what to do,"['heat', 'medicine', 'potency', 'what to do']",what should i do if my medicine got too hot?
+514,Can I take prenatal vitamins and iron together?,Vitamins,prenatal;iron;constipation;timing,"['prenatal', 'iron', 'constipation', 'timing']",can i take prenatal vitamins and iron together?
+515,Can I take vitamin B12 supplements?,Vitamins,vitamin B12;supplement;deficiency;safe,"['vitamin b12', 'supplement', 'deficiency', 'safe']",can i take vitamin b12 supplements?
+516,What should I do for an itchy rash?,Skin,rash;itch;hydrocortisone;antihistamine,"['rash', 'itch', 'hydrocortisone', 'antihistamine']",what should i do for an itchy rash?
+517,Can I use antibiotic cream on acne?,Skin,acne;antibiotic ointment;not recommended;irritation,"['acne', 'antibiotic ointment', 'not recommended', 'irritation']",can i use antibiotic cream on acne?
+518,What should I do if I get ear ringing?,Eyes & Ears,tinnitus;ear ringing;warning signs;doctor,"['tinnitus', 'ear ringing', 'warning signs', 'doctor']",what should i do if i get ear ringing?
+519,Can I take cold medicine if I’m on antidepressants?,Drug Interactions,cold medicine;antidepressant;dextromethorphan;serotonin,"['cold medicine', 'antidepressant', 'dextromethorphan', 'serotonin']",can i take cold medicine if i’m on antidepressants?
+520,Can I take dextromethorphan with sertraline?,Drug Interactions,dextromethorphan;sertraline;serotonin syndrome;risk,"['dextromethorphan', 'sertraline', 'serotonin syndrome', 'risk']",can i take dextromethorphan with sertraline?
+521,Can I take cough medicine if I have high blood pressure?,Heart,cough medicine;hypertension;decongestant;safe,"['cough medicine', 'hypertension', 'decongestant', 'safe']",can i take cough medicine if i have high blood pressure?
+522,Can I take decongestants if I have anxiety?,Mental Health,anxiety;decongestant;palpitations;avoid,"['anxiety', 'decongestant', 'palpitations', 'avoid']",can i take decongestants if i have anxiety?
+523,Can I take NSAIDs if I have diabetes?,Diabetes,diabetes;nsaid;kidney;safe,"['diabetes', 'nsaid', 'kidney', 'safe']",can i take nsaids if i have diabetes?
+524,Can I take antacids if I have kidney disease?,Acid Reflux,kidney disease;antacid;magnesium;aluminum,"['kidney disease', 'antacid', 'magnesium', 'aluminum']",can i take antacids if i have kidney disease?
+525,Can I take magnesium-based antacids if I have kidney disease?,Acid Reflux,kidney disease;magnesium antacid;avoid;doctor,"['kidney disease', 'magnesium antacid', 'avoid', 'doctor']",can i take magnesium-based antacids if i have kidney disease?
+526,Can I take calcium carbonate antacids if I have kidney disease?,Acid Reflux,kidney disease;calcium carbonate;safe;doctor,"['kidney disease', 'calcium carbonate', 'safe', 'doctor']",can i take calcium carbonate antacids if i have kidney disease?
+527,Can I take ibuprofen if I’m dehydrated from the flu?,Cold & Flu,dehydration;ibuprofen;kidney;safe,"['dehydration', 'ibuprofen', 'kidney', 'safe']",can i take ibuprofen if i’m dehydrated from the flu?
+528,Can I take loperamide for diarrhea from a stomach bug?,Dosage,diarrhea;stomach bug;loperamide;safety,"['diarrhea', 'stomach bug', 'loperamide', 'safety']",can i take loperamide for diarrhea from a stomach bug?
+529,What should I drink when I’m sick to stay hydrated?,Cold & Flu,hydration;flu;electrolytes;tips,"['hydration', 'flu', 'electrolytes', 'tips']",what should i drink when i’m sick to stay hydrated?
+530,What should I do if I’m vomiting and can’t keep fluids down?,Dosage,vomiting;dehydration;when to seek care;tips,"['vomiting', 'dehydration', 'when to seek care', 'tips']",what should i do if i’m vomiting and can’t keep fluids down?
+531,Can I use calamine lotion for itching?,Skin,calamine;itch;poison ivy;safe,"['calamine', 'itch', 'poison ivy', 'safe']",can i use calamine lotion for itching?
+532,What should I do if I accidentally took my medicine twice?,Dosage,double dose;accidental;call pharmacist;poison control,"['double dose', 'accidental', 'call pharmacist', 'poison control']",what should i do if i accidentally took my medicine twice?
