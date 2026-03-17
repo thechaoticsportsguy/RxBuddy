@@ -2,6 +2,7 @@ import Head from "next/head";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { useEffect, useMemo, useState } from "react";
+import ReactMarkdown from "react-markdown";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
@@ -157,9 +158,9 @@ export default function ResultsPage() {
                           💊 RxBuddy Answer
                         </p>
                         {hasAnswer ? (
-                          <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-slate-700">
-                            {r.answer}
-                          </p>
+                          <div className="mt-2 prose prose-sm prose-slate max-w-none text-slate-700">
+                            <ReactMarkdown>{r.answer}</ReactMarkdown>
+                          </div>
                         ) : (
                           <p className="mt-2 text-sm italic text-slate-400">
                             Generating answer…
