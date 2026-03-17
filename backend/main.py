@@ -66,34 +66,52 @@ def _generate_ai_answer(question: str) -> str:
     """
     api_key = _anthropic_api_key()
     if not api_key:
+        logger.error("[Claude] ANTHROPIC_API_KEY is NOT set in environment!")
         raise RuntimeError("ANTHROPIC_API_KEY is missing.")
+
+    logger.info("[Claude] API key found (first 8 chars): %s...", api_key[:8] if len(api_key) > 8 else "***")
 
     import anthropic
 
-    client = anthropic.Anthropic(api_key=api_key)
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
 
-    prompt = (
-        "You are a friendly pharmacist assistant. Answer this patient question "
-        "in plain English under 150 words. Include: what to do, what to avoid, "
-        f"and when to see a doctor. Question: {question}"
-    )
+        prompt = (
+            "You are a friendly pharmacist assistant. Answer this patient question "
+            "in plain English under 150 words. Include: what to do, what to avoid, "
+            f"and when to see a doctor. Question: {question}"
+        )
 
-    logger.info("[Claude] Sending question to claude-opus-4-5: %.80s...", question)
+        logger.info("[Claude] Sending question to claude-sonnet-4-20250514: %.80s...", question)
 
-    response = client.messages.create(
-        model="claude-opus-4-5",
-        max_tokens=300,
-        messages=[{"role": "user", "content": prompt}],
-    )
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}],
+        )
 
-    text = (response.content[0].text or "").strip()
-    if not text:
-        logger.warning("[Claude] Empty response for question: %.80s", question)
-        raise RuntimeError("Claude returned an empty response.")
+        logger.info("[Claude] Response received. Content blocks: %d", len(response.content))
 
-    answer = _truncate_words(text, 150)
-    logger.info("[Claude] Generated answer (%d words): %.100s...", len(answer.split()), answer)
-    return answer
+        if not response.content:
+            logger.error("[Claude] Response has no content blocks!")
+            raise RuntimeError("Claude returned no content.")
+
+        text = (response.content[0].text or "").strip()
+        if not text:
+            logger.warning("[Claude] Empty text in response for question: %.80s", question)
+            raise RuntimeError("Claude returned an empty response.")
+
+        answer = _truncate_words(text, 150)
+        logger.info("[Claude] SUCCESS! Generated answer (%d words): %.200s", len(answer.split()), answer)
+        print(f"[Claude] ANSWER: {answer}")  # Also print to stdout for Railway logs
+        return answer
+
+    except anthropic.APIError as e:
+        logger.error("[Claude] API Error: %s (status=%s)", e.message, getattr(e, 'status_code', 'N/A'))
+        raise RuntimeError(f"Claude API error: {e.message}")
+    except Exception as e:
+        logger.error("[Claude] Unexpected error: %s", str(e), exc_info=True)
+        raise
 
 
 # ---------- 2) Connect to PostgreSQL with SQLAlchemy ----------

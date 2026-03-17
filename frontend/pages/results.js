@@ -5,13 +5,6 @@ import { useEffect, useMemo, useState } from "react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
-function pct(score) {
-  if (score === null || score === undefined) return null;
-  const n = Number(score);
-  if (Number.isNaN(n)) return null;
-  return Math.max(0, Math.min(100, Math.round(n * 100)));
-}
-
 export default function ResultsPage() {
   const router = useRouter();
   const q = typeof router.query.q === "string" ? router.query.q : "";
@@ -139,7 +132,6 @@ export default function ResultsPage() {
             ) : (
               <div className="space-y-4">
                 {results.map((r, idx) => {
-                  const scorePct = pct(r.score);
                   const hasAnswer = typeof r.answer === "string" && r.answer.trim().length > 0;
 
                   return (
@@ -147,42 +139,19 @@ export default function ResultsPage() {
                       key={r.id}
                       className="group rounded-2xl border border-slate-200/80 bg-white p-6 shadow-lg shadow-slate-200/50 transition-all hover:shadow-xl hover:border-brand-200"
                     >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-100 text-xs font-bold text-brand-700">
-                              {idx + 1}
-                            </span>
-                            <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
-                              {r.category || "General"}
-                            </span>
-                          </div>
-                          <p className="mt-3 text-lg font-semibold leading-snug text-slate-900 group-hover:text-brand-700 transition-colors">
-                            {r.question}
-                          </p>
-                        </div>
-
-                        <div className="shrink-0 rounded-2xl bg-gradient-to-br from-brand-50 to-brand-100 px-4 py-3 text-center shadow-inner">
-                          <p className="text-[10px] font-bold uppercase tracking-wider text-brand-600">Match</p>
-                          <p className="text-2xl font-bold text-brand-700">
-                            {scorePct !== null ? scorePct : "—"}
-                            <span className="text-sm">%</span>
-                          </p>
-                        </div>
+                      <div className="flex items-center gap-2">
+                        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-100 text-xs font-bold text-brand-700">
+                          {idx + 1}
+                        </span>
+                        <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
+                          {r.category || "General"}
+                        </span>
                       </div>
+                      <p className="mt-3 text-lg font-semibold leading-snug text-slate-900 group-hover:text-brand-700 transition-colors">
+                        {r.question}
+                      </p>
 
-                      {scorePct !== null && (
-                        <div className="mt-4">
-                          <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                            <div
-                              className="h-full rounded-full bg-gradient-to-r from-brand-400 to-brand-500 transition-all duration-500"
-                              style={{ width: `${Math.max(scorePct, 2)}%` }}
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      {/* AI Answer section — always visible */}
+                      {/* AI Answer section */}
                       <div className="mt-4 rounded-xl border border-brand-200/60 bg-brand-50/70 p-4">
                         <p className="text-xs font-bold uppercase tracking-wider text-brand-700">
                           💊 RxBuddy Answer
