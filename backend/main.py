@@ -39,6 +39,62 @@ def _database_url() -> str:
     return url
 
 
+def _gemini_api_key() -> str | None:
+    key = os.getenv("GEMINI_API_KEY", "").strip()
+    return key or None
+
+
+def _truncate_words(text: str, max_words: int) -> str:
+    words = text.split()
+    if len(words) <= max_words:
+        return text.strip()
+    return (" ".join(words[:max_words])).strip()
+
+
+def _generate_gemini_answer(question: str) -> str:
+    """
+    Generate a short, friendly, plain-English answer using Google Gemini.
+    Output is kept under ~150 words and follows the requested format.
+    """
+    api_key = _gemini_api_key()
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is missing.")
+
+    # Import inside the function so the app can still boot even if the package
+    # isn't installed in some environments.
+    import google.generativeai as genai
+
+    genai.configure(api_key=api_key)
+
+    prompt = f"""
+You are RxBuddy, a helpful pharmacist-style assistant for everyday patients (not clinicians).
+Write a plain-English answer in UNDER 150 WORDS.
+Use exactly these 4 headings and keep each section short:
+
+What it is:
+What to do:
+What to avoid:
+When to see a doctor:
+
+Question: {question}
+""".strip()
+
+    model = genai.GenerativeModel("gemini-1.5-flash")
+    resp = model.generate_content(
+        prompt,
+        generation_config={
+            "temperature": 0.4,
+            "max_output_tokens": 220,
+        },
+    )
+
+    text = (getattr(resp, "text", None) or "").strip()
+    if not text:
+        raise RuntimeError("Gemini returned an empty response.")
+
+    return _truncate_words(text, 150)
+
+
 # ---------- 2) Connect to PostgreSQL with SQLAlchemy ----------
 engine = create_engine(_database_url(), future=True, pool_pre_ping=True)
 metadata = MetaData()
@@ -151,6 +207,7 @@ class QuestionMatch(BaseModel):
     category: Optional[str] = None
     tags: list[str] = []
     score: Optional[float] = None
+    answer: Optional[str] = None
 
 
 class SearchResponse(BaseModel):
@@ -168,6 +225,33 @@ class LogRequest(BaseModel):
 class LogResponse(BaseModel):
     ok: bool
     log_id: int
+
+
+# ---------- 4b) AI answer endpoint ----------
+class AnswerRequest(BaseModel):
+    question: str = Field(..., min_length=1, description="Patient question to answer")
+
+
+class AnswerResponse(BaseModel):
+    question: str
+    answer: str
+
+
+@app.post("/answer", response_model=AnswerResponse)
+def answer(req: AnswerRequest) -> AnswerResponse:
+    q = req.question.strip()
+    if not q:
+        raise HTTPException(status_code=400, detail="question cannot be empty")
+
+    try:
+        a = _generate_gemini_answer(q)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Gemini error while generating answer. Make sure GEMINI_API_KEY is set. ({e})",
+        )
+
+    return AnswerResponse(question=q, answer=a)
 
 
 # ---------- 5) ML search ----------
@@ -223,6 +307,7 @@ def search(req: SearchRequest) -> SearchResponse:
                         questions_table.c.question,
                         questions_table.c.category,
                         questions_table.c.tags,
+                        questions_table.c.answer,
                     ).where(questions_table.c.id.in_(match_ids))
                 )
                 .mappings()
@@ -237,11 +322,27 @@ def search(req: SearchRequest) -> SearchResponse:
     row_by_id = {int(r["id"]): dict(r) for r in rows}
 
     results: list[QuestionMatch] = []
+    generated_answers: dict[int, str] = {}
+
     for qid in match_ids:
         r = row_by_id.get(int(qid))
         if not r:
             continue
         tags = r.get("tags") or []
+
+        existing_answer = r.get("answer")
+        answer_text: str | None = str(existing_answer).strip() if existing_answer else None
+
+        # If Gemini key is available and we don't already have an answer cached in DB,
+        # generate one and save it so next time it's instant.
+        if not answer_text and _gemini_api_key():
+            try:
+                answer_text = _generate_gemini_answer(str(r["question"]))
+                generated_answers[int(r["id"])] = answer_text
+            except Exception:
+                # Don't break search if Gemini fails; just return results without answers.
+                answer_text = None
+
         results.append(
             QuestionMatch(
                 id=int(r["id"]),
@@ -249,8 +350,22 @@ def search(req: SearchRequest) -> SearchResponse:
                 category=r.get("category"),
                 tags=[str(t) for t in tags],
                 score=score_by_id.get(int(qid)),
+                answer=answer_text,
             )
         )
+
+    # Persist any newly generated answers (best-effort).
+    if generated_answers:
+        try:
+            with engine.begin() as conn:
+                for qid, ans in generated_answers.items():
+                    conn.execute(
+                        questions_table.update()
+                        .where(questions_table.c.id == int(qid))
+                        .values(answer=ans)
+                    )
+        except Exception:
+            pass
 
     # Log every search so the Streamlit dashboard has data.
     # We store matched_question_id as the top result (if any).
