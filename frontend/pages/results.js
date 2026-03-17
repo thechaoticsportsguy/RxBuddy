@@ -144,6 +144,8 @@ export default function ResultsPage() {
   const [error, setError] = useState("");
   const [results, setResults] = useState([]);
   const [didYouMean, setDidYouMean] = useState(null);
+  const [source, setSource] = useState("database");
+  const [savedToDb, setSavedToDb] = useState(false);
 
   const [pubmedLoading, setPubmedLoading] = useState(false);
   const [pubmedError, setPubmedError] = useState("");
@@ -172,6 +174,8 @@ export default function ResultsPage() {
       setLoading(true);
       setError("");
       setDidYouMean(null);
+      setSource("database");
+      setSavedToDb(false);
       try {
         const res = await fetch(`${API_BASE}/search`, {
           method: "POST",
@@ -188,6 +192,8 @@ export default function ResultsPage() {
         if (!cancelled) {
           setResults(Array.isArray(data.results) ? data.results : []);
           setDidYouMean(data.did_you_mean || null);
+          setSource(data.source || "database");
+          setSavedToDb(data.saved_to_db || false);
         }
       } catch (e) {
         if (!cancelled) setError(e?.message || "Could not load results.");
@@ -361,9 +367,24 @@ export default function ResultsPage() {
               <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-lg shadow-slate-200/40">
                 <div className="flex items-center justify-between gap-3">
                   <h2 className="text-sm font-extrabold tracking-tight text-slate-900">Direct Answer</h2>
-                  <span className="rounded-full bg-brand-50 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-brand-700 ring-1 ring-brand-200">
-                    interaction analysis
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {/* Source label */}
+                    {source === "database" ? (
+                      <span className="rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-emerald-700 ring-1 ring-emerald-200">
+                        💊 RxBuddy Answer
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-violet-50 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-violet-700 ring-1 ring-violet-200">
+                        🤖 AI Answer
+                      </span>
+                    )}
+                    {/* Saved to DB badge */}
+                    {savedToDb && (
+                      <span className="rounded-full bg-green-50 px-2 py-1 text-[10px] font-medium text-green-700 ring-1 ring-green-200">
+                        ✅ Added to database
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Did you mean? banner */}

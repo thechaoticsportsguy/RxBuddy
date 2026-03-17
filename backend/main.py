@@ -126,6 +126,133 @@ def spell_check_query(query: str) -> str | None:
     return None
 
 
+# ---------- Confidence threshold and self-learning ----------
+CONFIDENCE_THRESHOLD = 0.35  # If best match score is below this, use Claude for live answer
+
+# 16 pharmacy categories for self-learning classification
+PHARMACY_CATEGORIES = [
+    "Drug Interactions",
+    "Dosage",
+    "Side Effects",
+    "Warnings",
+    "Contraindications",
+    "Pregnancy",
+    "Storage",
+    "Children",
+    "Special Populations",
+    "Overdose",
+    "Adverse Reactions",
+    "General",
+    "Patient Counseling",
+    "Patient Information",
+    "Alcohol",
+    "Food Interactions",
+]
+
+
+def _is_valid_pharmacy_question(question: str) -> bool:
+    """
+    Ask Claude if this is a valid pharmacy question worth saving.
+    Returns True if YES, False otherwise.
+    """
+    api_key = _anthropic_api_key()
+    if not api_key:
+        return False
+
+    import anthropic
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        prompt = (
+            f"Is this a valid pharmacy/medication question worth saving to a medical FAQ database? "
+            f"Answer only YES or NO.\n\nQuestion: {question}"
+        )
+        response = client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=10,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = (response.content[0].text or "").strip().upper()
+        return text.startswith("YES")
+    except Exception as e:
+        logger.warning("[Claude] Failed to validate question: %s", e)
+        return False
+
+
+def _get_best_category(question: str) -> str:
+    """
+    Ask Claude to assign the best category from our 16 categories.
+    Returns category name or "General" as fallback.
+    """
+    api_key = _anthropic_api_key()
+    if not api_key:
+        return "General"
+
+    import anthropic
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        categories_str = ", ".join(PHARMACY_CATEGORIES)
+        prompt = (
+            f"Classify this pharmacy question into exactly one category.\n"
+            f"Categories: {categories_str}\n\n"
+            f"Question: {question}\n\n"
+            f"Reply with only the category name, nothing else."
+        )
+        response = client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=30,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = (response.content[0].text or "").strip()
+        # Find closest matching category
+        for cat in PHARMACY_CATEGORIES:
+            if cat.lower() in text.lower():
+                return cat
+        return "General"
+    except Exception as e:
+        logger.warning("[Claude] Failed to categorize question: %s", e)
+        return "General"
+
+
+def _save_question_to_db(question: str, answer: str, category: str) -> int | None:
+    """
+    Save a new question + answer to the questions table.
+    Returns the new question ID or None on failure.
+    """
+    try:
+        with engine.connect() as conn:
+            from sqlalchemy import text
+            r = conn.execute(text("SELECT COALESCE(MAX(id), 0) FROM questions"))
+            next_id = int(r.scalar() or 0) + 1
+
+        # Extract tags from question (simple heuristic: drug names)
+        q_lower = question.lower()
+        tags = [category.lower()]
+        # Add common drug names if found
+        common_drugs = ["ibuprofen", "tylenol", "acetaminophen", "aspirin", "naproxen", "amoxicillin"]
+        for drug in common_drugs:
+            if drug in q_lower:
+                tags.append(drug)
+
+        with engine.begin() as conn:
+            conn.execute(
+                questions_table.insert().values(
+                    id=next_id,
+                    question=question,
+                    category=category,
+                    tags=tags,
+                    answer=answer,
+                    created_at=_utc_now(),
+                )
+            )
+        logger.info("[Self-Learning] Saved new question #%d: %.60s...", next_id, question)
+        return next_id
+    except Exception as e:
+        logger.error("[Self-Learning] Failed to save question: %s", e, exc_info=True)
+        return None
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -417,6 +544,8 @@ class SearchResponse(BaseModel):
     query: str
     results: list[QuestionMatch]
     did_you_mean: Optional[str] = None  # Spell check suggestion (only if something changed)
+    source: str = "database"  # "database" or "ai_generated"
+    saved_to_db: bool = False  # True if AI-generated question was saved to database
 
 
 class LogRequest(BaseModel):
@@ -469,12 +598,14 @@ def search(req: SearchRequest) -> SearchResponse:
     """
     Takes a user query and returns the top 5 matching questions.
 
-    How it works (simple version):
+    How it works:
     1) Normalize query (fix misspellings, slang, filler words) — zero API calls
     2) Run spell check and generate "did you mean?" suggestion
     3) Use TF-IDF + cosine similarity to find the best matching question IDs
-    4) Fetch those rows from Postgres (so the API always reflects the database)
-    5) Return the top 5 (show original query to user; search used cleaned version)
+    4) Check confidence threshold:
+       - If best score >= 0.35 → return database results (source="database")
+       - If best score < 0.35 → generate live Claude answer (source="ai_generated")
+    5) Self-learning: if AI-generated and valid pharmacy question, save to DB
     """
     user_query = req.query.strip()
     if not user_query:
@@ -494,8 +625,6 @@ def search(req: SearchRequest) -> SearchResponse:
         match_ids = [m.id for m in matches]
         score_by_id = {m.id: float(m.score) for m in matches}
     elif engine_name == "knn":
-        # KNN uses sentence-transformers. On Railway we may not install it (too large),
-        # so if it isn't available we gracefully fall back to TF-IDF.
         try:
             matches2 = knn_search(search_query, top_k=top_k)
             match_ids = [m.id for m in matches2]
@@ -507,8 +636,79 @@ def search(req: SearchRequest) -> SearchResponse:
     else:
         raise HTTPException(status_code=400, detail="engine must be 'tfidf' or 'knn'")
 
+    # Get the best match score
+    best_score = max(score_by_id.values()) if score_by_id else 0.0
+    source = "database"
+    saved_to_db = False
+
+    # Check confidence threshold
+    if best_score < CONFIDENCE_THRESHOLD or not match_ids:
+        # Low confidence: generate live Claude answer
+        logger.info("[Confidence] Best score %.3f < threshold %.3f, using Claude", best_score, CONFIDENCE_THRESHOLD)
+
+        if _anthropic_api_key():
+            try:
+                live_answer = _generate_ai_answer(original_query)
+                source = "ai_generated"
+
+                # Self-learning: check if this is a valid pharmacy question
+                if _is_valid_pharmacy_question(original_query):
+                    category = _get_best_category(original_query)
+                    new_id = _save_question_to_db(original_query, live_answer, category)
+                    if new_id:
+                        saved_to_db = True
+                        # Return the newly saved question as a result
+                        results = [
+                            QuestionMatch(
+                                id=new_id,
+                                question=original_query,
+                                category=category,
+                                tags=[category.lower()],
+                                score=1.0,
+                                answer=live_answer,
+                            )
+                        ]
+                        _log_search(user_query, new_id)
+                        return SearchResponse(
+                            query=original_query,
+                            results=results,
+                            did_you_mean=did_you_mean,
+                            source=source,
+                            saved_to_db=saved_to_db,
+                        )
+
+                # Return AI-generated answer without saving
+                results = [
+                    QuestionMatch(
+                        id=0,  # No database ID
+                        question=original_query,
+                        category="General",
+                        tags=[],
+                        score=best_score,
+                        answer=live_answer,
+                    )
+                ]
+                _log_search(user_query, None)
+                return SearchResponse(
+                    query=original_query,
+                    results=results,
+                    did_you_mean=did_you_mean,
+                    source=source,
+                    saved_to_db=saved_to_db,
+                )
+            except Exception as exc:
+                logger.error("[Claude] Failed to generate live answer: %s", exc, exc_info=True)
+                # Fall through to database results
+
+    # High confidence: return database results
     if not match_ids:
-        return SearchResponse(query=original_query, results=[], did_you_mean=did_you_mean)
+        return SearchResponse(
+            query=original_query,
+            results=[],
+            did_you_mean=did_you_mean,
+            source=source,
+            saved_to_db=saved_to_db,
+        )
 
     try:
         with engine.connect() as conn:
@@ -525,7 +725,7 @@ def search(req: SearchRequest) -> SearchResponse:
                 .mappings()
                 .all()
             )
-    except Exception as e:  # pragma: no cover
+    except Exception as e:
         raise HTTPException(
             status_code=500,
             detail=f"Database error while searching. Did you run `python data/seed_db.py`? ({e})",
@@ -545,6 +745,7 @@ def search(req: SearchRequest) -> SearchResponse:
         existing_answer = r.get("answer")
         answer_text: str | None = str(existing_answer).strip() if existing_answer else None
 
+        # Generate answer for database questions that don't have one yet
         if not answer_text and _anthropic_api_key():
             try:
                 answer_text = _generate_ai_answer(str(r["question"]))
@@ -564,7 +765,7 @@ def search(req: SearchRequest) -> SearchResponse:
             )
         )
 
-    # Persist any newly generated answers (best-effort).
+    # Persist any newly generated answers (best-effort)
     if generated_answers:
         try:
             with engine.begin() as conn:
@@ -578,26 +779,33 @@ def search(req: SearchRequest) -> SearchResponse:
         except Exception as exc:
             logger.error("[DB] Failed to cache Claude answers: %s", exc, exc_info=True)
 
-    # Log every search so the Streamlit dashboard has data.
-    # We store matched_question_id as the top result (if any).
+    _log_search(user_query, match_ids[0] if match_ids else None)
+
+    return SearchResponse(
+        query=original_query,
+        results=results,
+        did_you_mean=did_you_mean,
+        source=source,
+        saved_to_db=saved_to_db,
+    )
+
+
+def _log_search(query: str, matched_question_id: int | None) -> None:
+    """Log a search to the search_logs table (best-effort)."""
     try:
-        top_match_id = int(match_ids[0]) if match_ids else None
         with engine.begin() as conn:
             conn.execute(
                 search_logs_table.insert(),
                 {
-                    "query": user_query,
-                    "matched_question_id": top_match_id,
+                    "query": query,
+                    "matched_question_id": matched_question_id,
                     "clicked": False,
                     "session_id": None,
                     "searched_at": _utc_now(),
                 },
             )
     except Exception:
-        # If logging fails, we still want search to work for the user.
         pass
-
-    return SearchResponse(query=original_query, results=results, did_you_mean=did_you_mean)
 
 
 @app.post("/log", response_model=LogResponse)
