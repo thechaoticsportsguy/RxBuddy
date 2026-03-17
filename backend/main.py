@@ -54,17 +54,17 @@ def _truncate_words(text: str, max_words: int) -> str:
 def _generate_gemini_answer(question: str) -> str:
     """
     Generate a short, friendly, plain-English answer using Google Gemini.
+    Uses the new google-genai SDK with gemini-2.0-flash model.
     Output is kept under ~150 words and follows the requested format.
     """
     api_key = _gemini_api_key()
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is missing.")
 
-    # Import inside the function so the app can still boot even if the package
-    # isn't installed in some environments.
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types
 
-    genai.configure(api_key=api_key)
+    client = genai.Client(api_key=api_key)
 
     prompt = f"""
 You are RxBuddy, a helpful pharmacist-style assistant for everyday patients (not clinicians).
@@ -79,16 +79,16 @@ When to see a doctor:
 Question: {question}
 """.strip()
 
-    model = genai.GenerativeModel("gemini-1.5-flash")
-    resp = model.generate_content(
-        prompt,
-        generation_config={
-            "temperature": 0.4,
-            "max_output_tokens": 220,
-        },
+    resp = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            temperature=0.4,
+            max_output_tokens=220,
+        ),
     )
 
-    text = (getattr(resp, "text", None) or "").strip()
+    text = (resp.text or "").strip()
     if not text:
         raise RuntimeError("Gemini returned an empty response.")
 
