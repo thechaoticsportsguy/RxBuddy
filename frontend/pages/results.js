@@ -43,6 +43,7 @@ export default function ResultsPage() {
           throw new Error(text || `Request failed (${res.status})`);
         }
         const data = await res.json();
+        console.log("[RxBuddy] Full /search response:", JSON.stringify(data, null, 2));
         if (!cancelled) setResults(Array.isArray(data.results) ? data.results : []);
       } catch (e) {
         if (!cancelled) setError(e?.message || "Could not load results.");
@@ -139,6 +140,8 @@ export default function ResultsPage() {
               <div className="space-y-4">
                 {results.map((r, idx) => {
                   const scorePct = pct(r.score);
+                  const hasAnswer = typeof r.answer === "string" && r.answer.trim().length > 0;
+
                   return (
                     <div
                       key={r.id}
@@ -157,27 +160,15 @@ export default function ResultsPage() {
                           <p className="mt-3 text-lg font-semibold leading-snug text-slate-900 group-hover:text-brand-700 transition-colors">
                             {r.question}
                           </p>
-
-                          {typeof r.answer === "string" && r.answer.trim().length > 0 && (
-                            <div className="mt-4 rounded-xl border border-brand-200/60 bg-brand-50/70 p-4">
-                              <p className="text-xs font-bold uppercase tracking-wider text-brand-700">
-                                💊 RxBuddy Answer
-                              </p>
-                              <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-slate-700">
-                                {r.answer}
-                              </p>
-                            </div>
-                          )}
                         </div>
-                        {scorePct !== null && (
-                          <div className="shrink-0 rounded-2xl bg-gradient-to-br from-brand-50 to-brand-100 px-4 py-3 text-center shadow-inner">
-                            <p className="text-[10px] font-bold uppercase tracking-wider text-brand-600">Match</p>
-                            <p className="text-2xl font-bold text-brand-700">
-                              {scorePct}
-                              <span className="text-sm">%</span>
-                            </p>
-                          </div>
-                        )}
+
+                        <div className="shrink-0 rounded-2xl bg-gradient-to-br from-brand-50 to-brand-100 px-4 py-3 text-center shadow-inner">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-brand-600">Match</p>
+                          <p className="text-2xl font-bold text-brand-700">
+                            {scorePct !== null ? scorePct : "—"}
+                            <span className="text-sm">%</span>
+                          </p>
+                        </div>
                       </div>
 
                       {scorePct !== null && (
@@ -185,11 +176,27 @@ export default function ResultsPage() {
                           <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
                             <div
                               className="h-full rounded-full bg-gradient-to-r from-brand-400 to-brand-500 transition-all duration-500"
-                              style={{ width: `${scorePct}%` }}
+                              style={{ width: `${Math.max(scorePct, 2)}%` }}
                             />
                           </div>
                         </div>
                       )}
+
+                      {/* AI Answer section — always visible */}
+                      <div className="mt-4 rounded-xl border border-brand-200/60 bg-brand-50/70 p-4">
+                        <p className="text-xs font-bold uppercase tracking-wider text-brand-700">
+                          💊 RxBuddy Answer
+                        </p>
+                        {hasAnswer ? (
+                          <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-slate-700">
+                            {r.answer}
+                          </p>
+                        ) : (
+                          <p className="mt-2 text-sm italic text-slate-400">
+                            Generating answer…
+                          </p>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
