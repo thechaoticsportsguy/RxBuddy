@@ -143,6 +143,7 @@ export default function ResultsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [results, setResults] = useState([]);
+  const [didYouMean, setDidYouMean] = useState(null);
 
   const [pubmedLoading, setPubmedLoading] = useState(false);
   const [pubmedError, setPubmedError] = useState("");
@@ -170,6 +171,7 @@ export default function ResultsPage() {
     async function run() {
       setLoading(true);
       setError("");
+      setDidYouMean(null);
       try {
         const res = await fetch(`${API_BASE}/search`, {
           method: "POST",
@@ -183,7 +185,10 @@ export default function ResultsPage() {
         }
         const data = await res.json();
         console.log("[RxBuddy] Full /search response:", JSON.stringify(data, null, 2));
-        if (!cancelled) setResults(Array.isArray(data.results) ? data.results : []);
+        if (!cancelled) {
+          setResults(Array.isArray(data.results) ? data.results : []);
+          setDidYouMean(data.did_you_mean || null);
+        }
       } catch (e) {
         if (!cancelled) setError(e?.message || "Could not load results.");
       } finally {
@@ -360,6 +365,22 @@ export default function ResultsPage() {
                     interaction analysis
                   </span>
                 </div>
+
+                {/* Did you mean? banner */}
+                {didYouMean && (
+                  <div
+                    className="mt-4 cursor-pointer rounded-xl border border-amber-300 bg-amber-50 p-4 transition-colors hover:bg-amber-100"
+                    onClick={() => {
+                      router.push(`/results?q=${encodeURIComponent(didYouMean)}&engine=${encodeURIComponent(engine)}`);
+                    }}
+                  >
+                    <p className="text-sm font-medium text-amber-900">
+                      <span className="font-bold">Did you mean:</span>{" "}
+                      <span className="underline">{didYouMean}</span>?
+                    </p>
+                    <p className="mt-1 text-xs text-amber-700">Click to search with corrected spelling</p>
+                  </div>
+                )}
 
                 <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Question</p>

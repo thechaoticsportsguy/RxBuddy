@@ -11,3 +11,4 @@ sentence-transformers
 streamlit
 plotly
 anthropic
+pyspellchecker

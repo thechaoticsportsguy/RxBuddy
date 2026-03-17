@@ -6,7 +6,9 @@ import re
 from datetime import datetime, timezone
 from typing import Optional
 
+import requests as http_requests
 from dotenv import load_dotenv
+from spellchecker import SpellChecker
 
 logger = logging.getLogger("rxbuddy")
 logging.basicConfig(level=logging.INFO)
@@ -20,6 +22,108 @@ from sqlalchemy.dialects.postgresql import ARRAY, VARCHAR
 # ---------- 1) Load secrets from .env ----------
 # `.env` lives in your project root and is NOT committed to GitHub.
 load_dotenv()
+
+
+# ---------- 1b) Medical dictionary from RxNorm (cached on startup) ----------
+# We fetch the top 1,000 drug names from RxNorm once at startup.
+# These are added to the spell checker so drug names aren't flagged as misspelled.
+RXNORM_DISPLAYNAMES_URL = "https://rxnav.nlm.nih.gov/REST/Prescribe/displaynames.json"
+_medical_terms: set[str] = set()
+_spell_checker: SpellChecker | None = None
+
+
+def _fetch_rxnorm_drug_names(limit: int = 1000) -> set[str]:
+    """
+    Fetch drug names from RxNorm Prescribe API (displaynames endpoint).
+    Returns a set of lowercase drug names for spell checking.
+    """
+    try:
+        logger.info("[RxNorm] Fetching drug names from %s...", RXNORM_DISPLAYNAMES_URL)
+        resp = http_requests.get(
+            RXNORM_DISPLAYNAMES_URL,
+            headers={"User-Agent": "RxBuddy/1.0"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        terms = data.get("displayTermsList", {}).get("term", [])
+        if not isinstance(terms, list):
+            terms = [terms] if terms else []
+        # Take first N terms, lowercase, filter short/non-alpha
+        drugs = set()
+        for t in terms[:limit]:
+            name = str(t).strip().lower()
+            # Only add reasonable drug names (3+ chars, mostly letters)
+            if len(name) >= 3 and any(c.isalpha() for c in name):
+                drugs.add(name)
+                # Also add individual words for multi-word drug names
+                for word in name.split():
+                    if len(word) >= 3 and word.isalpha():
+                        drugs.add(word)
+        logger.info("[RxNorm] Loaded %d medical terms", len(drugs))
+        return drugs
+    except Exception as e:
+        logger.warning("[RxNorm] Failed to fetch drug names: %s", e)
+        return set()
+
+
+def _init_spell_checker() -> None:
+    """Initialize the spell checker with medical terms. Called once at startup."""
+    global _medical_terms, _spell_checker
+    _medical_terms = _fetch_rxnorm_drug_names(limit=1000)
+    _spell_checker = SpellChecker()
+    # Add medical terms to the spell checker's known words
+    if _medical_terms:
+        _spell_checker.word_frequency.load_words(_medical_terms)
+    # Also add common drug-related words
+    extra_medical = {
+        "tylenol", "ibuprofen", "acetaminophen", "naproxen", "aspirin",
+        "amoxicillin", "metformin", "lisinopril", "omeprazole", "gabapentin",
+        "medication", "prescription", "dosage", "antibiotic", "painkiller",
+        "allergic", "interaction", "contraindication", "pharmacy", "pharmacist",
+    }
+    _spell_checker.word_frequency.load_words(extra_medical)
+    logger.info("[SpellChecker] Initialized with %d medical terms + %d extra", len(_medical_terms), len(extra_medical))
+
+
+def spell_check_query(query: str) -> str | None:
+    """
+    Run spell check on a query. Returns corrected query if changes were made, else None.
+    Skips words that are in the medical dictionary.
+    """
+    if _spell_checker is None:
+        return None
+    words = query.lower().split()
+    if not words:
+        return None
+    corrected = []
+    changed = False
+    for word in words:
+        # Skip punctuation-only or very short words
+        clean = re.sub(r"[^\w]", "", word)
+        if len(clean) < 3:
+            corrected.append(word)
+            continue
+        # Skip if it's a known medical term
+        if clean in _medical_terms:
+            corrected.append(word)
+            continue
+        # Skip if it's in the spell checker's dictionary
+        if clean in _spell_checker:
+            corrected.append(word)
+            continue
+        # Get correction suggestion
+        correction = _spell_checker.correction(clean)
+        if correction and correction != clean:
+            # Preserve original punctuation
+            new_word = word.replace(clean, correction)
+            corrected.append(new_word)
+            changed = True
+        else:
+            corrected.append(word)
+    if changed:
+        return " ".join(corrected)
+    return None
 
 
 def _utc_now() -> datetime:
@@ -279,6 +383,12 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+def startup_event() -> None:
+    """Initialize spell checker with RxNorm drug names on startup."""
+    _init_spell_checker()
+
+
 @app.get("/")
 def health_check() -> dict[str, str]:
     return {"status": "RxBuddy is live"}
@@ -306,6 +416,7 @@ class QuestionMatch(BaseModel):
 class SearchResponse(BaseModel):
     query: str
     results: list[QuestionMatch]
+    did_you_mean: Optional[str] = None  # Spell check suggestion (only if something changed)
 
 
 class LogRequest(BaseModel):
@@ -360,9 +471,10 @@ def search(req: SearchRequest) -> SearchResponse:
 
     How it works (simple version):
     1) Normalize query (fix misspellings, slang, filler words) — zero API calls
-    2) Use TF-IDF + cosine similarity to find the best matching question IDs
-    3) Fetch those rows from Postgres (so the API always reflects the database)
-    4) Return the top 5 (show original query to user; search used cleaned version)
+    2) Run spell check and generate "did you mean?" suggestion
+    3) Use TF-IDF + cosine similarity to find the best matching question IDs
+    4) Fetch those rows from Postgres (so the API always reflects the database)
+    5) Return the top 5 (show original query to user; search used cleaned version)
     """
     user_query = req.query.strip()
     if not user_query:
@@ -370,6 +482,9 @@ def search(req: SearchRequest) -> SearchResponse:
 
     original_query, cleaned_query = normalize_query(user_query)
     search_query = cleaned_query if cleaned_query else user_query
+
+    # Run spell check on the cleaned query
+    did_you_mean = spell_check_query(search_query)
 
     engine_name = (req.engine or "tfidf").strip().lower()
     top_k = int(req.top_k)
@@ -393,7 +508,7 @@ def search(req: SearchRequest) -> SearchResponse:
         raise HTTPException(status_code=400, detail="engine must be 'tfidf' or 'knn'")
 
     if not match_ids:
-        return SearchResponse(query=original_query, results=[])
+        return SearchResponse(query=original_query, results=[], did_you_mean=did_you_mean)
 
     try:
         with engine.connect() as conn:
@@ -482,7 +597,7 @@ def search(req: SearchRequest) -> SearchResponse:
         # If logging fails, we still want search to work for the user.
         pass
 
-    return SearchResponse(query=original_query, results=results)
+    return SearchResponse(query=original_query, results=results, did_you_mean=did_you_mean)
 
 
 @app.post("/log", response_model=LogResponse)
