@@ -621,23 +621,21 @@ STEP 10 — STRICT MISMATCH PREVENTION
 STEP 11 — FINAL SELF-AUDIT"""
 
         if fda_context:
-            prompt = f"""{system_prompt}
-
-FDA LABEL DATA (use as primary source when relevant):
-{fda_context}
-
-PATIENT QUESTION: {question}"""
+            user_content = (
+                f"FDA LABEL DATA (use as primary source when relevant):\n"
+                f"{fda_context}\n\n"
+                f"PATIENT QUESTION: {question}"
+            )
         else:
-            prompt = f"""{system_prompt}
-
-PATIENT QUESTION: {question}"""
+            user_content = f"PATIENT QUESTION: {question}"
 
         logger.info("[Claude] Sending question with FDA grounding to claude-sonnet-4-20250514: %.80s...", question)
 
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=600,  # Increased for chain of thought
-            messages=[{"role": "user", "content": prompt}],
+            max_tokens=600,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_content}],
         )
 
         logger.info("[Claude] Response received. Content blocks: %d", len(response.content))
@@ -1454,7 +1452,7 @@ def search(req: SearchRequest) -> SearchResponse:
                 tags=[str(t) for t in tags],
                 score=score_by_id.get(int(qid)),
                 answer=answer_text,
-                structured=_parse_structured_answer(answer_text, str(r["question"])) if answer_text else None,
+                structured=_parse_structured_answer(answer_text, user_query) if answer_text else None,
             )
         )
 
