@@ -56,7 +56,15 @@ function filterGenericAdvice(items) {
 }
 
 /**
- * Parse Claude's VERDICT-format answer
+ * Parse Claude's new Answer/Why/Important notes/Get medical help format.
+ *
+ * Expected format from API:
+ *   Answer: YES / NO / USUALLY YES / NEEDS REVIEW
+ *   Why: 1-2 simple sentences
+ *   Important notes: bullet list (lines starting with - or •)
+ *   Get medical help now if: bullet list
+ *
+ * Also supports legacy VERDICT / DIRECT formats as fallback.
  */
 function parseVerdictAnswer(answer, structured = null) {
   console.log("[parseVerdictAnswer] Raw answer:", answer);
@@ -65,15 +73,13 @@ function parseVerdictAnswer(answer, structured = null) {
   const text = String(answer || "").replace(/\r\n/g, "\n").trim();
   if (!text) return null;
 
-  // Parse the new VERDICT format
-  let verdict = null; // YES, NO, CONDITIONAL
-  let verdictReason = "";
-  let reason = "";
-  let avoidItems = [];
-  let alternatives = [];
-  let warnings = [];
-  let confidence = "MEDIUM";
-  let sources = "";
+  let verdict = null;       // YES, NO, USUALLY_YES, NEEDS_REVIEW
+  let why = "";
+  let importantNotes = [];
+  let medicalHelp = [];
+
+  // Track which multi-line section we're collecting bullets for
+  let currentSection = null;
 
   const lines = text.split("\n");
   for (const rawLine of lines) {
@@ -82,79 +88,108 @@ function parseVerdictAnswer(answer, structured = null) {
 
     const upperLine = line.toUpperCase();
 
-    if (upperLine.startsWith("VERDICT:")) {
-      const verdictText = line.substring(8).trim();
-      // Parse "YES — reason" or "NO — reason" or "CONDITIONAL — reason"
-      const dashIndex = verdictText.indexOf("—") !== -1 ? verdictText.indexOf("—") : verdictText.indexOf("-");
-      if (dashIndex > 0) {
-        const verdictPart = verdictText.substring(0, dashIndex).trim().toUpperCase();
-        verdictReason = verdictText.substring(dashIndex + 1).trim();
-        if (verdictPart.startsWith("YES")) verdict = "YES";
-        else if (verdictPart.startsWith("NO")) verdict = "NO";
-        else if (verdictPart.startsWith("CONDITIONAL")) verdict = "CONDITIONAL";
-      } else {
-        if (verdictText.toUpperCase().startsWith("YES")) verdict = "YES";
-        else if (verdictText.toUpperCase().startsWith("NO")) verdict = "NO";
-        else if (verdictText.toUpperCase().startsWith("CONDITIONAL")) verdict = "CONDITIONAL";
-        verdictReason = verdictText.replace(/^(YES|NO|CONDITIONAL)\s*/i, "").trim();
+    // --- New format ---
+    if (upperLine.startsWith("ANSWER:")) {
+      const val = line.substring(7).trim();
+      const upper = val.toUpperCase();
+      if (upper.startsWith("YES") || upper.startsWith("USUALLY YES")) {
+        verdict = upper.startsWith("USUALLY") ? "USUALLY_YES" : "YES";
+      } else if (upper.startsWith("NO")) {
+        verdict = "NO";
+      } else if (upper.startsWith("NEEDS REVIEW") || upper.startsWith("NEEDS_REVIEW")) {
+        verdict = "NEEDS_REVIEW";
       }
-    } else if (upperLine.startsWith("REASON:")) {
-      reason = line.substring(7).trim();
-    } else if (upperLine.startsWith("AVOID:")) {
-      avoidItems = line.substring(6).split("|").map(s => s.trim()).filter(Boolean);
-    } else if (upperLine.startsWith("ALTERNATIVES:")) {
-      alternatives = line.substring(13).split("|").map(s => s.trim()).filter(Boolean);
-    } else if (upperLine.startsWith("WARNING:")) {
-      warnings = line.substring(8).split("|").map(s => s.trim()).filter(Boolean);
-    } else if (upperLine.startsWith("CONFIDENCE:")) {
-      const conf = line.substring(11).trim().toUpperCase();
-      if (conf.includes("HIGH")) confidence = "HIGH";
-      else if (conf.includes("LOW")) confidence = "LOW";
-      else confidence = "MEDIUM";
-    } else if (upperLine.startsWith("SOURCES:")) {
-      sources = line.substring(8).trim();
+      currentSection = null;
+      continue;
     }
-    // Legacy format support
-    else if (upperLine.startsWith("DIRECT:")) {
-      const directText = line.substring(7).trim();
-      if (/^\s*yes\b/i.test(directText)) verdict = "YES";
-      else if (/^\s*no\b/i.test(directText)) verdict = "NO";
-      reason = directText.replace(/^(yes|no)[,.]?\s*/i, "").trim();
-    } else if (upperLine.startsWith("DO:")) {
-      // Legacy - ignore DO items
-    } else if (upperLine.startsWith("DOCTOR:")) {
-      warnings = line.substring(7).split("|").map(s => s.trim()).filter(Boolean);
+
+    if (upperLine.startsWith("WHY:")) {
+      why = line.substring(4).trim();
+      currentSection = null;
+      continue;
+    }
+
+    if (upperLine.startsWith("IMPORTANT NOTES:") || upperLine.startsWith("IMPORTANT NOTE:")) {
+      const inline = line.substring(line.indexOf(":") + 1).trim();
+      if (inline && !inline.startsWith("-") && !inline.startsWith("•")) {
+        importantNotes.push(inline);
+      }
+      currentSection = "notes";
+      continue;
+    }
+
+    if (upperLine.startsWith("GET MEDICAL HELP NOW IF:") || upperLine.startsWith("GET MEDICAL HELP IF:")) {
+      const inline = line.substring(line.indexOf(":") + 1).trim();
+      if (inline && !inline.startsWith("-") && !inline.startsWith("•")) {
+        medicalHelp.push(inline);
+      }
+      currentSection = "help";
+      continue;
+    }
+
+    // --- Legacy VERDICT format fallback ---
+    if (upperLine.startsWith("VERDICT:")) {
+      const vText = line.substring(8).trim();
+      const dashIdx = vText.indexOf("—") !== -1 ? vText.indexOf("—") : vText.indexOf("-");
+      const vPart = (dashIdx > 0 ? vText.substring(0, dashIdx) : vText).trim().toUpperCase();
+      if (vPart.startsWith("YES")) verdict = "YES";
+      else if (vPart.startsWith("NO")) verdict = "NO";
+      else if (vPart.startsWith("CONDITIONAL") || vPart.startsWith("USUALLY")) verdict = "USUALLY_YES";
+      currentSection = null;
+      continue;
+    }
+    if (upperLine.startsWith("REASON:")) {
+      why = why || line.substring(7).trim();
+      currentSection = null;
+      continue;
+    }
+    if (upperLine.startsWith("DIRECT:")) {
+      const dt = line.substring(7).trim();
+      if (/^\s*yes\b/i.test(dt)) verdict = verdict || "YES";
+      else if (/^\s*no\b/i.test(dt)) verdict = verdict || "NO";
+      why = why || dt.replace(/^(yes|no)[,.]?\s*/i, "").trim();
+      currentSection = null;
+      continue;
+    }
+    if (upperLine.startsWith("AVOID:") || upperLine.startsWith("WARNING:") || upperLine.startsWith("DOCTOR:")) {
+      const prefix = upperLine.startsWith("AVOID:") ? 6 : (upperLine.startsWith("WARNING:") ? 8 : 7);
+      const items = line.substring(prefix).split("|").map(s => s.trim()).filter(Boolean);
+      if (upperLine.startsWith("AVOID:")) importantNotes.push(...filterGenericAdvice(items));
+      else medicalHelp.push(...filterGenericAdvice(items));
+      currentSection = null;
+      continue;
+    }
+
+    // Collect bullet lines for the current multi-line section
+    if (currentSection) {
+      const bullet = line.replace(/^[-•*]\s*/, "").trim();
+      if (bullet) {
+        if (currentSection === "notes") importantNotes.push(bullet);
+        else if (currentSection === "help") medicalHelp.push(bullet);
+      }
     }
   }
 
   // Filter out generic advice
-  avoidItems = filterGenericAdvice(avoidItems);
-  alternatives = filterGenericAdvice(alternatives);
-  warnings = filterGenericAdvice(warnings);
+  importantNotes = filterGenericAdvice(importantNotes);
+  medicalHelp = filterGenericAdvice(medicalHelp);
 
-  // If no verdict parsed but we have text, try to detect from content
+  // Fallback verdict detection from body text
   if (!verdict && text) {
-    const lowerText = text.toLowerCase();
-    if (lowerText.includes("yes,") || lowerText.includes("yes you can") || lowerText.includes("it is safe")) {
-      verdict = "YES";
-    } else if (lowerText.includes("no,") || lowerText.includes("do not") || lowerText.includes("avoid") || lowerText.includes("not recommended")) {
-      verdict = "NO";
-    } else if (lowerText.includes("depends") || lowerText.includes("conditional") || lowerText.includes("sometimes")) {
-      verdict = "CONDITIONAL";
-    }
+    const lower = text.toLowerCase();
+    if (lower.includes("yes,") || lower.includes("yes you can") || lower.includes("it is safe")) verdict = "YES";
+    else if (lower.includes("usually yes")) verdict = "USUALLY_YES";
+    else if (lower.includes("no,") || lower.includes("do not") || lower.includes("not recommended")) verdict = "NO";
+    else if (lower.includes("needs review") || lower.includes("depends") || lower.includes("conditional")) verdict = "NEEDS_REVIEW";
   }
 
   const result = {
     verdict,
-    verdictReason: verdictReason || reason,
-    reason,
-    avoid: avoidItems,
-    alternatives,
-    warnings,
-    confidence,
-    sources,
+    why,
+    importantNotes,
+    medicalHelp,
     full: text,
-    hasContent: Boolean(verdict || reason || avoidItems.length || warnings.length),
+    hasContent: Boolean(verdict || why || importantNotes.length || medicalHelp.length),
   };
 
   console.log("[parseVerdictAnswer] Parsed result:", result);
@@ -388,11 +423,12 @@ export default function ResultsPage() {
     router.push(`/results?q=${encodeURIComponent(nextQ)}&engine=${encodeURIComponent(engine)}`);
   }
 
-  // Verdict styling
+  // Verdict styling — maps each verdict to colours + icon
   const verdictStyles = {
-    YES: { bg: "bg-emerald-50", border: "border-emerald-300", text: "text-emerald-800", icon: "✅", label: "YES" },
-    NO: { bg: "bg-rose-50", border: "border-rose-300", text: "text-rose-800", icon: "❌", label: "NO" },
-    CONDITIONAL: { bg: "bg-amber-50", border: "border-amber-300", text: "text-amber-800", icon: "⚠️", label: "CONDITIONAL" },
+    YES:         { bg: "bg-emerald-50", border: "border-emerald-300", text: "text-emerald-800", icon: "✅", label: "YES" },
+    USUALLY_YES: { bg: "bg-emerald-50", border: "border-emerald-300", text: "text-emerald-800", icon: "✅", label: "USUALLY YES" },
+    NO:          { bg: "bg-rose-50",    border: "border-rose-300",    text: "text-rose-800",    icon: "❌", label: "NO" },
+    NEEDS_REVIEW:{ bg: "bg-amber-50",   border: "border-amber-300",   text: "text-amber-800",   icon: "⚠️", label: "NEEDS REVIEW" },
   };
 
   const currentVerdict = parsedAnswer?.verdict ? verdictStyles[parsedAnswer.verdict] : null;
@@ -485,104 +521,63 @@ export default function ResultsPage() {
             </div>
           ) : (
             <>
-              {/* VERDICT BLOCK - Main Answer */}
+              {/* ANSWER BLOCK — big YES / NO / USUALLY YES / NEEDS REVIEW */}
               {currentVerdict && (
                 <div className={`mb-4 rounded-xl border-2 ${currentVerdict.border} ${currentVerdict.bg} p-5 shadow-sm`}>
                   <div className="flex items-start gap-3">
-                    <span className="text-3xl">{currentVerdict.icon}</span>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className={`text-xl font-bold ${currentVerdict.text}`}>{currentVerdict.label}</span>
-                        {parsedAnswer?.verdictReason && (
-                          <span className={`text-lg font-medium ${currentVerdict.text}`}>— {parsedAnswer.verdictReason}</span>
-                        )}
-                      </div>
-                      {parsedAnswer?.reason && (
-                        <p className="mt-2 text-base text-slate-700">{parsedAnswer.reason}</p>
+                    <span className="text-3xl leading-none">{currentVerdict.icon}</span>
+                    <div className="flex-1 min-w-0">
+                      <span className={`text-xl font-bold ${currentVerdict.text}`}>{currentVerdict.label}</span>
+                      {parsedAnswer?.why && (
+                        <p className="mt-2 text-base text-slate-700 leading-relaxed">{parsedAnswer.why}</p>
                       )}
-                      {/* Confidence & Sources */}
-                      <div className="mt-3 flex items-center gap-3 text-xs">
-                        {parsedAnswer?.confidence === "HIGH" && (
-                          <span className="rounded-full bg-emerald-200 px-2 py-0.5 font-medium text-emerald-800">High Confidence</span>
-                        )}
-                        {parsedAnswer?.confidence === "MEDIUM" && (
-                          <span className="rounded-full bg-amber-200 px-2 py-0.5 font-medium text-amber-800">Medium Confidence</span>
-                        )}
-                        {parsedAnswer?.confidence === "LOW" && (
-                          <span className="rounded-full bg-rose-200 px-2 py-0.5 font-medium text-rose-800">Low Confidence</span>
-                        )}
-                        {parsedAnswer?.sources && (
-                          <span className="text-slate-500">Source: {parsedAnswer.sources}</span>
-                        )}
-                      </div>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* Fallback if no verdict parsed */}
-              {!currentVerdict && parsedAnswer?.reason && (
+              {/* Fallback if no verdict parsed but we have a "why" */}
+              {!currentVerdict && parsedAnswer?.why && (
                 <div className="mb-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                  <p className="text-base text-slate-800">{parsedAnswer.reason}</p>
+                  <p className="text-base text-slate-800">{parsedAnswer.why}</p>
                 </div>
               )}
 
-              {/* Decision Blocks */}
-              <div className="grid gap-3 md:grid-cols-2 mb-4">
-                {/* Avoid Block */}
-                {parsedAnswer?.avoid?.length > 0 && (
-                  <div className="rounded-lg border border-rose-200 bg-white p-4 shadow-sm">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-lg">⚠️</span>
-                      <h3 className="font-semibold text-rose-800">Avoid</h3>
-                    </div>
-                    <ul className="space-y-1.5">
-                      {parsedAnswer.avoid.map((item, i) => (
-                        <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                          <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-rose-400 shrink-0" />
-                          <span>{item}</span>
-                        </li>
-                      ))}
-                    </ul>
+              {/* Important Notes — green box */}
+              {parsedAnswer?.importantNotes?.length > 0 && (
+                <div className="mb-4 rounded-lg border border-emerald-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">📋</span>
+                    <h3 className="font-semibold text-emerald-800">Important Notes</h3>
                   </div>
-                )}
+                  <ul className="space-y-1.5">
+                    {parsedAnswer.importantNotes.map((item, i) => (
+                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                        <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-emerald-400 shrink-0" />
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
-                {/* Alternatives Block */}
-                {parsedAnswer?.alternatives?.length > 0 && (
-                  <div className="rounded-lg border border-emerald-200 bg-white p-4 shadow-sm">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-lg">🟢</span>
-                      <h3 className="font-semibold text-emerald-800">Safe Alternatives</h3>
-                    </div>
-                    <ul className="space-y-1.5">
-                      {parsedAnswer.alternatives.map((item, i) => (
-                        <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                          <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-emerald-400 shrink-0" />
-                          <span>{item}</span>
-                        </li>
-                      ))}
-                    </ul>
+              {/* Get Medical Help Now If — red/amber box */}
+              {parsedAnswer?.medicalHelp?.length > 0 && (
+                <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 p-4 shadow-sm">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">🚨</span>
+                    <h3 className="font-semibold text-rose-800">Get Medical Help Now If</h3>
                   </div>
-                )}
-
-                {/* Warning Signs Block */}
-                {parsedAnswer?.warnings?.length > 0 && (
-                  <div className="rounded-lg border border-amber-200 bg-white p-4 shadow-sm md:col-span-2">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-lg">🚨</span>
-                      <h3 className="font-semibold text-amber-800">See a Doctor If</h3>
-                    </div>
-                    <ul className="grid gap-1.5 md:grid-cols-2">
-                      {parsedAnswer.warnings.map((item, i) => (
-                        <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                          <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-amber-400 shrink-0" />
-                          <span>{item}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
+                  <ul className="space-y-1.5">
+                    {parsedAnswer.medicalHelp.map((item, i) => (
+                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                        <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-rose-400 shrink-0" />
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               {/* Collapsible Full Answer */}
               {parsedAnswer?.full && (
