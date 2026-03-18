@@ -1,16 +1,40 @@
 import Head from "next/head";
 import { useRouter } from "next/router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 
 const CATEGORIES = [
   "Drug Interactions",
-  "Cold & Flu",
   "Pain Relief",
   "Allergies",
+  "Cold & Flu",
   "Sleep",
   "Dosage",
   "Pregnancy",
-  "Children",
+  "Side Effects",
+];
+
+const STATS = [
+  { value: "10,000+", label: "Questions" },
+  { value: "FDA", label: "Verified" },
+  { value: "Free", label: "Forever" },
+];
+
+const PLACEHOLDER_TEXT = "Ask about any medication...";
+
+// Decorative background pills with fixed positions to avoid hydration mismatch
+const FLOATING_PILLS = [
+  { w: 40, h: 16, x: 8, y: 12, dur: 10, delay: 0, rot: 15 },
+  { w: 55, h: 20, x: 85, y: 8, dur: 12, delay: 1, rot: -10 },
+  { w: 30, h: 12, x: 15, y: 75, dur: 9, delay: 2, rot: 30 },
+  { w: 50, h: 18, x: 78, y: 70, dur: 11, delay: 0.5, rot: -20 },
+  { w: 35, h: 14, x: 5, y: 45, dur: 13, delay: 3, rot: 5 },
+  { w: 45, h: 16, x: 92, y: 40, dur: 10, delay: 1.5, rot: -35 },
+  { w: 25, h: 10, x: 50, y: 5, dur: 14, delay: 2.5, rot: 45 },
+  { w: 60, h: 22, x: 30, y: 90, dur: 8, delay: 0, rot: -5 },
+  { w: 20, h: 8, x: 65, y: 85, dur: 15, delay: 3.5, rot: 25 },
+  { w: 38, h: 14, x: 42, y: 55, dur: 11, delay: 1, rot: -15 },
+  { w: 28, h: 10, x: 20, y: 30, dur: 12, delay: 4, rot: 10 },
+  { w: 48, h: 18, x: 70, y: 25, dur: 9, delay: 2, rot: -30 },
 ];
 
 function getSpeechRecognition() {
@@ -26,6 +50,36 @@ export default function HomePage() {
   const [supportsVoice, setSupportsVoice] = useState(false);
   const recognitionRef = useRef(null);
 
+  // Animation phases: entry → breathing → splitting → morphing → ready
+  const [phase, setPhase] = useState("entry");
+  const [typedText, setTypedText] = useState("");
+  const inputRef = useRef(null);
+
+  // Phase sequencing
+  useEffect(() => {
+    const t1 = setTimeout(() => setPhase("breathing"), 800);
+    const t2 = setTimeout(() => setPhase("splitting"), 1800);
+    const t3 = setTimeout(() => setPhase("morphing"), 2500);
+    const t4 = setTimeout(() => setPhase("ready"), 3500);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4); };
+  }, []);
+
+  // Typing animation for placeholder
+  useEffect(() => {
+    if (phase !== "ready") return;
+    let i = 0;
+    const interval = setInterval(() => {
+      if (i <= PLACEHOLDER_TEXT.length) {
+        setTypedText(PLACEHOLDER_TEXT.slice(0, i));
+        i++;
+      } else {
+        clearInterval(interval);
+      }
+    }, 50);
+    return () => clearInterval(interval);
+  }, [phase]);
+
+  // Voice recognition setup
   useEffect(() => {
     setSupportsVoice(!!getSpeechRecognition());
   }, []);
@@ -56,21 +110,16 @@ export default function HomePage() {
     recognitionRef.current = rec;
 
     return () => {
-      try {
-        rec.abort();
-      } catch {}
+      try { rec.abort(); } catch {}
       recognitionRef.current = null;
     };
   }, [supportsVoice]);
 
-  function goSearch(q) {
+  const goSearch = useCallback((q) => {
     const trimmed = (q || "").trim();
     if (!trimmed) return;
-    router.push({
-      pathname: "/results",
-      query: { q: trimmed, engine: "tfidf" },
-    });
-  }
+    router.push({ pathname: "/results", query: { q: trimmed, engine: "tfidf" } });
+  }, [router]);
 
   function toggleMic() {
     setVoiceError("");
@@ -80,161 +129,374 @@ export default function HomePage() {
     }
     const rec = recognitionRef.current;
     if (!rec) return;
-
     if (listening) {
-      try {
-        rec.stop();
-      } catch {}
+      try { rec.stop(); } catch {}
       setListening(false);
       return;
     }
-
     try {
       rec.start();
       setListening(true);
-    } catch (e) {
+    } catch {
       setListening(false);
       setVoiceError("Could not start the microphone. Try again.");
     }
   }
 
+  const phaseIndex = ["entry", "breathing", "splitting", "morphing", "ready"].indexOf(phase);
+  const isReady = phase === "ready";
+
   return (
     <>
       <Head>
         <title>RxBuddy — Your pocket pharmacist</title>
-        <meta
-          name="description"
-          content="Ask everyday medication questions and get fast, plain-English help."
-        />
+        <meta name="description" content="Ask everyday medication questions and get fast, plain-English help." />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-          rel="stylesheet"
-        />
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
       </Head>
 
-      <div className="min-h-screen bg-gradient-to-br from-brand-50 via-white to-brand-50/30" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
-        <div className="mx-auto max-w-2xl px-6 py-16">
-          {/* Header / Logo */}
-          <header className="text-center">
-            <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-brand-500 to-brand-600 text-white shadow-lg shadow-brand-500/30">
-              <svg className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-3-3v6m-7 4h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-              </svg>
+      <style jsx global>{`
+        @keyframes pillEntrance {
+          0%   { opacity: 0; transform: scale(0.5); }
+          70%  { transform: scale(1.05); }
+          100% { opacity: 1; transform: scale(1); }
+        }
+
+        @keyframes pillBreath {
+          0%, 100% { transform: scale(1); box-shadow: 0 20px 60px rgba(82,183,136,0.3); }
+          50%      { transform: scale(1.03); box-shadow: 0 20px 80px rgba(82,183,136,0.5); }
+        }
+
+        @keyframes splitTop {
+          0%   { transform: translateY(0) rotateX(0deg); opacity: 1; }
+          100% { transform: translateY(-100px) rotateX(-60deg); opacity: 0; }
+        }
+
+        @keyframes splitBottom {
+          0%   { transform: translateY(0) rotateX(0deg); opacity: 1; }
+          100% { transform: translateY(100px) rotateX(60deg); opacity: 0; }
+        }
+
+        @keyframes searchExpand {
+          0%   { width: 280px; opacity: 0; }
+          100% { width: min(600px, 90vw); opacity: 1; }
+        }
+
+        @keyframes fadeUp {
+          0%   { opacity: 0; transform: translateY(20px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes blink {
+          0%, 100% { opacity: 1; }
+          50%      { opacity: 0; }
+        }
+
+        @keyframes floatPill {
+          0%, 100% { transform: translateY(0px) rotate(var(--pill-rot)); }
+          50%      { transform: translateY(-20px) rotate(calc(var(--pill-rot) + 5deg)); }
+        }
+
+        @keyframes slideUp {
+          0%   { opacity: 0; transform: translateY(30px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes titleFadeIn {
+          0%   { opacity: 0; transform: translateY(-10px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+
+        .pill-entrance {
+          animation: pillEntrance 0.8s ease-out forwards;
+        }
+
+        .pill-breathing {
+          animation: pillBreath 1s ease-in-out infinite;
+        }
+
+        .pill-split-top {
+          animation: splitTop 0.8s ease-in-out forwards;
+        }
+
+        .pill-split-bottom {
+          animation: splitBottom 0.8s ease-in-out forwards;
+        }
+
+        .search-expand {
+          animation: searchExpand 0.8s ease-out forwards;
+        }
+
+        .fade-up {
+          animation: fadeUp 0.6s ease-out forwards;
+        }
+
+        .title-fade-in {
+          animation: titleFadeIn 0.6s ease-out forwards;
+        }
+
+        .slide-up {
+          animation: slideUp 0.5s ease-out forwards;
+        }
+
+        .cursor-blink::after {
+          content: "|";
+          animation: blink 1s step-end infinite;
+          color: #52B788;
+          font-weight: 300;
+        }
+
+        .search-glow:focus-within {
+          box-shadow: 0 0 0 4px rgba(82, 183, 136, 0.15), 0 4px 20px rgba(82, 183, 136, 0.1);
+        }
+
+        .category-pill {
+          transition: all 0.2s ease;
+        }
+        .category-pill:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 4px 12px rgba(82, 183, 136, 0.2);
+        }
+
+        @media (max-width: 640px) {
+          .pill-shape { width: 200px !important; height: 72px !important; }
+          .search-bar-anim { animation: none !important; width: 100% !important; }
+        }
+      `}</style>
+
+      <div className="min-h-screen bg-white overflow-hidden relative" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+        {/* Floating decorative pills */}
+        {FLOATING_PILLS.map((p, i) => (
+          <div
+            key={i}
+            className="absolute rounded-full pointer-events-none"
+            style={{
+              width: p.w,
+              height: p.h,
+              left: `${p.x}%`,
+              top: `${p.y}%`,
+              background: "linear-gradient(180deg, #52B788 50%, #ffffff 50%)",
+              border: "1px solid rgba(82, 183, 136, 0.15)",
+              opacity: 0.06,
+              "--pill-rot": `${p.rot}deg`,
+              transform: `rotate(${p.rot}deg)`,
+              animation: isReady ? `floatPill ${p.dur}s ease-in-out ${p.delay}s infinite` : "none",
+            }}
+          />
+        ))}
+
+        <div className="relative z-10 flex flex-col items-center justify-center min-h-screen px-4">
+          {/* -------- PILL ANIMATION (phases: entry, breathing, splitting) -------- */}
+          {phaseIndex < 3 && (
+            <div className="relative" style={{ perspective: "600px" }}>
+              {/* Top half */}
+              <div
+                className={`pill-shape ${
+                  phase === "entry" ? "pill-entrance" :
+                  phase === "breathing" ? "pill-breathing" :
+                  phase === "splitting" ? "pill-split-top" : ""
+                }`}
+                style={{
+                  width: 280,
+                  height: 50,
+                  background: "linear-gradient(180deg, #52B788 0%, #3DA576 100%)",
+                  borderRadius: "140px 140px 0 0",
+                  position: "relative",
+                  boxShadow: "0 20px 60px rgba(82, 183, 136, 0.3)",
+                  transformOrigin: "center bottom",
+                }}
+              >
+                {/* Glossy highlight */}
+                <div
+                  style={{
+                    position: "absolute",
+                    top: 8,
+                    left: 40,
+                    right: 40,
+                    height: 14,
+                    background: "linear-gradient(180deg, rgba(255,255,255,0.4), transparent)",
+                    borderRadius: "50px",
+                  }}
+                />
+              </div>
+              {/* Dividing line */}
+              <div style={{ height: 2, background: "#2D6A4F", width: 280 }} />
+              {/* Bottom half */}
+              <div
+                className={`${
+                  phase === "splitting" ? "pill-split-bottom" : ""
+                }`}
+                style={{
+                  width: 280,
+                  height: 50,
+                  background: "linear-gradient(180deg, #ffffff 0%, #f8fafb 100%)",
+                  borderRadius: "0 0 140px 140px",
+                  border: "1px solid rgba(82, 183, 136, 0.2)",
+                  borderTop: "none",
+                  transformOrigin: "center top",
+                }}
+              />
             </div>
-            <h1 className="text-4xl font-bold tracking-tight text-slate-900">
-              RxBuddy
-            </h1>
-            <p className="mt-3 text-lg text-slate-500">
-              Your pocket pharmacist
-            </p>
-          </header>
+          )}
 
-          {/* Search Card */}
-          <main className="mt-12">
-            <div className="rounded-3xl border border-slate-200/80 bg-white p-8 shadow-xl shadow-slate-200/50">
-              <label className="mb-4 block text-base font-semibold text-slate-800">
-                Ask a medication question
-              </label>
-
-              <div className="flex items-center gap-3">
-                <div className="relative flex-1">
-                  <input
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") goSearch(query);
-                    }}
-                    className="w-full rounded-2xl border-2 border-slate-200 bg-slate-50 px-5 py-4 text-base text-slate-900 placeholder:text-slate-400 transition-all focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-500/10"
-                    placeholder="e.g. can I take ibuprofen with blood pressure meds?"
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={toggleMic}
-                  className={`flex h-14 w-14 items-center justify-center rounded-2xl text-xl transition-all ${
-                    listening
-                      ? "bg-brand-500 text-white shadow-lg shadow-brand-500/30 scale-105"
-                      : "border-2 border-slate-200 bg-white text-slate-500 hover:border-brand-300 hover:text-brand-600 hover:bg-brand-50"
-                  }`}
-                  aria-label="Voice input"
-                  title="Voice input"
+          {/* -------- SEARCH BAR MORPH (phase: morphing → ready) -------- */}
+          {phaseIndex >= 3 && (
+            <div className="w-full flex flex-col items-center">
+              {/* Title */}
+              <div className={`text-center mb-8 ${phase === "morphing" || isReady ? "title-fade-in" : "opacity-0"}`}>
+                <h1
+                  className="text-5xl font-extrabold tracking-tight sm:text-5xl"
+                  style={{
+                    color: "#2D6A4F",
+                    textShadow: `0 1px 0 #ccc, 0 2px 0 #c9c9c9, 0 3px 0 #bbb,
+                      0 4px 0 #b9b9b9, 0 5px 0 #aaa,
+                      0 6px 1px rgba(0,0,0,.1), 0 0 5px rgba(0,0,0,.1),
+                      0 1px 3px rgba(0,0,0,.3), 0 3px 5px rgba(0,0,0,.2),
+                      0 5px 10px rgba(0,0,0,.25)`,
+                    fontSize: "clamp(32px, 6vw, 48px)",
+                  }}
                 >
-                  {listening ? (
-                    <span className="animate-pulse">●</span>
-                  ) : (
-                    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                    </svg>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => goSearch(query)}
-                  className="flex h-14 items-center gap-2 rounded-2xl bg-gradient-to-r from-brand-500 to-brand-600 px-6 text-base font-semibold text-white shadow-lg shadow-brand-500/30 transition-all hover:shadow-xl hover:shadow-brand-500/40 hover:scale-[1.02] active:scale-[0.98]"
+                  RxBuddy
+                </h1>
+                <p
+                  className="mt-2 font-medium"
+                  style={{
+                    color: "#52B788",
+                    fontSize: 16,
+                    letterSpacing: "3px",
+                    textTransform: "uppercase",
+                  }}
                 >
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  Your Pocket Pharmacist
+                </p>
+              </div>
+
+              {/* Search bar */}
+              <div
+                className={`search-bar-anim ${phase === "morphing" ? "search-expand" : ""} ${isReady ? "" : ""}`}
+                style={{
+                  width: isReady ? "min(600px, 90vw)" : undefined,
+                  maxWidth: "90vw",
+                }}
+              >
+                <form
+                  onSubmit={(e) => { e.preventDefault(); goSearch(query); }}
+                  className="search-glow flex items-center rounded-full border-2 bg-white px-4 py-3 transition-all"
+                  style={{
+                    borderColor: "#52B788",
+                    boxShadow: "0 20px 60px rgba(82, 183, 136, 0.15)",
+                    borderRadius: 50,
+                  }}
+                >
+                  {/* Search icon */}
+                  <svg className="h-5 w-5 shrink-0" style={{ color: "#52B788" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                   </svg>
-                  Search
-                </button>
+
+                  {/* Input */}
+                  <div className="flex-1 mx-3 relative">
+                    <input
+                      ref={inputRef}
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") goSearch(query); }}
+                      className="w-full bg-transparent text-base text-slate-900 outline-none placeholder:text-transparent"
+                      placeholder={PLACEHOLDER_TEXT}
+                    />
+                    {/* Typing animation placeholder (only shows when input is empty) */}
+                    {isReady && !query && (
+                      <div className="absolute inset-0 flex items-center pointer-events-none">
+                        <span className="text-slate-400 text-base cursor-blink">{typedText}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Mic button */}
+                  <button
+                    type="button"
+                    onClick={toggleMic}
+                    className="shrink-0 flex h-9 w-9 items-center justify-center rounded-full transition-all"
+                    style={{
+                      background: listening ? "#52B788" : "transparent",
+                      color: listening ? "#fff" : "#52B788",
+                    }}
+                    aria-label="Voice input"
+                  >
+                    {listening ? (
+                      <span className="animate-pulse text-sm font-bold">●</span>
+                    ) : (
+                      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                      </svg>
+                    )}
+                  </button>
+
+                  {/* Search button (appears when ready) */}
+                  {isReady && (
+                    <button
+                      type="submit"
+                      className="shrink-0 ml-1 flex h-9 items-center gap-1.5 rounded-full px-5 text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
+                      style={{ background: "#52B788" }}
+                    >
+                      Search
+                    </button>
+                  )}
+                </form>
+
+                {/* Voice error / tip */}
+                {isReady && voiceError && (
+                  <p className="mt-3 text-center text-sm font-medium text-rose-600">{voiceError}</p>
+                )}
               </div>
 
-              {voiceError ? (
-                <p className="mt-4 text-sm font-medium text-rose-600">{voiceError}</p>
-              ) : supportsVoice ? (
-                <p className="mt-4 text-sm text-slate-400">
-                  💡 Tip: Tap the microphone and speak your question
-                </p>
-              ) : (
-                <p className="mt-4 text-sm text-slate-400">
-                  Voice input works best in Chrome or Edge
-                </p>
+              {/* -------- PAGE CONTENT (slides up when ready) -------- */}
+              {isReady && (
+                <div className="w-full max-w-xl mt-10">
+                  {/* Stats bar */}
+                  <div className="flex justify-center gap-6 sm:gap-10 slide-up" style={{ animationDelay: "0s" }}>
+                    {STATS.map((s) => (
+                      <div key={s.label} className="text-center">
+                        <p className="text-2xl font-bold" style={{ color: "#2D6A4F" }}>{s.value}</p>
+                        <p className="text-xs font-medium text-slate-500 mt-0.5">{s.label}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Category pills */}
+                  <div className="mt-8 slide-up" style={{ animationDelay: "0.15s" }}>
+                    <p className="text-center text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">
+                      Popular Topics
+                    </p>
+                    <div className="flex flex-wrap justify-center gap-2">
+                      {CATEGORIES.map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => goSearch(c)}
+                          className="category-pill rounded-full border bg-white px-4 py-2 text-sm font-medium text-slate-700"
+                          style={{ borderColor: "#d1fae5" }}
+                        >
+                          {c}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Disclaimer */}
+                  <div className="mt-10 slide-up" style={{ animationDelay: "0.3s" }}>
+                    <p className="text-center text-xs text-slate-400 leading-relaxed max-w-md mx-auto">
+                      RxBuddy provides general information only and is not a substitute for professional medical advice.
+                      For emergencies, call your local emergency number.
+                    </p>
+                  </div>
+                </div>
               )}
             </div>
+          )}
 
-            {/* Category Buttons */}
-            <section className="mt-10">
-              <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-slate-400">
-                Browse by category
-              </h2>
-              <div className="flex flex-wrap gap-3">
-                {CATEGORIES.map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    onClick={() => goSearch(c)}
-                    className="rounded-full border-2 border-slate-200 bg-white px-5 py-2.5 text-sm font-medium text-slate-700 transition-all hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700 hover:shadow-md active:scale-95"
-                  >
-                    {c}
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            {/* Disclaimer */}
-            <section className="mt-12 rounded-2xl bg-gradient-to-r from-brand-50 to-brand-100/50 p-6 border border-brand-200/50">
-              <div className="flex items-start gap-4">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-500/10 text-brand-600">
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-                <div>
-                  <h3 className="text-sm font-semibold text-brand-900">
-                    Friendly reminder
-                  </h3>
-                  <p className="mt-1 text-sm leading-relaxed text-brand-800/80">
-                    RxBuddy provides general information only. For emergencies, call your local emergency number.
-                    For personal medical advice, always consult a licensed pharmacist or healthcare provider.
-                  </p>
-                </div>
-              </div>
-            </section>
-          </main>
+          {/* Show pill animation center placeholder so it stays vertically centered */}
+          {phaseIndex < 3 && <div />}
         </div>
       </div>
     </>
