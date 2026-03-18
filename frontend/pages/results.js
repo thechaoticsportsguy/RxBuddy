@@ -6,104 +6,72 @@ import ReactMarkdown from "react-markdown";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
-function extractDrugs(question) {
+// Generic phrases to filter out from answers
+const GENERIC_PHRASES = [
+  "follow the package directions",
+  "follow package directions",
+  "use the lowest effective dose",
+  "use the lowest dose",
+  "ask your pharmacist",
+  "consult your pharmacist",
+  "if you're unsure",
+  "if unsure",
+  "as directed",
+  "read the label",
+];
+
+/**
+ * Detect question type from keywords for dynamic templates
+ */
+function detectQuestionType(question) {
   const q = String(question || "").toLowerCase();
-  const known = [
-    { key: "acetaminophen", label: "Tylenol", aliases: ["acetaminophen", "tylenol", "paracetamol"] },
-    { key: "ibuprofen", label: "Ibuprofen", aliases: ["ibuprofen", "advil", "motrin"] },
-    { key: "naproxen", label: "Naproxen", aliases: ["naproxen", "aleve"] },
-    { key: "aspirin", label: "Aspirin", aliases: ["aspirin"] },
-    { key: "diphenhydramine", label: "Benadryl", aliases: ["diphenhydramine", "benadryl"] },
-    { key: "loratadine", label: "Loratadine", aliases: ["loratadine", "claritin"] },
-    { key: "cetirizine", label: "Cetirizine", aliases: ["cetirizine", "zyrtec"] },
-    { key: "omeprazole", label: "Omeprazole", aliases: ["omeprazole", "prilosec"] },
-    { key: "famotidine", label: "Famotidine", aliases: ["famotidine", "pepcid"] },
-  ];
-
-  const hits = [];
-  for (const d of known) {
-    if (d.aliases.some((a) => q.includes(a))) hits.push(d);
+  
+  if (q.includes("can i take") && q.includes("with") || q.includes("interaction") || q.includes("mix") || q.includes("combine")) {
+    return "interaction";
   }
-  const uniq = [];
-  const seen = new Set();
-  for (const h of hits) {
-    if (!seen.has(h.key)) {
-      uniq.push(h);
-      seen.add(h.key);
-    }
+  if (q.includes("dose") || q.includes("how much") || q.includes("how many") || q.includes("max")) {
+    return "dosage";
   }
-  return uniq.slice(0, 2);
-}
-
-function parseBullets(lines) {
-  const out = [];
-  for (const raw of lines) {
-    const line = String(raw || "").trim();
-    if (!line) continue;
-    const m =
-      line.match(/^[-*•]\s+(.*)$/) ||
-      line.match(/^\d+\.\s+(.*)$/) ||
-      line.match(/^⚠️\s*(.*)$/);
-    if (m && m[1]) out.push(m[1].trim());
+  if (q.includes("side effect") || q.includes("effects") || q.includes("cause") || q.includes("symptoms")) {
+    return "side_effects";
   }
-  return out;
+  if (q.includes("what is") || q.includes("how does") || q.includes("what does") || q.includes("explain")) {
+    return "explanation";
+  }
+  if (q.includes("safe") || q.includes("okay") || q.includes("ok to")) {
+    return "safety";
+  }
+  return "general";
 }
 
 /**
- * Parse Claude's answer - supports both structured (from API) and raw text formats.
- * 
- * Structured format from API:
- * { direct: "...", do: [...], avoid: [...], doctor: [...], raw: "..." }
- * 
- * Raw text format:
- * DIRECT: [sentence]
- * DO: [item] | [item] | [item]
- * AVOID: [item] | [item] | [item]
- * DOCTOR: [item] | [item]
- * 
- * IMPORTANT: Never returns generic placeholder bullets - only what Claude actually returned.
+ * Filter out generic advice from an array of items
  */
-function parseClaudeAnswer(answer, structured = null) {
-  // Debug: log raw answer to console
-  console.log("[parseClaudeAnswer] Raw answer:", answer);
-  console.log("[parseClaudeAnswer] Structured data:", structured);
+function filterGenericAdvice(items) {
+  if (!Array.isArray(items)) return [];
+  return items.filter(item => {
+    const lower = String(item || "").toLowerCase();
+    return !GENERIC_PHRASES.some(phrase => lower.includes(phrase));
+  });
+}
 
-  // If we have structured data from the API, use it directly
-  if (structured && typeof structured === "object") {
-    const direct = structured.direct || "";
-    let yesNo = null;
-    if (/^\s*yes\b/i.test(direct)) yesNo = "Yes";
-    else if (/^\s*no\b/i.test(direct)) yesNo = "No";
+/**
+ * Parse Claude's VERDICT-format answer
+ */
+function parseVerdictAnswer(answer, structured = null) {
+  console.log("[parseVerdictAnswer] Raw answer:", answer);
+  console.log("[parseVerdictAnswer] Structured data:", structured);
 
-    const result = {
-      yesNo,
-      lead: direct,
-      whatToDo: Array.isArray(structured.do) ? structured.do : [],
-      whatToAvoid: Array.isArray(structured.avoid) ? structured.avoid : [],
-      seeDoctorIf: Array.isArray(structured.doctor) ? structured.doctor : [],
-      confidence: structured.confidence || "MEDIUM",
-      sources: structured.sources || "",
-      parsedAnything: Boolean(
-        (structured.do?.length) || 
-        (structured.avoid?.length) || 
-        (structured.doctor?.length)
-      ),
-      full: structured.raw || String(answer || ""),
-      isPlainText: false,
-    };
-    console.log("[parseClaudeAnswer] Parsed from structured:", result);
-    return result;
-  }
-
-  // Fallback: parse raw text answer
   const text = String(answer || "").replace(/\r\n/g, "\n").trim();
   if (!text) return null;
 
-  // Try to parse structured format: DIRECT: / DO: / AVOID: / DOCTOR: / CONFIDENCE: / SOURCES:
-  let direct = "";
-  let doItems = [];
+  // Parse the new VERDICT format
+  let verdict = null; // YES, NO, CONDITIONAL
+  let verdictReason = "";
+  let reason = "";
   let avoidItems = [];
-  let doctorItems = [];
+  let alternatives = [];
+  let warnings = [];
   let confidence = "MEDIUM";
   let sources = "";
 
@@ -112,129 +80,94 @@ function parseClaudeAnswer(answer, structured = null) {
     const line = rawLine.trim();
     if (!line) continue;
 
-    if (line.toUpperCase().startsWith("DIRECT:")) {
-      direct = line.substring(7).trim();
-    } else if (line.toUpperCase().startsWith("DO:")) {
-      doItems = line.substring(3).split("|").map(s => s.trim()).filter(Boolean);
-    } else if (line.toUpperCase().startsWith("AVOID:")) {
+    const upperLine = line.toUpperCase();
+
+    if (upperLine.startsWith("VERDICT:")) {
+      const verdictText = line.substring(8).trim();
+      // Parse "YES — reason" or "NO — reason" or "CONDITIONAL — reason"
+      const dashIndex = verdictText.indexOf("—") !== -1 ? verdictText.indexOf("—") : verdictText.indexOf("-");
+      if (dashIndex > 0) {
+        const verdictPart = verdictText.substring(0, dashIndex).trim().toUpperCase();
+        verdictReason = verdictText.substring(dashIndex + 1).trim();
+        if (verdictPart.startsWith("YES")) verdict = "YES";
+        else if (verdictPart.startsWith("NO")) verdict = "NO";
+        else if (verdictPart.startsWith("CONDITIONAL")) verdict = "CONDITIONAL";
+      } else {
+        if (verdictText.toUpperCase().startsWith("YES")) verdict = "YES";
+        else if (verdictText.toUpperCase().startsWith("NO")) verdict = "NO";
+        else if (verdictText.toUpperCase().startsWith("CONDITIONAL")) verdict = "CONDITIONAL";
+        verdictReason = verdictText.replace(/^(YES|NO|CONDITIONAL)\s*/i, "").trim();
+      }
+    } else if (upperLine.startsWith("REASON:")) {
+      reason = line.substring(7).trim();
+    } else if (upperLine.startsWith("AVOID:")) {
       avoidItems = line.substring(6).split("|").map(s => s.trim()).filter(Boolean);
-    } else if (line.toUpperCase().startsWith("DOCTOR:")) {
-      doctorItems = line.substring(7).split("|").map(s => s.trim()).filter(Boolean);
-    } else if (line.toUpperCase().startsWith("CONFIDENCE:")) {
+    } else if (upperLine.startsWith("ALTERNATIVES:")) {
+      alternatives = line.substring(13).split("|").map(s => s.trim()).filter(Boolean);
+    } else if (upperLine.startsWith("WARNING:")) {
+      warnings = line.substring(8).split("|").map(s => s.trim()).filter(Boolean);
+    } else if (upperLine.startsWith("CONFIDENCE:")) {
       const conf = line.substring(11).trim().toUpperCase();
       if (conf.includes("HIGH")) confidence = "HIGH";
       else if (conf.includes("LOW")) confidence = "LOW";
       else confidence = "MEDIUM";
-    } else if (line.toUpperCase().startsWith("SOURCES:")) {
+    } else if (upperLine.startsWith("SOURCES:")) {
       sources = line.substring(8).trim();
     }
-  }
-
-  // If structured parsing worked, use it
-  if (direct || doItems.length || avoidItems.length || doctorItems.length) {
-    let yesNo = null;
-    if (/^\s*yes\b/i.test(direct)) yesNo = "Yes";
-    else if (/^\s*no\b/i.test(direct)) yesNo = "No";
-
-    const result = {
-      yesNo,
-      lead: direct || text.split("\n")[0],
-      whatToDo: doItems,
-      whatToAvoid: avoidItems,
-      seeDoctorIf: doctorItems,
-      confidence,
-      sources,
-      parsedAnything: Boolean(doItems.length || avoidItems.length || doctorItems.length),
-      full: text,
-      isPlainText: false,
-    };
-    console.log("[parseClaudeAnswer] Parsed from text (structured format):", result);
-    return result;
-  }
-
-  // Try old markdown parsing for "What to do:", "What to avoid:", etc.
-  const first = text.split("\n").slice(0, 2).join(" ").trim();
-  let yesNo = null;
-  if (/^\s*yes\b/i.test(first)) yesNo = "Yes";
-  else if (/^\s*no\b/i.test(first)) yesNo = "No";
-
-  const normalized = text.replace(/\*\*(What to do|What to avoid|See a doctor if|When to see a doctor)\*\*\s*:?/gi, (_, h) => {
-    return `${String(h).trim()}:`;
-  });
-
-  const sections = { whatToDo: [], whatToAvoid: [], seeDoctorIf: [] };
-  let current = null;
-  for (const rawLine of normalized.split("\n")) {
-    const line = String(rawLine || "").trim();
-    if (!line) continue;
-
-    if (/^what to do\s*:/i.test(line)) {
-      current = "whatToDo";
-      continue;
+    // Legacy format support
+    else if (upperLine.startsWith("DIRECT:")) {
+      const directText = line.substring(7).trim();
+      if (/^\s*yes\b/i.test(directText)) verdict = "YES";
+      else if (/^\s*no\b/i.test(directText)) verdict = "NO";
+      reason = directText.replace(/^(yes|no)[,.]?\s*/i, "").trim();
+    } else if (upperLine.startsWith("DO:")) {
+      // Legacy - ignore DO items
+    } else if (upperLine.startsWith("DOCTOR:")) {
+      warnings = line.substring(7).split("|").map(s => s.trim()).filter(Boolean);
     }
-    if (/^what to avoid\s*:/i.test(line)) {
-      current = "whatToAvoid";
-      continue;
-    }
-    if (/^(see a doctor if|when to see a doctor)\s*:/i.test(line)) {
-      current = "seeDoctorIf";
-      continue;
-    }
-    if (current) sections[current].push(line);
   }
 
-  const whatToDo = parseBullets(sections.whatToDo);
-  const whatToAvoid = parseBullets(sections.whatToAvoid);
-  const seeDoctorIf = parseBullets(sections.seeDoctorIf);
-  const parsedAnything = whatToDo.length || whatToAvoid.length || seeDoctorIf.length;
+  // Filter out generic advice
+  avoidItems = filterGenericAdvice(avoidItems);
+  alternatives = filterGenericAdvice(alternatives);
+  warnings = filterGenericAdvice(warnings);
 
-  // If markdown parsing found sections, use them
-  if (parsedAnything) {
-    const result = { 
-      yesNo, 
-      lead: first, 
-      whatToDo, 
-      whatToAvoid, 
-      seeDoctorIf, 
-      confidence: "MEDIUM",
-      sources: "",
-      parsedAnything: true, 
-      full: text,
-      isPlainText: false,
-    };
-    console.log("[parseClaudeAnswer] Parsed from markdown sections:", result);
-    return result;
+  // If no verdict parsed but we have text, try to detect from content
+  if (!verdict && text) {
+    const lowerText = text.toLowerCase();
+    if (lowerText.includes("yes,") || lowerText.includes("yes you can") || lowerText.includes("it is safe")) {
+      verdict = "YES";
+    } else if (lowerText.includes("no,") || lowerText.includes("do not") || lowerText.includes("avoid") || lowerText.includes("not recommended")) {
+      verdict = "NO";
+    } else if (lowerText.includes("depends") || lowerText.includes("conditional") || lowerText.includes("sometimes")) {
+      verdict = "CONDITIONAL";
+    }
   }
 
-  // FINAL FALLBACK: This is plain text with no structured format
-  // Display it as a paragraph - DO NOT add generic bullets
-  console.log("[parseClaudeAnswer] Plain text answer (no structure found)");
-  return { 
-    yesNo, 
-    lead: text,  // Use full text as lead
-    whatToDo: [],  // Empty - no generic bullets!
-    whatToAvoid: [],  // Empty - no generic bullets!
-    seeDoctorIf: [],  // Empty - no generic bullets!
-    confidence: "MEDIUM",
-    sources: "",
-    parsedAnything: false,  // Mark that we didn't parse structured sections
+  const result = {
+    verdict,
+    verdictReason: verdictReason || reason,
+    reason,
+    avoid: avoidItems,
+    alternatives,
+    warnings,
+    confidence,
+    sources,
     full: text,
-    isPlainText: true,  // Flag to indicate this should be displayed as paragraph
+    hasContent: Boolean(verdict || reason || avoidItems.length || warnings.length),
   };
+
+  console.log("[parseVerdictAnswer] Parsed result:", result);
+  return result;
 }
 
 /**
- * Build a clean 2-4 word PubMed query from user's question.
- * 
- * Step 1: Map brand names to generic (tylenol → acetaminophen)
- * Step 2: Extract medical topic (pregnancy → "pregnancy safety")
- * Step 3: Build clean query like "acetaminophen pregnancy safety"
+ * Build PubMed search query from user question
  */
 function buildPubMedQuery(query) {
   const q = String(query || "").toLowerCase().trim();
   if (!q) return "";
 
-  // Brand name → generic name mappings
   const brandToGeneric = {
     tylenol: "acetaminophen", advil: "ibuprofen", motrin: "ibuprofen",
     aleve: "naproxen", bayer: "aspirin", excedrin: "acetaminophen",
@@ -243,11 +176,8 @@ function buildPubMedQuery(query) {
     pepcid: "famotidine", xanax: "alprazolam", valium: "diazepam",
     ambien: "zolpidem", zoloft: "sertraline", prozac: "fluoxetine",
     lexapro: "escitalopram", lipitor: "atorvastatin", crestor: "rosuvastatin",
-    viagra: "sildenafil", cialis: "tadalafil", synthroid: "levothyroxine",
-    metformin: "metformin", lisinopril: "lisinopril", losartan: "losartan",
   };
 
-  // Generic drug names to detect
   const genericDrugs = [
     "ibuprofen", "acetaminophen", "aspirin", "naproxen", "amoxicillin",
     "metformin", "lisinopril", "omeprazole", "gabapentin", "sertraline",
@@ -255,112 +185,57 @@ function buildPubMedQuery(query) {
     "losartan", "amlodipine", "atorvastatin", "levothyroxine", "alprazolam",
   ];
 
-  // Topic keyword → PubMed search term
   const topicMappings = {
     "empty stomach": "food administration",
-    "with food": "food administration", 
+    "with food": "food administration",
     food: "food drug",
-    eating: "food administration",
     pregnancy: "pregnancy",
     pregnant: "pregnancy",
-    breastfeeding: "lactation",
-    nursing: "lactation",
     alcohol: "alcohol interaction",
     "side effect": "adverse effects",
-    overdose: "overdose toxicity",
     interaction: "drug interaction",
     children: "pediatric",
-    elderly: "geriatric",
     liver: "hepatic",
     kidney: "renal",
-    sleep: "sleep",
-    anxiety: "anxiety",
-    "blood pressure": "hypertension",
-    diabetes: "diabetes",
-    pain: "analgesic",
-    headache: "headache",
   };
 
-  // Step 1: Find drug name (prefer generic)
   let drugName = "";
-  
-  // Check brand names first
   for (const [brand, generic] of Object.entries(brandToGeneric)) {
-    if (q.includes(brand)) {
-      drugName = generic;
-      break;
-    }
+    if (q.includes(brand)) { drugName = generic; break; }
   }
-  
-  // If no brand found, check generic names
   if (!drugName) {
     for (const drug of genericDrugs) {
-      if (q.includes(drug)) {
-        drugName = drug;
-        break;
-      }
+      if (q.includes(drug)) { drugName = drug; break; }
     }
   }
 
-  // Step 2: Find topic
   let topic = "";
   for (const [keyword, pubmedTerm] of Object.entries(topicMappings)) {
-    if (q.includes(keyword)) {
-      topic = pubmedTerm;
-      break;
-    }
+    if (q.includes(keyword)) { topic = pubmedTerm; break; }
   }
 
-  // Step 3: Build clean 2-4 word query
-  if (drugName && topic) {
-    return `${drugName} ${topic}`;
-  } else if (drugName) {
-    return `${drugName} pharmacology`;
-  } else if (topic) {
-    return `medication ${topic}`;
-  }
+  if (drugName && topic) return `${drugName} ${topic}`;
+  if (drugName) return `${drugName} pharmacology`;
+  if (topic) return `medication ${topic}`;
 
-  // Fallback: extract meaningful words
-  const stopWords = new Set([
-    "can", "i", "is", "it", "the", "a", "an", "to", "with", "my", "me", 
-    "if", "or", "and", "of", "for", "on", "in", "at", "this", "that", 
-    "what", "how", "does", "do", "should", "would", "could", "will", 
-    "take", "taking", "use", "using", "safe", "okay", "ok", "be", "am",
-  ]);
+  const stopWords = new Set(["can", "i", "is", "it", "the", "a", "an", "to", "with", "my", "me", "if", "or", "and", "of", "for", "on", "in", "at", "this", "that", "what", "how", "does", "do", "should", "would", "could", "will", "take", "taking", "use", "using", "safe", "okay", "ok", "be", "am"]);
   const words = q.split(/\s+/).filter(w => w.length > 3 && !stopWords.has(w));
   return words.slice(0, 3).join(" ") || "medication safety";
 }
 
-/**
- * Helper: wait for specified milliseconds
- */
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/**
- * Fetch relevant PubMed articles for a user question.
- * 
- * Flow:
- * 1. Build optimized search query from user question
- * 2. Call PubMed esearch API to get article IDs
- * 3. Wait 200ms (NCBI rate limit)
- * 4. Call PubMed esummary API to get article details
- * 5. Return formatted article objects
- */
 async function fetchPubMedArticles(query) {
   const rawQuery = String(query || "").trim();
   if (!rawQuery) return [];
 
-  // Build optimized search term
   const searchTerm = buildPubMedQuery(rawQuery);
-  console.log("[PubMed] Original query:", rawQuery);
   console.log("[PubMed] Search term:", searchTerm);
-
   if (!searchTerm) return [];
 
   try {
-    // Step 1: Search for article IDs
     const esearchUrl = new URL("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi");
     esearchUrl.searchParams.set("db", "pubmed");
     esearchUrl.searchParams.set("term", searchTerm);
@@ -368,85 +243,45 @@ async function fetchPubMedArticles(query) {
     esearchUrl.searchParams.set("retmode", "json");
     esearchUrl.searchParams.set("sort", "relevance");
 
-    console.log("[PubMed] Fetching IDs from:", esearchUrl.toString());
     const searchRes = await fetch(esearchUrl.toString());
-    
-    if (!searchRes.ok) {
-      console.error("[PubMed] Search failed:", searchRes.status);
-      return [];
-    }
+    if (!searchRes.ok) return [];
 
     const searchData = await searchRes.json();
     const ids = searchData?.esearchresult?.idlist || [];
-    
-    console.log("[PubMed] Found IDs:", ids);
+    if (!Array.isArray(ids) || ids.length === 0) return [];
 
-    if (!Array.isArray(ids) || ids.length === 0) {
-      console.log("[PubMed] No articles found for:", searchTerm);
-      return [];
-    }
-
-    // Step 2: Wait 200ms to respect NCBI rate limits
     await sleep(200);
 
-    // Step 3: Get article details
     const esummaryUrl = new URL("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi");
     esummaryUrl.searchParams.set("db", "pubmed");
     esummaryUrl.searchParams.set("id", ids.join(","));
     esummaryUrl.searchParams.set("retmode", "json");
 
-    console.log("[PubMed] Fetching details from:", esummaryUrl.toString());
     const summaryRes = await fetch(esummaryUrl.toString());
-    
-    if (!summaryRes.ok) {
-      console.error("[PubMed] Summary failed:", summaryRes.status);
-      return [];
-    }
+    if (!summaryRes.ok) return [];
 
     const summaryData = await summaryRes.json();
     const results = summaryData?.result || {};
 
-    // Step 4: Format articles
     const articles = [];
     for (const id of ids) {
       const article = results[id];
       if (!article) continue;
 
-      // Extract fields from esummary response
-      const title = article.title 
-        ? String(article.title).replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim() 
-        : `PubMed Article ${id}`;
-      
-      const journal = article.fulljournalname 
-        ? String(article.fulljournalname).trim() 
-        : (article.source ? String(article.source).trim() : "PubMed");
-      
+      const title = article.title ? String(article.title).replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim() : `PubMed Article ${id}`;
+      const journal = article.fulljournalname ? String(article.fulljournalname).trim() : (article.source ? String(article.source).trim() : "PubMed");
       const pubdate = article.pubdate ? String(article.pubdate) : "";
       const yearMatch = pubdate.match(/\b(19|20)\d{2}\b/);
       const year = yearMatch ? yearMatch[0] : "";
 
-      // Generate key takeaway (first 120 chars of title, cleaned up)
-      let takeaway = title.length > 120 
-        ? title.substring(0, 117) + "..." 
-        : title;
-      // Remove trailing period if truncated
-      takeaway = takeaway.replace(/\.{3,}$/, "...");
+      let takeaway = title.length > 100 ? title.substring(0, 97) + "..." : title;
 
-      articles.push({
-        id: String(id),
-        title,
-        journal,
-        year,
-        url: `https://pubmed.ncbi.nlm.nih.gov/${id}/`,
-        takeaway,
-      });
+      articles.push({ id: String(id), title, journal, year, url: `https://pubmed.ncbi.nlm.nih.gov/${id}/`, takeaway });
     }
 
-    console.log("[PubMed] Returning", articles.length, "articles");
     return articles;
-
   } catch (error) {
-    console.error("[PubMed] Error fetching articles:", error);
+    console.error("[PubMed] Error:", error);
     return [];
   }
 }
@@ -464,35 +299,36 @@ export default function ResultsPage() {
   const [savedToDb, setSavedToDb] = useState(false);
 
   const [pubmedLoading, setPubmedLoading] = useState(false);
-  const [pubmedError, setPubmedError] = useState("");
   const [articles, setArticles] = useState([]);
 
   const [headerQuery, setHeaderQuery] = useState("");
+  const [showFullAnswer, setShowFullAnswer] = useState(false);
+  const [showMechanism, setShowMechanism] = useState(false);
+  const [showGenericTips, setShowGenericTips] = useState(false);
 
-  const title = useMemo(() => (q ? `Results — ${q}` : "Results"), [q]);
-  const drugs = useMemo(() => extractDrugs(q), [q]);
-  const topAnswer = useMemo(() => {
+  const title = useMemo(() => (q ? `Results - ${q}` : "Results"), [q]);
+  const questionType = useMemo(() => detectQuestionType(q), [q]);
+  
+  const parsedAnswer = useMemo(() => {
     const first = results?.[0];
     if (!first || typeof first.answer !== "string") return null;
-    // Pass structured data from API if available
-    return parseClaudeAnswer(first.answer, first.structured);
+    return parseVerdictAnswer(first.answer, first.structured);
   }, [results]);
 
-  useEffect(() => {
-    setHeaderQuery(q || "");
-  }, [q]);
+  useEffect(() => { setHeaderQuery(q || ""); }, [q]);
 
   useEffect(() => {
-    if (!router.isReady) return;
-    if (!q) return;
-
+    if (!router.isReady || !q) return;
     let cancelled = false;
+
     async function run() {
       setLoading(true);
       setError("");
       setDidYouMean(null);
       setSource("database");
       setSavedToDb(false);
+      setShowFullAnswer(false);
+
       try {
         const res = await fetch(`${API_BASE}/search`, {
           method: "POST",
@@ -504,8 +340,10 @@ export default function ResultsPage() {
           const text = await res.text();
           throw new Error(text || `Request failed (${res.status})`);
         }
+
         const data = await res.json();
-        console.log("[RxBuddy] Full /search response:", JSON.stringify(data, null, 2));
+        console.log("[RxBuddy] API Response:", data);
+
         if (!cancelled) {
           setResults(Array.isArray(data.results) ? data.results : []);
           setDidYouMean(data.did_you_mean || null);
@@ -520,33 +358,27 @@ export default function ResultsPage() {
     }
 
     run();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [router.isReady, q, engine]);
 
   useEffect(() => {
-    if (!router.isReady) return;
-    if (!q) return;
-
+    if (!router.isReady || !q) return;
     let cancelled = false;
+
     async function runPubMed() {
       setPubmedLoading(true);
-      setPubmedError("");
       try {
         const items = await fetchPubMedArticles(q);
         if (!cancelled) setArticles(items);
       } catch (e) {
-        if (!cancelled) setPubmedError(e?.message || "Could not load PubMed articles.");
+        console.error("[PubMed] Error:", e);
       } finally {
         if (!cancelled) setPubmedLoading(false);
       }
     }
 
     runPubMed();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [router.isReady, q]);
 
   function onSubmitHeader(e) {
@@ -556,335 +388,327 @@ export default function ResultsPage() {
     router.push(`/results?q=${encodeURIComponent(nextQ)}&engine=${encodeURIComponent(engine)}`);
   }
 
+  // Verdict styling
+  const verdictStyles = {
+    YES: { bg: "bg-emerald-50", border: "border-emerald-300", text: "text-emerald-800", icon: "✅", label: "YES" },
+    NO: { bg: "bg-rose-50", border: "border-rose-300", text: "text-rose-800", icon: "❌", label: "NO" },
+    CONDITIONAL: { bg: "bg-amber-50", border: "border-amber-300", text: "text-amber-800", icon: "⚠️", label: "CONDITIONAL" },
+  };
+
+  const currentVerdict = parsedAnswer?.verdict ? verdictStyles[parsedAnswer.verdict] : null;
+
   return (
     <>
       <Head>
         <title>{title}</title>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
-          rel="stylesheet"
-        />
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
       </Head>
 
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-brand-50/30" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+      <div className="min-h-screen bg-slate-50" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
         {/* Header */}
-        <div className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/80 backdrop-blur">
-          <div className="mx-auto max-w-6xl px-6 py-4">
+        <div className="sticky top-0 z-20 border-b border-slate-200 bg-white shadow-sm">
+          <div className="mx-auto max-w-4xl px-4 py-3">
             <div className="flex items-center gap-4">
-              <Link href="/" className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-brand-600 text-white shadow-md">
+              <Link href="/" className="flex items-center gap-2">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500 text-white">
                   <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-3-3v6m-7 4h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                   </svg>
                 </div>
-                <div className="leading-tight">
-                  <p className="text-sm font-extrabold tracking-tight text-slate-900">RxBuddy</p>
-                  <p className="text-xs font-medium text-slate-500">Your pocket pharmacist</p>
-                </div>
+                <span className="text-lg font-bold text-slate-900">RxBuddy</span>
               </Link>
 
-              <form onSubmit={onSubmitHeader} className="mx-auto hidden w-full max-w-2xl items-center gap-2 md:flex">
-                <div className="flex w-full items-center rounded-full border border-slate-200 bg-white px-4 py-2.5 shadow-sm focus-within:ring-2 focus-within:ring-brand-200">
-                  <svg className="h-5 w-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <form onSubmit={onSubmitHeader} className="flex-1 flex items-center gap-2">
+                <div className="flex flex-1 items-center rounded-full border border-slate-200 bg-slate-50 px-4 py-2 focus-within:ring-2 focus-within:ring-emerald-200 focus-within:border-emerald-300">
+                  <svg className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                   </svg>
                   <input
                     value={headerQuery}
                     onChange={(e) => setHeaderQuery(e.target.value)}
-                    placeholder="Search your medication question..."
-                    className="ml-3 w-full bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400"
+                    placeholder="Ask about medications..."
+                    className="ml-2 flex-1 bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400"
                   />
                 </div>
-                <button type="submit" className="rounded-full bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-600">
+                <button type="submit" className="rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600 transition-colors">
                   Search
                 </button>
               </form>
-
-              <span className="hidden rounded-full bg-white px-4 py-1.5 text-xs font-semibold text-slate-500 ring-1 ring-slate-200 shadow-sm md:inline-flex">
-                Search Engine: {engine.toUpperCase()}
-              </span>
             </div>
           </div>
         </div>
 
-        <div className="mx-auto max-w-6xl px-6 py-8">
-          <div className="mb-5 md:hidden">
-            <form onSubmit={onSubmitHeader} className="flex items-center gap-2">
-              <div className="flex w-full items-center rounded-full border border-slate-200 bg-white px-4 py-2.5 shadow-sm focus-within:ring-2 focus-within:ring-brand-200">
-                <svg className="h-5 w-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-                <input
-                  value={headerQuery}
-                  onChange={(e) => setHeaderQuery(e.target.value)}
-                  placeholder="Search your medication question..."
-                  className="ml-3 w-full bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400"
-                />
+        <div className="mx-auto max-w-4xl px-4 py-6">
+          {/* Did you mean? */}
+          {didYouMean && (
+            <div
+              className="mb-4 cursor-pointer rounded-lg border border-amber-200 bg-amber-50 p-3 hover:bg-amber-100 transition-colors"
+              onClick={() => router.push(`/results?q=${encodeURIComponent(didYouMean)}&engine=${encodeURIComponent(engine)}`)}
+            >
+              <p className="text-sm text-amber-800">
+                <span className="font-semibold">Did you mean:</span> <span className="underline">{didYouMean}</span>?
+              </p>
+            </div>
+          )}
+
+          {/* Question Card */}
+          <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Your Question</p>
+                <p className="mt-1 text-lg font-semibold text-slate-900">{q || "-"}</p>
               </div>
-              <button type="submit" className="rounded-full bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-600">
-                Search
-              </button>
-            </form>
+              <div className="flex items-center gap-2">
+                {source === "database" ? (
+                  <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">Database</span>
+                ) : (
+                  <span className="rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-violet-700">AI Generated</span>
+                )}
+                {savedToDb && (
+                  <span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-medium text-green-700">Saved</span>
+                )}
+              </div>
+            </div>
           </div>
 
-          <main className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-            {/* Left */}
-            <section className="lg:col-span-3">
-              <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-lg shadow-slate-200/40">
-                <h2 className="text-sm font-extrabold tracking-tight text-slate-900">Drug Visuals &amp; Mechanism</h2>
-
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  {(drugs.length ? drugs : [{ key: "drug-a", label: "Drug A" }, { key: "drug-b", label: "Drug B" }]).map((d) => (
-                    <div key={d.key} className="rounded-xl border border-slate-200 bg-white p-3 text-center">
-                      <div className="mx-auto h-20 w-20 overflow-hidden rounded-xl bg-slate-50 ring-1 ring-slate-200">
-                        <img
-                          alt={`${d.label} placeholder`}
-                          className="h-full w-full object-cover"
-                          src={`https://via.placeholder.com/160x160.png?text=${encodeURIComponent(d.label)}`}
-                        />
+          {loading ? (
+            <div className="rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm">
+              <div className="mx-auto h-8 w-8 animate-spin rounded-full border-3 border-slate-200 border-t-emerald-500" />
+              <p className="mt-3 text-sm text-slate-600">Generating your answer...</p>
+            </div>
+          ) : error ? (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 shadow-sm">
+              <p className="font-semibold text-rose-800">Error loading results</p>
+              <p className="mt-1 text-sm text-rose-700">{error}</p>
+            </div>
+          ) : (
+            <>
+              {/* VERDICT BLOCK - Main Answer */}
+              {currentVerdict && (
+                <div className={`mb-4 rounded-xl border-2 ${currentVerdict.border} ${currentVerdict.bg} p-5 shadow-sm`}>
+                  <div className="flex items-start gap-3">
+                    <span className="text-3xl">{currentVerdict.icon}</span>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xl font-bold ${currentVerdict.text}`}>{currentVerdict.label}</span>
+                        {parsedAnswer?.verdictReason && (
+                          <span className={`text-lg font-medium ${currentVerdict.text}`}>— {parsedAnswer.verdictReason}</span>
+                        )}
                       </div>
-                      <p className="mt-2 text-xs font-semibold text-slate-800">{d.label}</p>
+                      {parsedAnswer?.reason && (
+                        <p className="mt-2 text-base text-slate-700">{parsedAnswer.reason}</p>
+                      )}
+                      {/* Confidence & Sources */}
+                      <div className="mt-3 flex items-center gap-3 text-xs">
+                        {parsedAnswer?.confidence === "HIGH" && (
+                          <span className="rounded-full bg-emerald-200 px-2 py-0.5 font-medium text-emerald-800">High Confidence</span>
+                        )}
+                        {parsedAnswer?.confidence === "MEDIUM" && (
+                          <span className="rounded-full bg-amber-200 px-2 py-0.5 font-medium text-amber-800">Medium Confidence</span>
+                        )}
+                        {parsedAnswer?.confidence === "LOW" && (
+                          <span className="rounded-full bg-rose-200 px-2 py-0.5 font-medium text-rose-800">Low Confidence</span>
+                        )}
+                        {parsedAnswer?.sources && (
+                          <span className="text-slate-500">Source: {parsedAnswer.sources}</span>
+                        )}
+                      </div>
                     </div>
-                  ))}
+                  </div>
                 </div>
+              )}
 
-                <div className="mt-5">
-                  <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Mechanism</p>
-                  <div className="mt-2 overflow-hidden rounded-xl border border-slate-200">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+              {/* Fallback if no verdict parsed */}
+              {!currentVerdict && parsedAnswer?.reason && (
+                <div className="mb-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <p className="text-base text-slate-800">{parsedAnswer.reason}</p>
+                </div>
+              )}
+
+              {/* Decision Blocks */}
+              <div className="grid gap-3 md:grid-cols-2 mb-4">
+                {/* Avoid Block */}
+                {parsedAnswer?.avoid?.length > 0 && (
+                  <div className="rounded-lg border border-rose-200 bg-white p-4 shadow-sm">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-lg">⚠️</span>
+                      <h3 className="font-semibold text-rose-800">Avoid</h3>
+                    </div>
+                    <ul className="space-y-1.5">
+                      {parsedAnswer.avoid.map((item, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                          <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-rose-400 shrink-0" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Alternatives Block */}
+                {parsedAnswer?.alternatives?.length > 0 && (
+                  <div className="rounded-lg border border-emerald-200 bg-white p-4 shadow-sm">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-lg">🟢</span>
+                      <h3 className="font-semibold text-emerald-800">Safe Alternatives</h3>
+                    </div>
+                    <ul className="space-y-1.5">
+                      {parsedAnswer.alternatives.map((item, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                          <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-emerald-400 shrink-0" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Warning Signs Block */}
+                {parsedAnswer?.warnings?.length > 0 && (
+                  <div className="rounded-lg border border-amber-200 bg-white p-4 shadow-sm md:col-span-2">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-lg">🚨</span>
+                      <h3 className="font-semibold text-amber-800">See a Doctor If</h3>
+                    </div>
+                    <ul className="grid gap-1.5 md:grid-cols-2">
+                      {parsedAnswer.warnings.map((item, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                          <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-amber-400 shrink-0" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              {/* Collapsible Full Answer */}
+              {parsedAnswer?.full && (
+                <div className="mb-4">
+                  <button
+                    onClick={() => setShowFullAnswer(!showFullAnswer)}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-left shadow-sm hover:bg-slate-50 transition-colors flex items-center justify-between"
+                  >
+                    <span className="text-sm font-medium text-slate-700">Show Detailed Explanation</span>
+                    <svg className={`h-4 w-4 text-slate-400 transition-transform ${showFullAnswer ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                  {showFullAnswer && (
+                    <div className="mt-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                      <div className="prose prose-sm prose-slate max-w-none">
+                        <ReactMarkdown>{parsedAnswer.full}</ReactMarkdown>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Collapsible General Tips */}
+              <div className="mb-4">
+                <button
+                  onClick={() => setShowGenericTips(!showGenericTips)}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-left shadow-sm hover:bg-slate-50 transition-colors flex items-center justify-between"
+                >
+                  <span className="text-sm font-medium text-slate-700">General Medication Tips</span>
+                  <svg className={`h-4 w-4 text-slate-400 transition-transform ${showGenericTips ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {showGenericTips && (
+                  <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-4 shadow-sm">
+                    <ul className="space-y-2 text-sm text-slate-600">
+                      <li className="flex items-start gap-2">
+                        <span className="text-slate-400">•</span>
+                        <span>Always read the medication label and follow dosing instructions</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-slate-400">•</span>
+                        <span>Start with the lowest effective dose when possible</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-slate-400">•</span>
+                        <span>Consult a pharmacist if you have questions about drug interactions</span>
+                      </li>
+                      <li className="flex items-start gap-2">
+                        <span className="text-slate-400">•</span>
+                        <span>Keep a list of all medications you take, including supplements</span>
+                      </li>
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              {/* PubMed Articles - Simplified */}
+              {articles.length > 0 && (
+                <div className="mb-4">
+                  <h3 className="text-sm font-semibold text-slate-700 mb-2">Related Research</h3>
+                  <div className="space-y-2">
+                    {articles.slice(0, 3).map((a) => (
+                      <a
+                        key={a.id}
+                        href={a.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block rounded-lg border border-slate-200 bg-white p-3 shadow-sm hover:border-emerald-300 hover:shadow transition-all"
+                      >
+                        <p className="text-sm font-medium text-slate-800 line-clamp-2">{a.title}</p>
+                        <p className="mt-1 text-xs text-slate-500">{a.journal}{a.year ? ` • ${a.year}` : ""}</p>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {pubmedLoading && (
+                <p className="text-xs text-slate-500 mb-4">Loading related research...</p>
+              )}
+
+              {/* Collapsible Mechanism - Hidden by default */}
+              <div className="mb-4">
+                <button
+                  onClick={() => setShowMechanism(!showMechanism)}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-left shadow-sm hover:bg-slate-50 transition-colors flex items-center justify-between"
+                >
+                  <span className="text-sm font-medium text-slate-700">Show Drug Mechanism</span>
+                  <svg className={`h-4 w-4 text-slate-400 transition-transform ${showMechanism ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {showMechanism && (
+                  <div className="mt-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                    <table className="w-full text-left text-sm">
+                      <thead className="text-xs font-semibold text-slate-500 uppercase">
                         <tr>
-                          <th className="px-3 py-2">Primary Action</th>
-                          <th className="px-3 py-2">Duration</th>
+                          <th className="pb-2">Primary Action</th>
+                          <th className="pb-2">Duration</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-200">
+                      <tbody className="text-slate-700">
                         <tr>
-                          <td className="px-3 py-2 font-semibold text-slate-800">Pain relief / fever</td>
-                          <td className="px-3 py-2 text-slate-700">4-6 hours</td>
+                          <td className="py-1">Pain relief / fever reduction</td>
+                          <td className="py-1">4-6 hours</td>
                         </tr>
                         <tr>
-                          <td className="px-3 py-2 font-semibold text-slate-800">Anti-inflammatory</td>
-                          <td className="px-3 py-2 text-slate-700">6-12 hours</td>
+                          <td className="py-1">Anti-inflammatory effect</td>
+                          <td className="py-1">6-12 hours</td>
                         </tr>
                       </tbody>
                     </table>
-                  </div>
-                  <p className="mt-3 text-xs leading-relaxed text-slate-500">
-                    Placeholders for now (we'll auto-detect drugs + real mechanisms next).
-                  </p>
-                </div>
-              </div>
-            </section>
-
-            {/* Center */}
-            <section className="lg:col-span-6">
-              <div className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-lg shadow-slate-200/40">
-                <div className="flex items-center justify-between gap-3">
-                  <h2 className="text-sm font-extrabold tracking-tight text-slate-900">Direct Answer</h2>
-                  <div className="flex items-center gap-2">
-                    {/* Source label */}
-                    {source === "database" ? (
-                      <span className="rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-emerald-700 ring-1 ring-emerald-200">
-                        RxBuddy Answer
-                      </span>
-                    ) : (
-                      <span className="rounded-full bg-violet-50 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-violet-700 ring-1 ring-violet-200">
-                        AI Answer
-                      </span>
-                    )}
-                    {/* Saved to DB badge */}
-                    {savedToDb && (
-                      <span className="rounded-full bg-green-50 px-2 py-1 text-[10px] font-medium text-green-700 ring-1 ring-green-200">
-                        Added to database
-                      </span>
-                    )}
-                    {/* Confidence badge */}
-                    {topAnswer?.confidence === "HIGH" && (
-                      <span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-medium text-emerald-700 ring-1 ring-emerald-200">
-                        FDA Verified
-                      </span>
-                    )}
-                    {topAnswer?.confidence === "MEDIUM" && (
-                      <span className="rounded-full bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-700 ring-1 ring-amber-200">
-                        General Guidance
-                      </span>
-                    )}
-                    {topAnswer?.confidence === "LOW" && (
-                      <span className="rounded-full bg-rose-50 px-2 py-1 text-[10px] font-medium text-rose-700 ring-1 ring-rose-200">
-                        Consult Pharmacist
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Did you mean? banner */}
-                {didYouMean && (
-                  <div
-                    className="mt-4 cursor-pointer rounded-xl border border-amber-300 bg-amber-50 p-4 transition-colors hover:bg-amber-100"
-                    onClick={() => {
-                      router.push(`/results?q=${encodeURIComponent(didYouMean)}&engine=${encodeURIComponent(engine)}`);
-                    }}
-                  >
-                    <p className="text-sm font-medium text-amber-900">
-                      <span className="font-bold">Did you mean:</span>{" "}
-                      <span className="underline">{didYouMean}</span>?
-                    </p>
-                    <p className="mt-1 text-xs text-amber-700">Click to search with corrected spelling</p>
-                  </div>
-                )}
-
-                <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Question</p>
-                  <p className="mt-1 text-sm font-semibold text-slate-900">{q || "-"}</p>
-                </div>
-
-                {loading ? (
-                  <div className="mt-6 flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4">
-                    <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-200 border-t-brand-500" />
-                    <p className="text-sm font-medium text-slate-600">Generating your answer...</p>
-                  </div>
-                ) : error ? (
-                  <div className="mt-6 rounded-xl border border-rose-200 bg-rose-50 p-4">
-                    <p className="text-sm font-semibold text-rose-900">Couldn't load results</p>
-                    <p className="mt-1 text-sm text-rose-700">{error}</p>
-                    <p className="mt-3 text-xs text-rose-700">
-                      API base: <code className="rounded bg-rose-100 px-2 py-0.5 font-mono">{API_BASE}</code>
-                    </p>
-                  </div>
-                ) : (
-                  <>
-                    <div className={`mt-6 rounded-xl border p-4 ${topAnswer?.yesNo === "No" ? "border-rose-200 bg-rose-50" : "border-emerald-200 bg-emerald-50"}`}>
-                      <p className={`${topAnswer?.yesNo === "No" ? "text-rose-800" : "text-emerald-800"} text-lg font-extrabold`}>
-                        {topAnswer?.yesNo ? `${topAnswer.yesNo},` : "Direct answer"}
-                      </p>
-                      <p className="mt-1 text-sm font-medium text-slate-700">
-                        {topAnswer?.lead || (results?.[0]?.answer ? "Answer generated from Claude." : "Generating answer...")}
-                      </p>
-                      {/* Sources citation */}
-                      {topAnswer?.sources && (
-                        <p className="mt-2 text-xs text-slate-500">
-                          <span className="font-semibold">Sources:</span> {topAnswer.sources}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Show structured bullet sections ONLY if we have actual parsed content */}
-                    {topAnswer?.parsedAnything && (
-                      <div className="mt-5 space-y-4">
-                        {/* What to Do - only show if we have items */}
-                        {topAnswer?.whatToDo?.length > 0 && (
-                          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                            <p className="text-sm font-extrabold text-emerald-900">What to Do</p>
-                            <ul className="mt-3 space-y-2 text-sm text-emerald-950">
-                              {topAnswer.whatToDo.map((b, i) => (
-                                <li key={i} className="flex gap-2">
-                                  <span className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
-                                  <span className="leading-relaxed">{b}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-
-                        {/* What to Avoid - only show if we have items */}
-                        {topAnswer?.whatToAvoid?.length > 0 && (
-                          <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
-                            <p className="text-sm font-extrabold text-rose-900">What to Avoid</p>
-                            <ul className="mt-3 space-y-2 text-sm text-rose-950">
-                              {topAnswer.whatToAvoid.map((b, i) => (
-                                <li key={i} className="flex gap-2">
-                                  <span className="shrink-0 text-rose-700">!</span>
-                                  <span className="leading-relaxed">{b}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-
-                        {/* See a Doctor If - only show if we have items */}
-                        {topAnswer?.seeDoctorIf?.length > 0 && (
-                          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-                            <p className="text-sm font-extrabold text-amber-900">See a Doctor If</p>
-                            <ul className="mt-3 space-y-2 text-sm text-amber-950">
-                              {topAnswer.seeDoctorIf.map((b, i) => (
-                                <li key={i} className="flex gap-2">
-                                  <span className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-amber-500" />
-                                  <span className="leading-relaxed">{b}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* For plain text answers without structured format, show full answer */}
-                    {results?.[0]?.answer && topAnswer && (topAnswer.isPlainText || !topAnswer.parsedAnything) && (
-                      <div className="mt-6 rounded-xl border border-slate-200 bg-white p-4">
-                        <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Detailed Answer</p>
-                        <div className="mt-3 prose prose-sm prose-slate max-w-none">
-                          <ReactMarkdown>{String(results[0].answer)}</ReactMarkdown>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            </section>
-
-            {/* Right */}
-            <section className="lg:col-span-3">
-              <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-lg shadow-slate-200/40">
-                <h2 className="text-sm font-extrabold tracking-tight text-slate-900">Authoritative Scholar Articles</h2>
-                <p className="mt-1 text-xs text-slate-500">Real results from PubMed (NCBI).</p>
-
-                {pubmedLoading ? (
-                  <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-sm font-medium text-slate-600">Fetching PubMed articles...</p>
-                  </div>
-                ) : pubmedError ? (
-                  <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4">
-                    <p className="text-sm font-semibold text-rose-900">Couldn't load PubMed</p>
-                    <p className="mt-1 text-sm text-rose-700">{pubmedError}</p>
-                  </div>
-                ) : articles.length === 0 ? (
-                  <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-sm font-medium text-slate-600">No articles found yet.</p>
-                  </div>
-                ) : (
-                  <div className="mt-4 space-y-3">
-                    {articles.slice(0, 3).map((a) => (
-                      <div key={a.id} className="rounded-xl border border-slate-200 bg-white p-4">
-                        <p className="text-sm font-bold leading-snug text-slate-900">{a.title}</p>
-                        <p className="mt-1 text-xs font-medium text-slate-500">
-                          {a.journal}
-                          {a.year ? `, ${a.year}` : ""}
-                        </p>
-                        <div className="mt-3 rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200">
-                          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Key takeaway</p>
-                          <p className="mt-1 text-xs text-slate-700">{a.takeaway}</p>
-                        </div>
-                        <a
-                          href={a.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="mt-3 inline-flex w-full items-center justify-center rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-700 hover:bg-brand-100"
-                        >
-                          PubMed
-                        </a>
-                      </div>
-                    ))}
+                    <p className="mt-3 text-xs text-slate-500">Drug mechanism data will be populated based on detected drugs.</p>
                   </div>
                 )}
               </div>
-            </section>
-          </main>
+            </>
+          )}
 
-          <div className="mt-8 rounded-2xl border border-slate-200/80 bg-white p-5 text-xs text-slate-500 shadow-sm">
-            RxBuddy provides general information and is not a substitute for professional medical advice. If symptoms are severe or you feel unsafe, seek urgent care.
+          {/* Footer Disclaimer */}
+          <div className="mt-6 rounded-lg bg-slate-100 p-4 text-center">
+            <p className="text-xs text-slate-500">
+              RxBuddy provides general information only. Always consult a healthcare professional for medical advice.
+            </p>
           </div>
         </div>
       </div>

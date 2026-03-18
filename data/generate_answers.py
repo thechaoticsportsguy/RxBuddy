@@ -32,32 +32,40 @@ def _anthropic_key() -> str:
 
 def _make_prompt(question: str) -> str:
     """
-    Create a prompt that generates answers in our structured format.
+    Create a prompt that generates answers in VERDICT format.
     
     Output format:
-    DIRECT: [one sentence direct answer]
-    DO: [action 1] | [action 2] | [action 3]
-    AVOID: [thing 1] | [thing 2] | [thing 3]
-    DOCTOR: [warning 1] | [warning 2]
+    VERDICT: YES/NO/CONDITIONAL — [reason]
+    REASON: [explanation]
+    AVOID: [item 1] | [item 2]
+    ALTERNATIVES: [option 1] | [option 2]
+    WARNING: [sign 1] | [sign 2]
+    CONFIDENCE: HIGH/MEDIUM/LOW
+    SOURCES: [source]
     """
-    return f"""You are a licensed pharmacist answering this SPECIFIC patient question.
-Give a DIRECT answer to exactly what they asked - not generic advice.
+    return f"""You are a licensed clinical pharmacist giving a clear, actionable answer.
 
 Patient Question: {question}
 
-You MUST respond in this EXACT format (use | to separate items):
+Respond in this EXACT format:
 
-DIRECT: [One clear sentence answering their specific question - start with Yes/No if applicable]
-DO: [Specific action for this drug/situation] | [Another specific action] | [Third specific action]
-AVOID: [Specific thing to avoid for this drug] | [Another thing to avoid] | [Third thing to avoid]
-DOCTOR: [Specific warning sign for this situation] | [Another warning sign]
+VERDICT: [YES/NO/CONDITIONAL] — [one specific reason in under 10 words]
+REASON: [One clear sentence explaining why]
+AVOID: [specific thing 1] | [specific thing 2] | [specific thing 3]
+ALTERNATIVES: [safe option 1] | [safe option 2] (only if relevant)
+WARNING: [specific warning sign 1] | [specific warning sign 2]
+CONFIDENCE: [HIGH/MEDIUM/LOW]
+SOURCES: [Clinical guideline / Established pharmacology]
 
-IMPORTANT RULES:
-- Be SPECIFIC to the drugs and situations mentioned in their question
-- Do NOT use generic advice like "follow package directions" or "consult your pharmacist"
-- Each DO/AVOID/DOCTOR item should be actionable and specific to their question
-- Keep each item under 15 words
-- Separate items with | character"""
+CRITICAL RULES:
+- VERDICT must start with YES, NO, or CONDITIONAL
+- YES = safe to do what they asked
+- NO = not safe / not recommended
+- CONDITIONAL = depends on circumstances
+- Be SPECIFIC to the drugs mentioned - no generic advice
+- NEVER say "follow package directions" or "ask your pharmacist"
+- Keep each item under 12 words
+- Use | to separate multiple items"""
 
 
 def _generate_answer(question: str) -> str:

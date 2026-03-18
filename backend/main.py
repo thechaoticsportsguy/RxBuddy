@@ -567,66 +567,64 @@ def _generate_ai_answer(question: str) -> str:
     try:
         client = anthropic.Anthropic(api_key=api_key)
 
-        # Build the prompt - FDA data supplements clinical knowledge, doesn't restrict it
+        # Build the prompt with VERDICT format for clear YES/NO/CONDITIONAL answers
         if fda_context:
-            # We have FDA data - use it as primary source but allow clinical knowledge
-            prompt = f"""You are a licensed clinical pharmacist. Answer this specific patient question accurately.
+            prompt = f"""You are a licensed clinical pharmacist giving a clear, actionable answer.
 
-Use this FDA label data as your PRIMARY source if relevant:
+FDA LABEL DATA (use as primary source):
 {fda_context}
 
-If the FDA label doesn't directly address the question, use your established clinical pharmacology knowledge to answer. You are a pharmacist — you have medical training beyond just the FDA label.
-
-CRITICAL: Never say "I don't have enough information" for well-known drug interactions like ibuprofen + alcohol, acetaminophen + liver, or NSAIDs + bleeding. These are established medical facts that any pharmacist knows.
-
-Only say "consult a pharmacist" for genuinely rare or complex interactions not covered by standard pharmacology.
+If FDA data doesn't address the question, use established clinical pharmacology knowledge.
 
 PATIENT QUESTION: {question}
 
-Provide your structured answer in this EXACT format (use | to separate items):
+Respond in this EXACT format:
 
-DIRECT: [One clear sentence answering their specific question - start with Yes/No if applicable]
-DO: [Specific action for this drug/situation] | [Another specific action] | [Third specific action]
-AVOID: [Specific thing to avoid for this drug] | [Another thing to avoid] | [Third thing to avoid]
-DOCTOR: [Specific warning sign for this situation] | [Another warning sign]
-SOURCES: [FDA label / Clinical pharmacology / Established medical knowledge]
-CONFIDENCE: [HIGH if supported by FDA data or established pharmacology / MEDIUM if general guidance / LOW only for truly rare situations]
+VERDICT: [YES/NO/CONDITIONAL] — [one specific reason in under 10 words]
+REASON: [One clear sentence explaining why]
+AVOID: [specific thing 1] | [specific thing 2] | [specific thing 3]
+ALTERNATIVES: [safe option 1] | [safe option 2] (include ONLY if question asks about interactions or alternatives)
+WARNING: [specific warning sign 1] | [specific warning sign 2]
+CONFIDENCE: [HIGH/MEDIUM/LOW]
+SOURCES: [FDA label / Clinical guideline / Established pharmacology]
 
-IMPORTANT RULES:
-- Be SPECIFIC to the drugs and situations mentioned
-- Do NOT use generic advice like "follow package directions"
-- Each item should be actionable and specific
-- Keep each item under 15 words
-- Separate items with | character
-- Answer confidently for common drug questions — you are a trained pharmacist"""
+CRITICAL RULES:
+- VERDICT must start with YES, NO, or CONDITIONAL
+- YES = safe to do what they asked
+- NO = not safe / not recommended
+- CONDITIONAL = depends on specific circumstances (explain in reason)
+- Be SPECIFIC to the drugs mentioned - no generic advice
+- NEVER say "follow package directions" or "ask your pharmacist"
+- Keep each item actionable and under 12 words
+- Use | to separate multiple items
+- ALTERNATIVES only needed for interaction/compatibility questions"""
         else:
-            # No FDA data available - use clinical pharmacology knowledge
-            prompt = f"""You are a licensed clinical pharmacist. Answer this specific patient question accurately.
+            prompt = f"""You are a licensed clinical pharmacist giving a clear, actionable answer.
 
-Use your established clinical pharmacology knowledge to answer. You are a trained pharmacist with medical expertise.
-
-CRITICAL: Never say "I don't have enough information" for well-known drug interactions like ibuprofen + alcohol, acetaminophen + liver, or NSAIDs + bleeding. These are established medical facts that any pharmacist knows.
-
-Only say "consult a pharmacist" for genuinely rare or complex interactions not covered by standard pharmacology.
+Use your established clinical pharmacology knowledge.
 
 PATIENT QUESTION: {question}
 
-Provide your structured answer in this EXACT format (use | to separate items):
+Respond in this EXACT format:
 
-DIRECT: [One clear sentence answering their specific question - start with Yes/No if applicable]
-DO: [Specific action for this drug/situation] | [Another specific action] | [Third specific action]
-AVOID: [Specific thing to avoid for this drug] | [Another thing to avoid] | [Third thing to avoid]
-DOCTOR: [Specific warning sign for this situation] | [Another warning sign]
-SOURCES: [Clinical pharmacology / Established medical knowledge]
-CONFIDENCE: [HIGH for established pharmacology facts / MEDIUM for general guidance / LOW only for truly rare situations]
+VERDICT: [YES/NO/CONDITIONAL] — [one specific reason in under 10 words]
+REASON: [One clear sentence explaining why]
+AVOID: [specific thing 1] | [specific thing 2] | [specific thing 3]
+ALTERNATIVES: [safe option 1] | [safe option 2] (include ONLY if question asks about interactions or alternatives)
+WARNING: [specific warning sign 1] | [specific warning sign 2]
+CONFIDENCE: [HIGH/MEDIUM/LOW]
+SOURCES: [Clinical guideline / Established pharmacology]
 
-IMPORTANT RULES:
-- Be SPECIFIC to the drugs and situations mentioned
-- Do NOT use generic advice like "follow package directions"
-- Each item should be actionable and specific
-- Keep each item under 15 words
-- Separate items with | character
-- Answer confidently for common drug questions — you are a trained pharmacist"""
+CRITICAL RULES:
+- VERDICT must start with YES, NO, or CONDITIONAL
+- YES = safe to do what they asked
+- NO = not safe / not recommended
+- CONDITIONAL = depends on specific circumstances (explain in reason)
+- Be SPECIFIC to the drugs mentioned - no generic advice
+- NEVER say "follow package directions" or "ask your pharmacist"
+- Keep each item actionable and under 12 words
+- Use | to separate multiple items
+- ALTERNATIVES only needed for interaction/compatibility questions"""
 
         logger.info("[Claude] Sending question with FDA grounding to claude-sonnet-4-20250514: %.80s...", question)
 
