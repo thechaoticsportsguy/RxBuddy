@@ -211,61 +211,78 @@ def _fetch_fda_label(drug_name: str) -> dict | None:
 
 def _build_fda_context(fda_data: dict | None, question: str, medlineplus_data: dict | None = None) -> str:
     """
-    Build a context string from FDA label data for Claude.
-    Only includes sections relevant to the question.
-    Appends MedlinePlus patient-friendly summary at the bottom if available.
+    Build a grounded context string for Claude.
+    FDA clinical data is the source of truth for interactions, contraindications,
+    warnings, and severity. MedlinePlus is included only for patient-friendly
+    explanations and side-effect descriptions.
     """
     if not fda_data and not medlineplus_data:
         return ""
-    
+
     q_lower = question.lower()
-    sections = []
-    
-    # Always include drug name
-    sections.append(f"Drug: {fda_data.get('drug_name', 'Unknown')}")
-    
-    # Include relevant sections based on question keywords
-    if any(w in q_lower for w in ["dose", "dosage", "how much", "how many", "take"]):
-        if fda_data.get("dosage_and_administration"):
-            sections.append(f"DOSAGE: {fda_data['dosage_and_administration'][:500]}")
-    
-    if any(w in q_lower for w in ["warning", "danger", "risk", "safe"]):
-        if fda_data.get("warnings"):
-            sections.append(f"WARNINGS: {fda_data['warnings'][:500]}")
-    
-    if any(w in q_lower for w in ["interact", "with", "mix", "combine", "together"]):
-        if fda_data.get("drug_interactions"):
-            sections.append(f"INTERACTIONS: {fda_data['drug_interactions'][:500]}")
-    
-    if any(w in q_lower for w in ["pregnant", "pregnancy", "breastfeed", "nursing"]):
-        if fda_data.get("pregnancy"):
-            sections.append(f"PREGNANCY: {fda_data['pregnancy'][:500]}")
-    
-    if any(w in q_lower for w in ["side effect", "reaction", "adverse"]):
-        if fda_data.get("adverse_reactions"):
-            sections.append(f"SIDE EFFECTS: {fda_data['adverse_reactions'][:500]}")
-    
-    if any(w in q_lower for w in ["shouldn't", "should not", "can't", "cannot", "avoid"]):
-        if fda_data.get("contraindications"):
-            sections.append(f"CONTRAINDICATIONS: {fda_data['contraindications'][:500]}")
-    
-    # If no specific sections matched, include warnings and dosage as default
-    if fda_data and len(sections) == 1:
-        if fda_data.get("warnings"):
-            sections.append(f"WARNINGS: {fda_data['warnings'][:400]}")
-        if fda_data.get("dosage_and_administration"):
-            sections.append(f"DOSAGE: {fda_data['dosage_and_administration'][:400]}")
 
-    # Append MedlinePlus patient-friendly summary for additional grounding
+    fda_sections: list[str] = []
+    medline_sections: list[str] = []
+    drug_name = (fda_data or {}).get("drug_name", "Unknown")
+
+    if fda_data:
+        fda_sections.append("FDA CLINICAL DATA")
+        fda_sections.append(f"Drug: {drug_name}")
+
+        if fda_data.get("indications_and_usage"):
+            fda_sections.append(f"INDICATIONS: {fda_data['indications_and_usage'][:400]}")
+
+        if any(w in q_lower for w in ["dose", "dosage", "how much", "how many", "take"]):
+            if fda_data.get("dosage_and_administration"):
+                fda_sections.append(f"DOSAGE AND ADMINISTRATION: {fda_data['dosage_and_administration'][:500]}")
+
+        if any(w in q_lower for w in ["warning", "danger", "risk", "safe", "unsafe"]):
+            if fda_data.get("warnings"):
+                fda_sections.append(f"WARNINGS: {fda_data['warnings'][:500]}")
+
+        if any(w in q_lower for w in ["interact", "interaction", "with", "mix", "combine", "together"]):
+            if fda_data.get("drug_interactions"):
+                fda_sections.append(f"DRUG INTERACTIONS: {fda_data['drug_interactions'][:500]}")
+
+        if any(w in q_lower for w in ["shouldn't", "should not", "can't", "cannot", "avoid", "contraindication"]):
+            if fda_data.get("contraindications"):
+                fda_sections.append(f"CONTRAINDICATIONS: {fda_data['contraindications'][:500]}")
+
+        if any(w in q_lower for w in ["pregnant", "pregnancy", "breastfeed", "nursing"]):
+            if fda_data.get("pregnancy"):
+                fda_sections.append(f"PREGNANCY: {fda_data['pregnancy'][:500]}")
+
+        if any(w in q_lower for w in ["side effect", "reaction", "adverse"]):
+            if fda_data.get("adverse_reactions"):
+                fda_sections.append(f"ADVERSE REACTIONS: {fda_data['adverse_reactions'][:500]}")
+
+        if len(fda_sections) <= 2:
+            if fda_data.get("warnings"):
+                fda_sections.append(f"WARNINGS: {fda_data['warnings'][:400]}")
+            if fda_data.get("contraindications"):
+                fda_sections.append(f"CONTRAINDICATIONS: {fda_data['contraindications'][:400]}")
+            if fda_data.get("drug_interactions"):
+                fda_sections.append(f"DRUG INTERACTIONS: {fda_data['drug_interactions'][:400]}")
+            if fda_data.get("dosage_and_administration"):
+                fda_sections.append(f"DOSAGE AND ADMINISTRATION: {fda_data['dosage_and_administration'][:300]}")
+
     if medlineplus_data:
+        medline_sections.append("MEDLINEPLUS PATIENT SUMMARY")
+        medline_sections.append("Use this section only for plain-English explanation and side-effect descriptions.")
         if medlineplus_data.get("summary"):
-            sections.append(f"MEDLINEPLUS SUMMARY: {medlineplus_data['summary']}")
+            medline_sections.append(f"SUMMARY: {medlineplus_data['summary']}")
         if medlineplus_data.get("usage"):
-            sections.append(f"MEDLINEPLUS USAGE: {medlineplus_data['usage']}")
+            medline_sections.append(f"PLAIN-ENGLISH USE: {medlineplus_data['usage']}")
         if medlineplus_data.get("side_effects"):
-            sections.append(f"MEDLINEPLUS SIDE EFFECTS: {medlineplus_data['side_effects']}")
+            medline_sections.append(f"PATIENT SIDE EFFECTS: {medlineplus_data['side_effects']}")
 
-    return "\n".join(sections)
+    sections: list[str] = []
+    if fda_sections:
+        sections.append("\n".join(fda_sections))
+    if medline_sections:
+        sections.append("\n".join(medline_sections))
+
+    return "\n\n".join(sections)
 
 
 def _fetch_rxnorm_drug_names(limit: int = 1000) -> set[str]:
@@ -783,7 +800,7 @@ def _validate_ai_answer(question: str, answer: str) -> str:
     import anthropic
     try:
         client = anthropic.Anthropic(api_key=api_key)
-        validation_prompt = f"""Check this medication answer for accuracy:
+        validation_prompt = f"""Check this medication answer for accuracy and verdict consistency:
 
 ORIGINAL QUESTION: {question}
 ANSWER TO CHECK: {answer}
@@ -792,9 +809,21 @@ Verify:
 1. Does the answer ONLY mention drugs from the original question?
 2. Does it directly answer the question type (dosing/interaction/pregnancy/side effects)?
 3. Is there any unrelated medication mentioned?
+4. Does the VERDICT match the explanation?
+5. If the explanation mentions a moderate interaction, monitoring, kidney strain, lactic acidosis risk, or "use with caution", the VERDICT must be CAUTION and never SAFE.
+6. If the explanation mentions a serious interaction, contraindication, major bleeding risk, or "do not take together", the VERDICT must be AVOID.
 
 If any issue found → rewrite the answer correctly following the same output structure.
 If answer is correct → return it unchanged.
+If any issue is found, use EXACTLY this structure:
+VERDICT: ...
+DIRECT: ...
+WHY: ...
+DO: item 1 | item 2
+AVOID: item 1 | item 2
+DOCTOR: item 1 | item 2
+CONFIDENCE: ...
+SOURCES: ...
 Return ONLY the final answer, no commentary."""
 
         response = client.messages.create(
@@ -882,25 +911,27 @@ STRICT RULES:
 - NEVER hallucinate
 - If unsure → return CONSULT PHARMACIST
 - NEVER say SAFE if ANY risk exists
+- FDA clinical data is the source of truth for interactions, contraindications, warnings, and severity
+- MedlinePlus is only for plain-English explanation and side effects
+- If sources conflict, always choose the more dangerous interpretation
 
 RESPONSE FORMAT (return exactly this):
 
-## Verdict: [SAFE / CAUTION / AVOID / CONSULT PHARMACIST]
+VERDICT: [SAFE / CAUTION / AVOID / CONSULT PHARMACIST]
+DIRECT: one plain-English sentence that directly answers the question
+WHY: 1-2 plain-English sentences explaining the risk or lack of risk
+DO: action item 1 | action item 2
+AVOID: thing to avoid 1 | thing to avoid 2
+DOCTOR: red flag symptom 1 | red flag symptom 2
+CONFIDENCE: [HIGH / MEDIUM / LOW]
+SOURCES: FDA label | MedlinePlus | RxNorm
 
-### Why this matters
-Clear 1-2 sentence explanation of the risk.
-
-### What happens
-Mechanism in plain English.
-
-### What you should do
-Actionable steps (monitor, avoid, spacing, timing, etc.)
-
-### When to get help
-Red flag symptoms only.
-
-### Disclaimer
-This information is for educational purposes only and does not replace professional medical advice.
+FORMAT RULES:
+- Use the exact uppercase labels above
+- Do not use markdown headings
+- Do not return bullets outside the DO / AVOID / DOCTOR lines
+- If there is a moderate interaction or monitoring need, VERDICT must be CAUTION
+- If there is a serious interaction, contraindication, or major harm risk, VERDICT must be AVOID
 
 FINAL VALIDATION (run silently before output):
 1. Do drugs in answer match drugs in question?
@@ -1074,6 +1105,140 @@ class StructuredAnswer(BaseModel):
     raw: str = ""  # Original raw answer text
     confidence: str = "MEDIUM"  # HIGH, MEDIUM, or LOW
     sources: str = ""  # FDA label, DailyMed, etc.
+    interaction_summary: dict[str, list[str]] = Field(
+        default_factory=lambda: {"avoid_pairs": [], "caution_pairs": []}
+    )
+
+
+DOSAGE_TERMS = (
+    "dosage", "dose", "how much", "how many", "how to take",
+    "when to take", "maximum dose", "max dose", "mg", "milligram",
+    "dosing", "strength", "how often",
+)
+
+SIDE_EFFECT_TERMS = (
+    "side effect", "side effects", "adverse effect", "adverse effects",
+    "reaction", "reactions", "symptom", "symptoms",
+)
+
+INFORMATIONAL_TERMS = (
+    "side effect", "side effects", "adverse effect", "adverse effects",
+    "what is", "what are", "how does", "explain", "reaction", "reactions",
+)
+
+AVOID_PHRASES = (
+    "avoid taking", "do not take", "not recommended", "bleeding risk",
+    "contraindicated", "should not be taken together", "dangerous combination",
+    "increased risk of bleeding", "major interaction", "severe interaction",
+    "serious interaction", "avoid this combination", "do not combine",
+    "not safe together", "should be avoided", "high risk", "black box warning",
+)
+
+CAUTION_PHRASES = (
+    "moderate interaction", "use with caution", "monitor", "monitoring",
+    "may increase risk", "can increase risk", "increased risk", "kidney strain",
+    "kidney stress", "renal risk", "renal impairment", "lactic acidosis risk",
+    "may worsen", "can worsen", "not ideal", "be careful", "watch for side effects",
+    "needs closer monitoring", "dose adjustment may be needed",
+    "generally well tolerated but", "slight risk", "small risk", "rare risk",
+    "may slightly increase", "not completely safe", "should be monitored",
+    "mild interaction", "possible interaction",
+)
+
+SAFE_PHRASES = (
+    "no known interaction", "no significant interaction", "generally safe",
+    "no clinically significant interaction", "safe to take together",
+    "no major interaction", "compatible together", "typically safe",
+    "low interaction risk",
+)
+
+NSAID_DRUGS = {"ibuprofen", "naproxen", "aspirin"}
+ANTICOAGULANT_DRUGS = {"warfarin", "heparin"}
+RENAL_RISK_DRUGS = {"metformin", "lisinopril", "losartan"}
+
+EXPLICIT_PAIR_RISKS: dict[tuple[str, str], str] = {
+    ("ibuprofen", "warfarin"): "AVOID",
+    ("naproxen", "warfarin"): "AVOID",
+    ("aspirin", "warfarin"): "AVOID",
+    ("heparin", "ibuprofen"): "AVOID",
+    ("heparin", "naproxen"): "AVOID",
+    ("heparin", "aspirin"): "AVOID",
+    ("ibuprofen", "metformin"): "CAUTION",
+    ("ibuprofen", "lisinopril"): "CAUTION",
+    ("ibuprofen", "losartan"): "CAUTION",
+    ("naproxen", "metformin"): "CAUTION",
+    ("naproxen", "lisinopril"): "CAUTION",
+    ("naproxen", "losartan"): "CAUTION",
+    ("aspirin", "metformin"): "CAUTION",
+    ("aspirin", "lisinopril"): "CAUTION",
+    ("aspirin", "losartan"): "CAUTION",
+}
+
+
+def _contains_any(haystack: str, phrases: tuple[str, ...] | list[str]) -> bool:
+    return any(phrase in haystack for phrase in phrases)
+
+
+def _normalize_pair(drug_a: str, drug_b: str) -> tuple[str, str]:
+    return tuple(sorted((drug_a.strip().lower(), drug_b.strip().lower())))
+
+
+def _pair_label(pair: tuple[str, str]) -> str:
+    return f"{pair[0]} + {pair[1]}"
+
+
+def _evaluate_pair_interaction(drug_a: str, drug_b: str) -> str:
+    """
+    Deterministic backend interaction classification for a drug pair.
+    Returns SAFE, CAUTION, or AVOID.
+    """
+    left, right = _normalize_pair(drug_a, drug_b)
+    if left == right:
+        return "SAFE"
+
+    explicit = EXPLICIT_PAIR_RISKS.get((left, right))
+    if explicit:
+        return explicit
+
+    pair_set = {left, right}
+    if pair_set & NSAID_DRUGS and pair_set & ANTICOAGULANT_DRUGS:
+        return "AVOID"
+    if pair_set & NSAID_DRUGS and pair_set & RENAL_RISK_DRUGS:
+        return "CAUTION"
+
+    return "SAFE"
+
+
+def _evaluate_pairwise_interactions(drugs: list[str]) -> tuple[str, dict[str, list[str]]]:
+    """
+    Evaluate all unique drug pairs in the query and return the aggregate risk.
+    Final rule:
+    - if ANY pair is AVOID => AVOID
+    - elif ANY pair is CAUTION => CAUTION
+    - else SAFE
+    """
+    unique_drugs = list(dict.fromkeys(d.strip().lower() for d in drugs if d and d.strip()))
+    summary = {"avoid_pairs": [], "caution_pairs": []}
+
+    if len(unique_drugs) < 2:
+        return "CONSULT_PHARMACIST", summary
+
+    saw_caution = False
+    for i, left in enumerate(unique_drugs):
+        for right in unique_drugs[i + 1:]:
+            pair_verdict = _evaluate_pair_interaction(left, right)
+            label = _pair_label(_normalize_pair(left, right))
+            if pair_verdict == "AVOID":
+                summary["avoid_pairs"].append(label)
+            elif pair_verdict == "CAUTION":
+                summary["caution_pairs"].append(label)
+                saw_caution = True
+
+    if summary["avoid_pairs"]:
+        return "AVOID", summary
+    if saw_caution:
+        return "CAUTION", summary
+    return "SAFE", summary
 
 
 def _extract_verdict(text: str, question: str = "") -> str:
@@ -1333,113 +1498,467 @@ def _post_process_cached_answer(answer_text: str) -> str:
     return "\n".join(processed_lines)
 
 
+def _extract_verdict(text: str, question: str = "") -> str:
+    """
+    Robustly extract a backend verdict and keep it consistent with the explanation.
+    Priority order: AVOID > CAUTION > SAFE > CONSULT_PHARMACIST.
+    """
+    if not text:
+        return "CONSULT_PHARMACIST"
+
+    normalized_text = text.replace("\r\n", "\n")
+    lower_text = normalized_text.lower()
+    q_lower = question.lower() if question else ""
+
+    dosage_terms = [
+        "dosage", "dose", "how much", "how many", "how to take",
+        "when to take", "maximum dose", "max dose", "mg", "milligram",
+        "dosing", "strength", "how often",
+    ]
+    side_effect_terms = [
+        "side effect", "side effects", "adverse effect", "adverse effects",
+        "reaction", "reactions", "symptom", "symptoms",
+    ]
+    avoid_phrases = [
+        "avoid taking", "do not take", "not recommended", "bleeding risk",
+        "contraindicated", "should not be taken together", "dangerous combination",
+        "increased risk of bleeding", "major interaction", "severe interaction",
+        "serious interaction", "avoid this combination", "do not combine",
+        "not safe together", "should be avoided", "high risk", "black box warning",
+    ]
+    caution_phrases = [
+        "moderate interaction", "use with caution", "monitor", "monitoring",
+        "may increase risk", "can increase risk", "increased risk", "kidney strain",
+        "kidney stress", "renal risk", "renal impairment", "lactic acidosis risk",
+        "may worsen", "can worsen", "not ideal", "be careful", "watch for side effects",
+        "needs closer monitoring", "dose adjustment may be needed",
+    ]
+    safe_phrases = [
+        "no known interaction", "no significant interaction", "generally safe",
+        "no clinically significant interaction", "safe to take together",
+        "no major interaction", "compatible together", "typically safe",
+        "low interaction risk",
+    ]
+
+    def _contains_any(haystack: str, phrases: list[str]) -> bool:
+        return any(phrase in haystack for phrase in phrases)
+
+    def _extract_explicit_verdict(raw_text: str) -> str | None:
+        for raw_line in raw_text.split("\n"):
+            line = raw_line.strip()
+            if not line:
+                continue
+            line = re.sub(r"^[#*\-\s]+", "", line)
+            upper_line = line.upper()
+            if upper_line.startswith("ANSWER:") or upper_line.startswith("VERDICT:"):
+                val = upper_line.split(":", 1)[1].strip() if ":" in upper_line else ""
+                if val.startswith("SAFE") or val.startswith("YES") or val.startswith("USUALLY YES"):
+                    return "SAFE"
+                if val.startswith("AVOID") or val.startswith("NO"):
+                    return "AVOID"
+                if val.startswith("CAUTION") or val.startswith("MAYBE") or val.startswith("DEPENDS") or val.startswith("IT DEPENDS"):
+                    return "CAUTION"
+                if val.startswith("NEEDS REVIEW") or val.startswith("CONSULT") or val.startswith("ASK"):
+                    return "CONSULT_PHARMACIST"
+        return None
+
+    # Intent override comes first so informational queries resolve consistently.
+    if _contains_any(q_lower, dosage_terms):
+        return "CONSULT_PHARMACIST"
+    if _contains_any(q_lower, side_effect_terms):
+        return "CAUTION"
+
+    if _contains_any(lower_text, avoid_phrases):
+        return "AVOID"
+    if _contains_any(lower_text, caution_phrases):
+        return "CAUTION"
+
+    explicit_verdict = _extract_explicit_verdict(normalized_text)
+    if explicit_verdict == "CAUTION" and _contains_any(lower_text, avoid_phrases):
+        return "AVOID"
+    if explicit_verdict == "SAFE":
+        if _contains_any(lower_text, avoid_phrases):
+            return "AVOID"
+        if _contains_any(lower_text, caution_phrases):
+            return "CAUTION"
+        return "SAFE"
+    if explicit_verdict == "AVOID":
+        return "AVOID"
+    if explicit_verdict == "CAUTION":
+        return "CAUTION"
+    if explicit_verdict == "CONSULT_PHARMACIST":
+        return explicit_verdict
+
+    upper_text = normalized_text.upper()
+    has_safe_signal = _contains_any(lower_text, safe_phrases) or any(
+        phrase in upper_text for phrase in [
+            "YES, YOU CAN", "YES YOU CAN", "IT IS SAFE", "GENERALLY SAFE",
+            "USUALLY SAFE", "TYPICALLY SAFE", "YES,", "ANSWER: YES",
+            "âœ… SAFE", "SAFETY LEVEL", "SAFETY LEVEL: SAFE",
+        ]
+    )
+    if has_safe_signal and not _contains_any(lower_text, caution_phrases) and not _contains_any(lower_text, avoid_phrases):
+        return "SAFE"
+
+    if any(phrase in upper_text for phrase in [
+        "NO, YOU SHOULD NOT", "NO YOU SHOULD NOT", "DO NOT TAKE",
+        "NOT RECOMMENDED", "AVOID TAKING", "SHOULD NOT TAKE",
+        "NO,", "ANSWER: NO", "CONTRAINDICATED",
+        "âŒ AVOID", "AVOID / CONTRAINDICATED",
+    ]):
+        return "AVOID"
+
+    if any(phrase in upper_text for phrase in [
+        "DEPENDS ON", "IT DEPENDS", "CASE BY CASE", "VARIES",
+        "POSSIBLY", "MIGHT BE", "COULD BE", "SOMETIMES",
+        "âš ï¸ USE WITH CAUTION", "USE WITH CAUTION",
+    ]):
+        return "CAUTION"
+
+    return "CONSULT_PHARMACIST"
+
+
 def _parse_structured_answer(answer_text: str, question: str = "") -> StructuredAnswer:
     """
-    Parse Claude's structured answer format into StructuredAnswer object.
-    
-    Expected format:
-    Answer: YES / NO / MAYBE / NEEDS REVIEW
-    Why: [explanation]
-    Important notes: [bullets]
-    Get medical help now if: [bullets]
-    
-    Also supports legacy formats. Falls back gracefully if format doesn't match.
-    Always returns a valid verdict (never null).
-    
-    ISSUE 4 FIX: Accepts question parameter to determine if this is an
-    informational question that should get CONSULT_PHARMACIST verdict.
+    Parse Claude output into StructuredAnswer using regex-based extraction.
+    Handles minor formatting drift and never raises on malformed model output.
     """
     result = StructuredAnswer(raw=answer_text, verdict="CONSULT_PHARMACIST")
-    
+
     if not answer_text:
         return result
-    
-    # Post-process the cached answer for cleaner rendering
-    text = _post_process_cached_answer(answer_text.strip())
-    result.raw = text
-    
-    # Extract verdict robustly - this ALWAYS returns a valid verdict
-    # ISSUE 4 FIX: Pass question to detect informational vs binary questions
-    result.verdict = _extract_verdict(text, question)
-    
-    lines = text.split("\n")
-    
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        
-        line_upper = line.upper()
-            
-        # Parse DIRECT: line
-        if line_upper.startswith("DIRECT:"):
-            result.direct = line[7:].strip()
-            
-        # Parse WHY: line (new format)
-        elif line_upper.startswith("WHY:"):
-            result.direct = result.direct or line[4:].strip()
-            
-        # Parse DO: line
-        elif line_upper.startswith("DO:"):
-            items = line[3:].split("|")
-            result.do = [item.strip() for item in items if item.strip()]
-            
-        # Parse AVOID: line
-        elif line_upper.startswith("AVOID:"):
-            items = line[6:].split("|")
-            result.avoid = [item.strip() for item in items if item.strip()]
-            
-        # Parse DOCTOR: / WARNING: line
-        elif line_upper.startswith("DOCTOR:") or line_upper.startswith("WARNING:"):
-            prefix_len = 7 if line_upper.startswith("DOCTOR:") else 8
-            items = line[prefix_len:].split("|")
-            result.doctor = [item.strip() for item in items if item.strip()]
-            
-        # Parse GET MEDICAL HELP lines
-        elif "GET MEDICAL HELP" in line_upper or "SEEK MEDICAL" in line_upper:
-            # Extract items after the colon if present
-            if ":" in line:
-                items = line.split(":", 1)[1].split("|")
-                result.doctor.extend([item.strip() for item in items if item.strip()])
-            
-        # Parse CONFIDENCE: line
-        elif line_upper.startswith("CONFIDENCE:"):
-            conf = line[11:].strip().upper()
-            if conf in ("HIGH", "MEDIUM", "LOW"):
-                result.confidence = conf
-            elif "HIGH" in conf:
-                result.confidence = "HIGH"
-            elif "LOW" in conf:
-                result.confidence = "LOW"
-            else:
-                result.confidence = "MEDIUM"
-                
-        # Parse SOURCES: line
-        elif line_upper.startswith("SOURCES:"):
-            result.sources = line[8:].strip()
-    
-    # Fallback: if nothing was parsed, try to extract something useful
-    if not result.direct and not result.do and not result.avoid:
-        # Use first sentence as direct answer
-        sentences = text.replace("\n", " ").split(".")
-        if sentences:
+
+    try:
+        text = _post_process_cached_answer(answer_text.strip())
+        result.raw = text
+
+        def _normalize_verdict(value: str) -> str:
+            upper = value.strip().upper().replace("-", " ").replace("_", " ")
+            upper = re.sub(r"\s+", " ", upper)
+            if upper.startswith("AVOID") or upper.startswith("NO"):
+                return "AVOID"
+            if upper.startswith("CAUTION") or upper.startswith("MAYBE") or upper.startswith("DEPENDS"):
+                return "CAUTION"
+            if upper.startswith("SAFE") or upper.startswith("YES") or upper.startswith("USUALLY YES"):
+                return "SAFE"
+            if upper.startswith("CONSULT") or upper.startswith("NEEDS REVIEW") or upper.startswith("ASK"):
+                return "CONSULT_PHARMACIST"
+            return ""
+
+        def _extract_field(patterns: list[str]) -> str:
+            for pattern in patterns:
+                match = re.search(pattern, text, flags=re.IGNORECASE | re.MULTILINE | re.DOTALL)
+                if match:
+                    value = (match.group(1) or "").strip()
+                    if value:
+                        return value
+            return ""
+
+        def _split_items(value: str) -> list[str]:
+            if not value:
+                return []
+            normalized = value.replace("\r\n", "\n").strip()
+            parts = [normalized]
+            if "|" in normalized:
+                parts = normalized.split("|")
+            elif "\n" in normalized:
+                parts = normalized.split("\n")
+            cleaned: list[str] = []
+            for part in parts:
+                item = re.sub(r"^\s*[-*•]+\s*", "", part).strip(" .;")
+                if item:
+                    cleaned.append(item)
+            deduped: list[str] = []
+            for item in cleaned:
+                if item not in deduped:
+                    deduped.append(item)
+            return deduped
+
+        label_boundary = r"(?=^\s*(?:VERDICT|ANSWER|DIRECT|WHY|DO|AVOID|DOCTOR|WARNING|GET\s+MEDICAL\s+HELP(?:\s+NOW)?\s+IF|SEEK\s+MEDICAL\s+HELP(?:\s+NOW)?(?:\s+IF)?|CONFIDENCE|SOURCES)\s*[:\-]|\Z)"
+
+        verdict_raw = _extract_field([
+            rf"^\s*(?:VERDICT|ANSWER)\s*[:\-]\s*(.+?)\s*{label_boundary}",
+        ])
+        result.verdict = _normalize_verdict(verdict_raw) or _extract_verdict(text, question)
+
+        direct_raw = _extract_field([
+            rf"^\s*DIRECT\s*[:\-]\s*(.+?)\s*{label_boundary}",
+        ])
+        why_raw = _extract_field([
+            rf"^\s*WHY\s*[:\-]\s*(.+?)\s*{label_boundary}",
+            rf"^\s*REASON\s*[:\-]\s*(.+?)\s*{label_boundary}",
+        ])
+        do_raw = _extract_field([
+            rf"^\s*DO\s*[:\-]\s*(.+?)\s*{label_boundary}",
+            rf"^\s*WHAT\s+YOU\s+SHOULD\s+DO\s*[:\-]\s*(.+?)\s*{label_boundary}",
+        ])
+        avoid_raw = _extract_field([
+            rf"^\s*AVOID\s*[:\-]\s*(.+?)\s*{label_boundary}",
+            rf"^\s*WHAT\s+TO\s+AVOID\s*[:\-]\s*(.+?)\s*{label_boundary}",
+        ])
+        doctor_raw = _extract_field([
+            rf"^\s*DOCTOR\s*[:\-]\s*(.+?)\s*{label_boundary}",
+            rf"^\s*WARNING\s*[:\-]\s*(.+?)\s*{label_boundary}",
+            rf"^\s*GET\s+MEDICAL\s+HELP(?:\s+NOW)?\s+IF\s*[:\-]\s*(.+?)\s*{label_boundary}",
+            rf"^\s*SEEK\s+MEDICAL\s+HELP(?:\s+NOW)?(?:\s+IF)?\s*[:\-]\s*(.+?)\s*{label_boundary}",
+        ])
+        confidence_raw = _extract_field([
+            rf"^\s*CONFIDENCE\s*[:\-]\s*(.+?)\s*{label_boundary}",
+        ])
+        sources_raw = _extract_field([
+            rf"^\s*SOURCES?\s*[:\-]\s*(.+?)\s*{label_boundary}",
+        ])
+
+        result.direct = direct_raw or why_raw or ""
+        result.do = _split_items(do_raw)
+        result.avoid = _split_items(avoid_raw)
+        result.doctor = _split_items(doctor_raw)
+        result.sources = sources_raw or ""
+
+        conf = confidence_raw.strip().upper()
+        if conf in ("HIGH", "MEDIUM", "LOW"):
+            result.confidence = conf
+        elif "HIGH" in conf:
+            result.confidence = "HIGH"
+        elif "LOW" in conf:
+            result.confidence = "LOW"
+        else:
+            result.confidence = "MEDIUM"
+
+        if not result.direct:
+            sentences = re.split(r"(?<=[.!?])\s+", text.replace("\n", " ").strip())
+            if sentences and sentences[0]:
+                result.direct = sentences[0].strip()
+
+        if result.direct and not re.search(r"[.!?]$", result.direct):
+            result.direct += "."
+
+        result.interaction_summary = build_interaction_summary(question)
+        result.verdict = validate_and_correct_verdict(
+            text,
+            result.verdict,
+            question,
+            interaction_summary=result.interaction_summary,
+        )
+
+        return result
+
+    except Exception:
+        fallback_text = answer_text.strip()
+        result.raw = fallback_text
+        result.verdict = _extract_verdict(fallback_text, question)
+        sentences = re.split(r"(?<=[.!?])\s+", fallback_text.replace("\n", " ").strip())
+        if sentences and sentences[0]:
             result.direct = sentences[0].strip()
-            if result.direct and not result.direct.endswith("."):
+            if result.direct and not re.search(r"[.!?]$", result.direct):
                 result.direct += "."
-        
-        # Provide generic fallbacks
-        if not result.do:
-            result.do = ["Follow your medication's specific dosing instructions"]
-        if not result.avoid:
-            result.avoid = ["Avoid exceeding the recommended dose"]
-        if not result.doctor:
-            result.doctor = ["Symptoms worsen or don't improve"]
-    
-    # Default confidence if not specified
-    if not result.confidence:
+        result.do = []
+        result.avoid = []
+        result.doctor = []
         result.confidence = "MEDIUM"
-    
-    return result
+        result.sources = ""
+        result.interaction_summary = build_interaction_summary(question)
+        result.verdict = validate_and_correct_verdict(
+            fallback_text,
+            result.verdict,
+            question,
+            interaction_summary=result.interaction_summary,
+        )
+        return result
+
+
+def validate_and_correct_verdict(answer_text: str, verdict: str, question: str = "") -> str:
+    """
+    Final backend authority for verdict correction.
+    Uses deterministic rules to reconcile the returned verdict with the explanation text.
+    Priority order: AVOID > CAUTION > SAFE > CONSULT_PHARMACIST.
+    """
+    normalized_verdict = (verdict or "").strip().upper() or "CONSULT_PHARMACIST"
+    combined_text = f"{question}\n{answer_text}".lower()
+
+    dosage_terms = [
+        "dosage", "dose", "how much", "how many", "how to take",
+        "when to take", "maximum dose", "max dose", "mg", "milligram",
+        "dosing", "strength", "how often",
+    ]
+    informational_terms = [
+        "side effect", "side effects", "adverse effect", "adverse effects",
+        "what is", "what are", "how does", "explain", "reaction", "reactions",
+    ]
+    avoid_phrases = [
+        "avoid taking", "do not take", "not recommended", "bleeding risk",
+        "contraindicated", "should not be taken together", "dangerous combination",
+        "increased risk of bleeding", "major interaction", "severe interaction",
+        "serious interaction", "avoid this combination", "do not combine",
+        "not safe together", "should be avoided", "high risk", "black box warning",
+    ]
+    caution_phrases = [
+        "moderate interaction", "use with caution", "monitor", "monitoring",
+        "may increase risk", "can increase risk", "increased risk", "kidney strain",
+        "kidney stress", "renal risk", "renal impairment", "lactic acidosis risk",
+        "may worsen", "can worsen", "not ideal", "be careful", "watch for side effects",
+        "needs closer monitoring", "dose adjustment may be needed",
+    ]
+    safe_phrases = [
+        "no known interaction", "no significant interaction", "generally safe",
+        "no clinically significant interaction", "safe to take together",
+        "no major interaction", "compatible together", "typically safe",
+        "low interaction risk",
+    ]
+
+    def _contains_any(haystack: str, phrases: list[str]) -> bool:
+        return any(phrase in haystack for phrase in phrases)
+
+    if _contains_any(combined_text, dosage_terms):
+        return "CONSULT_PHARMACIST"
+    if _contains_any(combined_text, avoid_phrases):
+        return "AVOID"
+    if _contains_any(combined_text, caution_phrases):
+        return "CAUTION"
+    if _contains_any(combined_text, informational_terms):
+        return "CAUTION"
+    if normalized_verdict == "SAFE" and _contains_any(combined_text, safe_phrases):
+        return "SAFE"
+    if normalized_verdict == "SAFE":
+        return "CONSULT_PHARMACIST"
+    if normalized_verdict in {"AVOID", "CAUTION", "CONSULT_PHARMACIST"}:
+        return normalized_verdict
+    if _contains_any(combined_text, safe_phrases):
+        return "SAFE"
+    return "CONSULT_PHARMACIST"
+
+
+def build_interaction_summary(question: str) -> dict[str, list[str]]:
+    _, summary = _evaluate_pairwise_interactions(_extract_drug_names(question))
+    return summary
+
+
+def _extract_verdict(text: str, question: str = "") -> str:
+    """
+    Final deterministic backend verdict extraction.
+    Priority order: AVOID > CAUTION > SAFE > CONSULT_PHARMACIST.
+    """
+    if not text:
+        return "CONSULT_PHARMACIST"
+
+    normalized_text = text.replace("\r\n", "\n")
+    lower_text = normalized_text.lower()
+    q_lower = question.lower() if question else ""
+
+    def _extract_explicit_verdict(raw_text: str) -> str | None:
+        for raw_line in raw_text.split("\n"):
+            line = raw_line.strip()
+            if not line:
+                continue
+            line = re.sub(r"^[#*\-\s]+", "", line)
+            upper_line = line.upper()
+            if upper_line.startswith("ANSWER:") or upper_line.startswith("VERDICT:"):
+                val = upper_line.split(":", 1)[1].strip() if ":" in upper_line else ""
+                if val.startswith("SAFE") or val.startswith("YES") or val.startswith("USUALLY YES"):
+                    return "SAFE"
+                if val.startswith("AVOID") or val.startswith("NO"):
+                    return "AVOID"
+                if val.startswith("CAUTION") or val.startswith("MAYBE") or val.startswith("DEPENDS") or val.startswith("IT DEPENDS"):
+                    return "CAUTION"
+                if val.startswith("NEEDS REVIEW") or val.startswith("CONSULT") or val.startswith("ASK"):
+                    return "CONSULT_PHARMACIST"
+        return None
+
+    if _contains_any(q_lower, DOSAGE_TERMS):
+        return "CONSULT_PHARMACIST"
+    if _contains_any(q_lower, SIDE_EFFECT_TERMS):
+        return "CAUTION"
+
+    pairwise_verdict, _ = _evaluate_pairwise_interactions(_extract_drug_names(question))
+    if pairwise_verdict == "AVOID":
+        return "AVOID"
+    if pairwise_verdict == "CAUTION":
+        return "CAUTION"
+
+    if _contains_any(lower_text, AVOID_PHRASES):
+        return "AVOID"
+    if _contains_any(lower_text, CAUTION_PHRASES):
+        return "CAUTION"
+
+    explicit_verdict = _extract_explicit_verdict(normalized_text)
+    if explicit_verdict == "CAUTION" and _contains_any(lower_text, AVOID_PHRASES):
+        return "AVOID"
+    if explicit_verdict == "SAFE":
+        if _contains_any(lower_text, AVOID_PHRASES):
+            return "AVOID"
+        if _contains_any(lower_text, CAUTION_PHRASES):
+            return "CAUTION"
+        return "SAFE"
+    if explicit_verdict in {"AVOID", "CAUTION", "CONSULT_PHARMACIST"}:
+        return explicit_verdict
+
+    upper_text = normalized_text.upper()
+    has_safe_signal = _contains_any(lower_text, SAFE_PHRASES) or any(
+        phrase in upper_text for phrase in (
+            "YES, YOU CAN", "YES YOU CAN", "IT IS SAFE", "GENERALLY SAFE",
+            "USUALLY SAFE", "TYPICALLY SAFE", "YES,", "ANSWER: YES",
+            "Ã¢Å“â€¦ SAFE", "SAFETY LEVEL", "SAFETY LEVEL: SAFE",
+        )
+    )
+    if has_safe_signal and not _contains_any(lower_text, CAUTION_PHRASES) and not _contains_any(lower_text, AVOID_PHRASES):
+        return "SAFE"
+
+    if any(phrase in upper_text for phrase in (
+        "NO, YOU SHOULD NOT", "NO YOU SHOULD NOT", "DO NOT TAKE",
+        "NOT RECOMMENDED", "AVOID TAKING", "SHOULD NOT TAKE",
+        "NO,", "ANSWER: NO", "CONTRAINDICATED",
+        "Ã¢ÂÅ’ AVOID", "AVOID / CONTRAINDICATED",
+    )):
+        return "AVOID"
+
+    if any(phrase in upper_text for phrase in (
+        "DEPENDS ON", "IT DEPENDS", "CASE BY CASE", "VARIES",
+        "POSSIBLY", "MIGHT BE", "COULD BE", "SOMETIMES",
+        "Ã¢Å¡Â Ã¯Â¸Â USE WITH CAUTION", "USE WITH CAUTION",
+    )):
+        return "CAUTION"
+
+    if pairwise_verdict == "SAFE":
+        return "SAFE"
+
+    return "CONSULT_PHARMACIST"
+
+
+def validate_and_correct_verdict(
+    answer_text: str,
+    verdict: str,
+    question: str = "",
+    interaction_summary: dict[str, list[str]] | None = None,
+) -> str:
+    """
+    Final backend authority for verdict correction.
+    Deterministically reconciles explanation text, intent, and pairwise interaction risk.
+    """
+    normalized_verdict = (verdict or "").strip().upper() or "CONSULT_PHARMACIST"
+    combined_text = f"{question}\n{answer_text}".lower()
+    summary = interaction_summary or build_interaction_summary(question)
+
+    if _contains_any(combined_text, DOSAGE_TERMS):
+        return "CONSULT_PHARMACIST"
+    if summary.get("avoid_pairs"):
+        return "AVOID"
+    if _contains_any(combined_text, AVOID_PHRASES):
+        return "AVOID"
+    if summary.get("caution_pairs"):
+        return "CAUTION"
+    if _contains_any(combined_text, CAUTION_PHRASES):
+        return "CAUTION"
+    if _contains_any(combined_text, INFORMATIONAL_TERMS):
+        return "CAUTION"
+    if normalized_verdict == "SAFE" and _contains_any(combined_text, SAFE_PHRASES):
+        return "SAFE"
+    if normalized_verdict == "SAFE" and not _contains_any(combined_text, CAUTION_PHRASES) and not _contains_any(combined_text, AVOID_PHRASES):
+        return "SAFE"
+    if normalized_verdict in {"AVOID", "CAUTION", "CONSULT_PHARMACIST"}:
+        return normalized_verdict
+    if _contains_any(combined_text, SAFE_PHRASES):
+        return "SAFE"
+    return "CONSULT_PHARMACIST"
 
 
 class QuestionMatch(BaseModel):
@@ -2078,4 +2597,3 @@ def log_search(req: LogRequest) -> LogResponse:
         raise HTTPException(status_code=500, detail=f"Database error while logging. ({e})")
 
     return LogResponse(ok=True, log_id=log_id)
-
