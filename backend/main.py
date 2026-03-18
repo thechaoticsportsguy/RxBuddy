@@ -28,8 +28,161 @@ load_dotenv()
 # We fetch the top 1,000 drug names from RxNorm once at startup.
 # These are added to the spell checker so drug names aren't flagged as misspelled.
 RXNORM_DISPLAYNAMES_URL = "https://rxnav.nlm.nih.gov/REST/Prescribe/displaynames.json"
+OPENFDA_LABEL_URL = "https://api.fda.gov/drug/label.json"
 _medical_terms: set[str] = set()
 _spell_checker: SpellChecker | None = None
+
+
+# ---------- FDA Label Fetching for Grounded Answers ----------
+# Brand name → generic name mappings for FDA lookup
+BRAND_TO_GENERIC = {
+    "tylenol": "acetaminophen", "advil": "ibuprofen", "motrin": "ibuprofen",
+    "aleve": "naproxen", "bayer": "aspirin", "excedrin": "acetaminophen",
+    "benadryl": "diphenhydramine", "claritin": "loratadine", "zyrtec": "cetirizine",
+    "allegra": "fexofenadine", "prilosec": "omeprazole", "nexium": "esomeprazole",
+    "pepcid": "famotidine", "xanax": "alprazolam", "valium": "diazepam",
+    "ambien": "zolpidem", "zoloft": "sertraline", "prozac": "fluoxetine",
+    "lexapro": "escitalopram", "lipitor": "atorvastatin", "crestor": "rosuvastatin",
+    "viagra": "sildenafil", "cialis": "tadalafil", "synthroid": "levothyroxine",
+}
+
+
+def _extract_drug_name(question: str) -> str | None:
+    """
+    Extract the primary drug name from a question.
+    Converts brand names to generic names for FDA lookup.
+    """
+    q_lower = question.lower()
+    
+    # Check brand names first
+    for brand, generic in BRAND_TO_GENERIC.items():
+        if brand in q_lower:
+            return generic
+    
+    # Check common generic names
+    generic_drugs = [
+        "acetaminophen", "ibuprofen", "aspirin", "naproxen", "amoxicillin",
+        "metformin", "lisinopril", "omeprazole", "gabapentin", "sertraline",
+        "fluoxetine", "escitalopram", "prednisone", "azithromycin", "metoprolol",
+        "losartan", "amlodipine", "atorvastatin", "levothyroxine", "alprazolam",
+        "hydrocodone", "oxycodone", "tramadol", "warfarin", "ciprofloxacin",
+    ]
+    for drug in generic_drugs:
+        if drug in q_lower:
+            return drug
+    
+    return None
+
+
+def _fetch_fda_label(drug_name: str) -> dict | None:
+    """
+    Fetch FDA label data from OpenFDA API.
+    Returns relevant sections or None if not found.
+    """
+    if not drug_name:
+        return None
+    
+    try:
+        url = f"{OPENFDA_LABEL_URL}?search=openfda.generic_name:{drug_name}&limit=1"
+        logger.info("[FDA] Fetching label for '%s' from OpenFDA...", drug_name)
+        
+        resp = http_requests.get(
+            url,
+            headers={"User-Agent": "RxBuddy/1.0"},
+            timeout=10,
+        )
+        
+        if resp.status_code == 404:
+            logger.info("[FDA] No label found for '%s'", drug_name)
+            return None
+        
+        resp.raise_for_status()
+        data = resp.json()
+        
+        results = data.get("results", [])
+        if not results:
+            return None
+        
+        label = results[0]
+        
+        # Extract relevant sections (each is a list of strings)
+        def get_section(key: str) -> str:
+            val = label.get(key, [])
+            if isinstance(val, list) and val:
+                return val[0][:1000]  # Limit to 1000 chars
+            return ""
+        
+        fda_data = {
+            "drug_name": drug_name,
+            "warnings": get_section("warnings"),
+            "dosage_and_administration": get_section("dosage_and_administration"),
+            "contraindications": get_section("contraindications"),
+            "drug_interactions": get_section("drug_interactions"),
+            "adverse_reactions": get_section("adverse_reactions"),
+            "pregnancy": get_section("pregnancy"),
+            "indications_and_usage": get_section("indications_and_usage"),
+        }
+        
+        # Check if we got any useful data
+        has_data = any(v for k, v in fda_data.items() if k != "drug_name" and v)
+        if not has_data:
+            return None
+        
+        logger.info("[FDA] Successfully fetched label for '%s'", drug_name)
+        return fda_data
+        
+    except Exception as e:
+        logger.warning("[FDA] Error fetching label for '%s': %s", drug_name, e)
+        return None
+
+
+def _build_fda_context(fda_data: dict, question: str) -> str:
+    """
+    Build a context string from FDA label data for Claude.
+    Only includes sections relevant to the question.
+    """
+    if not fda_data:
+        return ""
+    
+    q_lower = question.lower()
+    sections = []
+    
+    # Always include drug name
+    sections.append(f"Drug: {fda_data.get('drug_name', 'Unknown')}")
+    
+    # Include relevant sections based on question keywords
+    if any(w in q_lower for w in ["dose", "dosage", "how much", "how many", "take"]):
+        if fda_data.get("dosage_and_administration"):
+            sections.append(f"DOSAGE: {fda_data['dosage_and_administration'][:500]}")
+    
+    if any(w in q_lower for w in ["warning", "danger", "risk", "safe"]):
+        if fda_data.get("warnings"):
+            sections.append(f"WARNINGS: {fda_data['warnings'][:500]}")
+    
+    if any(w in q_lower for w in ["interact", "with", "mix", "combine", "together"]):
+        if fda_data.get("drug_interactions"):
+            sections.append(f"INTERACTIONS: {fda_data['drug_interactions'][:500]}")
+    
+    if any(w in q_lower for w in ["pregnant", "pregnancy", "breastfeed", "nursing"]):
+        if fda_data.get("pregnancy"):
+            sections.append(f"PREGNANCY: {fda_data['pregnancy'][:500]}")
+    
+    if any(w in q_lower for w in ["side effect", "reaction", "adverse"]):
+        if fda_data.get("adverse_reactions"):
+            sections.append(f"SIDE EFFECTS: {fda_data['adverse_reactions'][:500]}")
+    
+    if any(w in q_lower for w in ["shouldn't", "should not", "can't", "cannot", "avoid"]):
+        if fda_data.get("contraindications"):
+            sections.append(f"CONTRAINDICATIONS: {fda_data['contraindications'][:500]}")
+    
+    # If no specific sections matched, include warnings and dosage as default
+    if len(sections) == 1:
+        if fda_data.get("warnings"):
+            sections.append(f"WARNINGS: {fda_data['warnings'][:400]}")
+        if fda_data.get("dosage_and_administration"):
+            sections.append(f"DOSAGE: {fda_data['dosage_and_administration'][:400]}")
+    
+    return "\n".join(sections)
 
 
 def _fetch_rxnorm_drug_names(limit: int = 1000) -> set[str]:
@@ -388,11 +541,14 @@ def _generate_ai_answer(question: str) -> str:
     """
     Generate a structured, specific answer using Anthropic Claude.
     
-    Returns answer in a parseable format:
-    DIRECT: [one sentence direct answer]
-    DO: [action 1] | [action 2] | [action 3]
-    AVOID: [thing 1] | [thing 2] | [thing 3]
-    DOCTOR: [warning 1] | [warning 2]
+    Implements 5 hallucination guardrails:
+    1. Allow "I don't know" - Claude can admit uncertainty
+    2. Ground in FDA data - Fetch real FDA label data first
+    3. Require citations - SOURCES field required
+    4. Chain of thought - Think through drug, concern, FDA data
+    5. Confidence scoring - HIGH/MEDIUM/LOW rating
+    
+    Returns answer in a parseable format with confidence and sources.
     """
     api_key = _anthropic_api_key()
     if not api_key:
@@ -401,35 +557,94 @@ def _generate_ai_answer(question: str) -> str:
 
     logger.info("[Claude] API key found (first 8 chars): %s...", api_key[:8] if len(api_key) > 8 else "***")
 
+    # TECHNIQUE 2: Ground answers in FDA data first
+    drug_name = _extract_drug_name(question)
+    fda_data = _fetch_fda_label(drug_name) if drug_name else None
+    fda_context = _build_fda_context(fda_data, question) if fda_data else ""
+    
     import anthropic
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
 
-        prompt = f"""You are a licensed pharmacist answering this SPECIFIC patient question.
-Give a DIRECT answer to exactly what they asked - not generic advice.
+        # Build the prompt with all 5 hallucination guardrails
+        if fda_context:
+            # We have FDA data - ground the answer in it
+            prompt = f"""You are a licensed pharmacist answering a patient question.
 
-Patient Question: {question}
+TECHNIQUE 1 - UNCERTAINTY IS OK:
+If you are not certain about any aspect of this medication question, say "I don't have enough verified information to answer this confidently" instead of guessing. Patient safety is more important than giving an answer.
 
-You MUST respond in this EXACT format (use | to separate items):
+TECHNIQUE 2 - FDA GROUNDING:
+You must base your answer PRIMARILY on the following FDA label data. If the FDA data doesn't address the question, say "The FDA label doesn't specifically address this."
+
+FDA LABEL DATA:
+{fda_context}
+
+PATIENT QUESTION: {question}
+
+TECHNIQUE 4 - CHAIN OF THOUGHT:
+Before answering, think through:
+1. What drug(s) are involved?
+2. What is the specific concern?
+3. What does the FDA label say about this?
+4. What is the evidence-based answer?
+
+Now provide your structured answer in this EXACT format (use | to separate items):
 
 DIRECT: [One clear sentence answering their specific question - start with Yes/No if applicable]
+DO: [Specific action based on FDA data] | [Another specific action] | [Third specific action]
+AVOID: [Specific thing to avoid per FDA data] | [Another thing to avoid] | [Third thing to avoid]
+DOCTOR: [Specific warning sign from FDA data] | [Another warning sign]
+SOURCES: [FDA label / DailyMed / Clinical guideline / Insufficient data]
+CONFIDENCE: [HIGH if directly supported by FDA data above / MEDIUM if general medical knowledge / LOW if insufficient data - always recommend consulting pharmacist for LOW]
+
+IMPORTANT RULES:
+- Be SPECIFIC to the drugs and situations mentioned
+- Do NOT use generic advice like "follow package directions"
+- Each item should be actionable and specific
+- Keep each item under 15 words
+- Separate items with | character"""
+        else:
+            # No FDA data available - use general medical knowledge with caution
+            prompt = f"""You are a licensed pharmacist answering a patient question.
+
+TECHNIQUE 1 - UNCERTAINTY IS OK:
+If you are not certain about any aspect of this medication question, say "I don't have enough verified information to answer this confidently" instead of guessing. Patient safety is more important than giving an answer.
+
+NOTE: No FDA label data was found for this question. Use your general medical knowledge but be appropriately cautious.
+
+PATIENT QUESTION: {question}
+
+TECHNIQUE 4 - CHAIN OF THOUGHT:
+Before answering, think through:
+1. What drug(s) are involved?
+2. What is the specific concern?
+3. What is the evidence-based answer?
+4. How confident am I without FDA data?
+
+Now provide your structured answer in this EXACT format (use | to separate items):
+
+DIRECT: [One clear sentence answering their specific question - start with Yes/No if applicable, or admit uncertainty if appropriate]
 DO: [Specific action for this drug/situation] | [Another specific action] | [Third specific action]
 AVOID: [Specific thing to avoid for this drug] | [Another thing to avoid] | [Third thing to avoid]
 DOCTOR: [Specific warning sign for this situation] | [Another warning sign]
+SOURCES: [General medical knowledge / Insufficient data]
+CONFIDENCE: [MEDIUM for general medical knowledge without FDA data / LOW if uncertain - recommend consulting pharmacist]
 
 IMPORTANT RULES:
-- Be SPECIFIC to the drugs and situations mentioned in their question
-- Do NOT use generic advice like "follow package directions" or "consult your pharmacist"
-- Each DO/AVOID/DOCTOR item should be actionable and specific to their question
+- Be SPECIFIC to the drugs and situations mentioned
+- Do NOT use generic advice like "follow package directions"
+- Each item should be actionable and specific
 - Keep each item under 15 words
-- Separate items with | character"""
+- Separate items with | character
+- Since no FDA data is available, be appropriately cautious"""
 
-        logger.info("[Claude] Sending question to claude-sonnet-4-20250514: %.80s...", question)
+        logger.info("[Claude] Sending question with FDA grounding to claude-sonnet-4-20250514: %.80s...", question)
 
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=400,
+            max_tokens=600,  # Increased for chain of thought
             messages=[{"role": "user", "content": prompt}],
         )
 
@@ -444,7 +659,7 @@ IMPORTANT RULES:
             logger.warning("[Claude] Empty text in response for question: %.80s", question)
             raise RuntimeError("Claude returned an empty response.")
 
-        answer = _truncate_words(text, 200)
+        answer = _truncate_words(text, 300)  # Increased limit for new format
         logger.info("[Claude] SUCCESS! Generated answer (%d words): %.200s", len(answer.split()), answer)
         print(f"[Claude] ANSWER: {answer}")  # Also print to stdout for Railway logs
         return answer
@@ -576,6 +791,8 @@ class StructuredAnswer(BaseModel):
     avoid: list[str] = []  # What to avoid bullets
     doctor: list[str] = []  # See a doctor if bullets
     raw: str = ""  # Original raw answer text
+    confidence: str = "MEDIUM"  # HIGH, MEDIUM, or LOW
+    sources: str = ""  # FDA label, DailyMed, etc.
 
 
 def _parse_structured_answer(answer_text: str) -> StructuredAnswer:
@@ -621,6 +838,22 @@ def _parse_structured_answer(answer_text: str) -> StructuredAnswer:
         elif line.upper().startswith("DOCTOR:"):
             items = line[7:].split("|")
             result.doctor = [item.strip() for item in items if item.strip()]
+            
+        # Parse CONFIDENCE: line
+        elif line.upper().startswith("CONFIDENCE:"):
+            conf = line[11:].strip().upper()
+            if conf in ("HIGH", "MEDIUM", "LOW"):
+                result.confidence = conf
+            elif "HIGH" in conf:
+                result.confidence = "HIGH"
+            elif "LOW" in conf:
+                result.confidence = "LOW"
+            else:
+                result.confidence = "MEDIUM"
+                
+        # Parse SOURCES: line
+        elif line.upper().startswith("SOURCES:"):
+            result.sources = line[8:].strip()
     
     # Fallback: if nothing was parsed, try to extract something useful
     if not result.direct and not result.do and not result.avoid:
@@ -636,6 +869,10 @@ def _parse_structured_answer(answer_text: str) -> StructuredAnswer:
             result.avoid = ["Avoid exceeding the recommended dose"]
         if not result.doctor:
             result.doctor = ["Symptoms worsen or don't improve"]
+    
+    # Default confidence if not specified
+    if not result.confidence:
+        result.confidence = "MEDIUM"
     
     return result
 

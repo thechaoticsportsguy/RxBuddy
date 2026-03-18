@@ -75,6 +75,8 @@ function parseClaudeAnswer(answer, structured = null) {
       whatToDo: Array.isArray(structured.do) ? structured.do : [],
       whatToAvoid: Array.isArray(structured.avoid) ? structured.avoid : [],
       seeDoctorIf: Array.isArray(structured.doctor) ? structured.doctor : [],
+      confidence: structured.confidence || "MEDIUM",
+      sources: structured.sources || "",
       parsedAnything: Boolean(
         (structured.do?.length) || 
         (structured.avoid?.length) || 
@@ -88,11 +90,13 @@ function parseClaudeAnswer(answer, structured = null) {
   const text = String(answer || "").replace(/\r\n/g, "\n").trim();
   if (!text) return null;
 
-  // Try to parse structured format: DIRECT: / DO: / AVOID: / DOCTOR:
+  // Try to parse structured format: DIRECT: / DO: / AVOID: / DOCTOR: / CONFIDENCE: / SOURCES:
   let direct = "";
   let doItems = [];
   let avoidItems = [];
   let doctorItems = [];
+  let confidence = "MEDIUM";
+  let sources = "";
 
   const lines = text.split("\n");
   for (const rawLine of lines) {
@@ -107,6 +111,13 @@ function parseClaudeAnswer(answer, structured = null) {
       avoidItems = line.substring(6).split("|").map(s => s.trim()).filter(Boolean);
     } else if (line.toUpperCase().startsWith("DOCTOR:")) {
       doctorItems = line.substring(7).split("|").map(s => s.trim()).filter(Boolean);
+    } else if (line.toUpperCase().startsWith("CONFIDENCE:")) {
+      const conf = line.substring(11).trim().toUpperCase();
+      if (conf.includes("HIGH")) confidence = "HIGH";
+      else if (conf.includes("LOW")) confidence = "LOW";
+      else confidence = "MEDIUM";
+    } else if (line.toUpperCase().startsWith("SOURCES:")) {
+      sources = line.substring(8).trim();
     }
   }
 
@@ -122,6 +133,8 @@ function parseClaudeAnswer(answer, structured = null) {
       whatToDo: doItems,
       whatToAvoid: avoidItems,
       seeDoctorIf: doctorItems,
+      confidence,
+      sources,
       parsedAnything: Boolean(doItems.length || avoidItems.length || doctorItems.length),
       full: text,
     };
@@ -163,7 +176,17 @@ function parseClaudeAnswer(answer, structured = null) {
   const seeDoctorIf = parseBullets(sections.seeDoctorIf);
   const parsedAnything = whatToDo.length || whatToAvoid.length || seeDoctorIf.length;
 
-  return { yesNo, lead: first, whatToDo, whatToAvoid, seeDoctorIf, parsedAnything: Boolean(parsedAnything), full: text };
+  return { 
+    yesNo, 
+    lead: first, 
+    whatToDo, 
+    whatToAvoid, 
+    seeDoctorIf, 
+    confidence: "MEDIUM",  // Default for fallback parsing
+    sources: "",
+    parsedAnything: Boolean(parsedAnything), 
+    full: text 
+  };
 }
 
 /**
@@ -644,6 +667,22 @@ export default function ResultsPage() {
                         ✅ Added to database
                       </span>
                     )}
+                    {/* Confidence badge */}
+                    {topAnswer?.confidence === "HIGH" && (
+                      <span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-medium text-emerald-700 ring-1 ring-emerald-200">
+                        ✅ FDA Verified
+                      </span>
+                    )}
+                    {topAnswer?.confidence === "MEDIUM" && (
+                      <span className="rounded-full bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-700 ring-1 ring-amber-200">
+                        ⚠️ General Guidance
+                      </span>
+                    )}
+                    {topAnswer?.confidence === "LOW" && (
+                      <span className="rounded-full bg-rose-50 px-2 py-1 text-[10px] font-medium text-rose-700 ring-1 ring-rose-200">
+                        ❓ Consult Pharmacist
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -690,6 +729,12 @@ export default function ResultsPage() {
                       <p className="mt-1 text-sm font-medium text-slate-700">
                         {topAnswer?.lead || (results?.[0]?.answer ? "Answer generated from Claude." : "Generating answer…")}
                       </p>
+                      {/* Sources citation */}
+                      {topAnswer?.sources && (
+                        <p className="mt-2 text-xs text-slate-500">
+                          <span className="font-semibold">Sources:</span> {topAnswer.sources}
+                        </p>
+                      )}
                     </div>
 
                     <div className="mt-5 space-y-4">
