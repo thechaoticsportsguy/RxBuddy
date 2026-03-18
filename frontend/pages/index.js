@@ -4,23 +4,27 @@ import { useRouter } from "next/router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BackgroundGradientAnimation } from "../components/ui/background-gradient-animation";
 
-const Spline = dynamic(() => import("@splinetool/react-spline"), {
-  ssr: false,
-  loading: () => (
-    <div
-      style={{
-        width: "100%",
-        height: "300px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        color: "#52B788",
-      }}
-    >
-      Loading 3D scene...
-    </div>
-  ),
-});
+const Spline = dynamic(
+  () => import("@splinetool/react-spline").then((mod) => mod.default),
+  {
+    ssr: false,
+    loading: () => (
+      <div
+        style={{
+          width: "100%",
+          height: "300px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "#52B788",
+          fontSize: "14px",
+        }}
+      >
+        Loading 3D scene...
+      </div>
+    ),
+  },
+);
 
 const CATEGORIES = [
   "Drug Interactions",
@@ -60,288 +64,6 @@ function getSpeechRecognition() {
 }
 
 /* ──────────────────────────────────────────────
-   PharmacistRobot — pure CSS animated character
-   ────────────────────────────────────────────── */
-function PharmacistRobot() {
-  const [hovered, setHovered] = useState(false);
-  const [clicked, setClicked] = useState(false);
-
-  function handleClick() {
-    setClicked(true);
-    setTimeout(() => setClicked(false), 1200);
-  }
-
-  return (
-    <div
-      className="robot-wrap"
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      onClick={handleClick}
-      style={{ cursor: "pointer", position: "relative", display: "inline-block" }}
-    >
-      {/* Speech bubble */}
-      <div
-        className="speech-bubble"
-        style={{
-          position: "absolute",
-          top: -48,
-          left: "50%",
-          transform: "translateX(-50%)",
-          background: "rgba(255,255,255,0.95)",
-          color: "#2D6A4F",
-          fontSize: 11,
-          fontWeight: 600,
-          padding: "6px 14px",
-          borderRadius: 12,
-          whiteSpace: "nowrap",
-          opacity: hovered || clicked ? 1 : 0,
-          transition: "opacity 0.3s ease, transform 0.3s ease",
-          pointerEvents: "none",
-          boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
-          zIndex: 20,
-        }}
-      >
-        {clicked ? "Let's find your answer! 🔍" : "Ask me about your medications! 💊"}
-        <div style={{
-          position: "absolute",
-          bottom: -6,
-          left: "50%",
-          transform: "translateX(-50%)",
-          width: 0,
-          height: 0,
-          borderLeft: "6px solid transparent",
-          borderRight: "6px solid transparent",
-          borderTop: "6px solid rgba(255,255,255,0.95)",
-        }} />
-      </div>
-
-      {/* Robot container */}
-      <div
-        className={`robot-body ${clicked ? "robot-bounce" : ""}`}
-        style={{
-          width: 140,
-          height: 220,
-          position: "relative",
-          animation: hovered ? "float 1.5s ease-in-out infinite" : "float 3s ease-in-out infinite",
-          transition: "filter 0.3s ease",
-          filter: hovered
-            ? "drop-shadow(0 0 24px rgba(82,183,136,0.6))"
-            : "drop-shadow(0 0 12px rgba(82,183,136,0.3))",
-        }}
-      >
-        {/* ---- ANTENNA LEFT ---- */}
-        <div style={{
-          position: "absolute", top: 4, left: 42,
-          width: 3, height: 18, background: "#52B788", borderRadius: 2,
-          transform: "rotate(-15deg)", transformOrigin: "bottom center",
-        }}>
-          <div style={{
-            position: "absolute", top: -5, left: -3,
-            width: 9, height: 9, borderRadius: "50%", background: "#fff",
-            boxShadow: "0 0 6px rgba(82,183,136,0.5)",
-          }} />
-        </div>
-        {/* ---- ANTENNA RIGHT ---- */}
-        <div style={{
-          position: "absolute", top: 4, right: 42,
-          width: 3, height: 18, background: "#52B788", borderRadius: 2,
-          transform: "rotate(15deg)", transformOrigin: "bottom center",
-        }}>
-          <div style={{
-            position: "absolute", top: -5, left: -3,
-            width: 9, height: 9, borderRadius: "50%", background: "#fff",
-            boxShadow: "0 0 6px rgba(82,183,136,0.5)",
-          }} />
-        </div>
-
-        {/* ---- HEAD ---- */}
-        <div style={{
-          position: "absolute", top: 18, left: 20, width: 100, height: 72,
-          background: "#fff", borderRadius: 20,
-          boxShadow: "0 4px 20px rgba(0,0,0,0.1)",
-          border: "2px solid rgba(82,183,136,0.2)",
-          overflow: "hidden",
-        }}>
-          {/* Eyes */}
-          <div style={{ position: "absolute", top: 20, left: 18, display: "flex", gap: 24 }}>
-            {/* Left eye */}
-            <div className="robot-eye" style={{
-              width: hovered ? 18 : 16, height: hovered ? 22 : 20,
-              background: "#2D6A4F", borderRadius: "50%",
-              position: "relative", transition: "all 0.2s ease",
-              animation: "eyeBlink 3s ease-in-out infinite",
-            }}>
-              <div style={{
-                position: "absolute", top: 4, left: 4,
-                width: 6, height: 6, borderRadius: "50%", background: "#fff",
-              }} />
-            </div>
-            {/* Right eye */}
-            <div className="robot-eye" style={{
-              width: hovered ? 18 : 16, height: hovered ? 22 : 20,
-              background: "#2D6A4F", borderRadius: "50%",
-              position: "relative", transition: "all 0.2s ease",
-              animation: "eyeBlink 3s ease-in-out infinite",
-            }}>
-              <div style={{
-                position: "absolute", top: 4, left: 4,
-                width: 6, height: 6, borderRadius: "50%", background: "#fff",
-              }} />
-            </div>
-          </div>
-          {/* Rosy cheeks */}
-          <div style={{
-            position: "absolute", top: 38, left: 10,
-            width: 14, height: 10, borderRadius: "50%",
-            background: "rgba(255, 150, 150, 0.35)",
-          }} />
-          <div style={{
-            position: "absolute", top: 38, right: 10,
-            width: 14, height: 10, borderRadius: "50%",
-            background: "rgba(255, 150, 150, 0.35)",
-          }} />
-          {/* Smile */}
-          <div style={{
-            position: "absolute", bottom: 12, left: "50%", transform: "translateX(-50%)",
-            width: 22, height: 11, borderBottom: "3px solid #2D6A4F",
-            borderRadius: "0 0 50% 50%",
-          }} />
-        </div>
-
-        {/* ---- STETHOSCOPE ---- */}
-        <div style={{
-          position: "absolute", top: 85, left: "50%", transform: "translateX(-50%)",
-          width: 36, height: 16,
-          border: "3px solid #52B788", borderTop: "none",
-          borderRadius: "0 0 18px 18px",
-          zIndex: 3,
-        }}>
-          <div style={{
-            position: "absolute", bottom: -5, left: "50%", transform: "translateX(-50%)",
-            width: 10, height: 10, borderRadius: "50%",
-            background: "#52B788", border: "2px solid #2D6A4F",
-          }} />
-        </div>
-
-        {/* ---- BODY (lab coat) ---- */}
-        <div style={{
-          position: "absolute", top: 92, left: 22, width: 96, height: 80,
-          background: "#ffffff", borderRadius: "16px 16px 12px 12px",
-          border: "2px solid #2D6A4F",
-          boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
-          overflow: "hidden",
-        }}>
-          {/* Collar V-shape */}
-          <div style={{
-            position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)",
-            width: 0, height: 0,
-            borderLeft: "16px solid transparent",
-            borderRight: "16px solid transparent",
-            borderTop: "14px solid #2D6A4F",
-          }} />
-          {/* Pocket with cross */}
-          <div style={{
-            position: "absolute", top: 20, left: 8,
-            width: 24, height: 18, borderRadius: 4,
-            border: "1.5px solid #2D6A4F",
-          }}>
-            <div style={{
-              position: "absolute", top: "50%", left: "50%",
-              transform: "translate(-50%, -50%)",
-              color: "#2D6A4F", fontSize: 12, fontWeight: 800, lineHeight: 1,
-            }}>&#10010;</div>
-          </div>
-          {/* RXBUDDY text */}
-          <div style={{
-            position: "absolute", bottom: 10, left: 0, right: 0,
-            textAlign: "center", color: "#2D6A4F",
-            fontSize: 9, fontWeight: 800, letterSpacing: "1.5px",
-          }}>RXBUDDY</div>
-          {/* Center line (coat buttons) */}
-          <div style={{
-            position: "absolute", top: 16, left: "50%",
-            transform: "translateX(-50%)",
-            width: 2, height: 48, background: "rgba(45,106,79,0.2)",
-          }} />
-          {/* Buttons */}
-          {[24, 38, 52].map((t) => (
-            <div key={t} style={{
-              position: "absolute", top: t, left: "50%",
-              transform: "translateX(-50%)",
-              width: 6, height: 6, borderRadius: "50%",
-              background: "#2D6A4F",
-            }} />
-          ))}
-        </div>
-
-        {/* ---- LEFT ARM (waving) ---- */}
-        <div style={{
-          position: "absolute", top: 100, left: 2,
-          width: 22, height: 58,
-          transformOrigin: "top center",
-          animation: "wave 2s ease-in-out infinite",
-        }}>
-          <div style={{
-            width: 22, height: 44, background: "#fff",
-            border: "2px solid #2D6A4F", borderRadius: "10px 10px 8px 8px",
-          }} />
-          {/* Hand */}
-          <div style={{
-            width: 18, height: 16, background: "#ffdbac",
-            borderRadius: "50%", margin: "0 auto",
-            border: "1.5px solid rgba(45,106,79,0.2)",
-          }} />
-        </div>
-
-        {/* ---- RIGHT ARM ---- */}
-        <div style={{
-          position: "absolute", top: 100, right: 2,
-          width: 22, height: 58,
-        }}>
-          <div style={{
-            width: 22, height: 44, background: "#fff",
-            border: "2px solid #2D6A4F", borderRadius: "10px 10px 8px 8px",
-          }} />
-          <div style={{
-            width: 18, height: 16, background: "#ffdbac",
-            borderRadius: "50%", margin: "0 auto",
-            border: "1.5px solid rgba(45,106,79,0.2)",
-          }} />
-        </div>
-
-        {/* ---- LEGS ---- */}
-        <div style={{
-          position: "absolute", top: 172, left: 34, display: "flex", gap: 12,
-        }}>
-          {/* Left leg + shoe */}
-          <div>
-            <div style={{
-              width: 22, height: 24, background: "#fff",
-              border: "2px solid rgba(45,106,79,0.3)", borderRadius: "6px 6px 4px 4px",
-            }} />
-            <div style={{
-              width: 26, height: 12, background: "#2D6A4F",
-              borderRadius: "4px 4px 8px 8px", marginLeft: -2,
-            }} />
-          </div>
-          {/* Right leg + shoe */}
-          <div>
-            <div style={{
-              width: 22, height: 24, background: "#fff",
-              border: "2px solid rgba(45,106,79,0.3)", borderRadius: "6px 6px 4px 4px",
-            }} />
-            <div style={{
-              width: 26, height: 12, background: "#2D6A4F",
-              borderRadius: "4px 4px 8px 8px", marginLeft: -2,
-            }} />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ──────────────────────────────────────────────
    Main Page
    ────────────────────────────────────────────── */
 export default function HomePage() {
@@ -352,6 +74,7 @@ export default function HomePage() {
   const [supportsVoice, setSupportsVoice] = useState(false);
   const recognitionRef = useRef(null);
   const [typedText, setTypedText] = useState("");
+  const [splineError, setSplineError] = useState(false);
 
   useEffect(() => {
     setSupportsVoice(!!getSpeechRecognition());
@@ -438,30 +161,6 @@ export default function HomePage() {
       </Head>
 
       <style jsx global>{`
-        /* ---- Robot animations ---- */
-        @keyframes float {
-          0%, 100% { transform: translateY(0px); }
-          50%      { transform: translateY(-12px); }
-        }
-        @keyframes wave {
-          0%, 100% { transform: rotate(-10deg); }
-          50%      { transform: rotate(20deg); }
-        }
-        @keyframes eyeBlink {
-          0%, 90%, 100% { transform: scaleY(1); }
-          95%           { transform: scaleY(0.1); }
-        }
-        .robot-bounce {
-          animation: bounce 0.4s ease !important;
-        }
-        @keyframes bounce {
-          0%   { transform: translateY(0); }
-          30%  { transform: translateY(-18px); }
-          50%  { transform: translateY(0); }
-          70%  { transform: translateY(-8px); }
-          100% { transform: translateY(0); }
-        }
-
         /* ---- Page animations ---- */
         @keyframes fadeUp {
           0%   { opacity: 0; transform: translateY(24px); }
@@ -506,13 +205,6 @@ export default function HomePage() {
           border-color: rgba(82, 183, 136, 0.5) !important;
         }
 
-        /* Mobile: scale robot down */
-        @media (max-width: 640px) {
-          .robot-wrap {
-            transform: scale(0.7);
-            transform-origin: top center;
-          }
-        }
       `}</style>
 
       <BackgroundGradientAnimation
@@ -549,21 +241,19 @@ export default function HomePage() {
             </p>
           </div>
 
-          <div
-            style={{
-              width: "100%",
-              maxWidth: "500px",
-              height: "300px",
-              margin: "0 auto",
-              position: "relative",
-            }}
-          >
-            <Spline scene="https://prod.spline.design/0fc3ccf2-6131-4754-a821-e00b70790d20/scene.splinecode" />
-          </div>
-
-          {/* ---- Robot ---- */}
-          <div className="mt-6 anim-fade-up" style={{ animationDelay: "0.1s" }}>
-            <PharmacistRobot />
+          <div style={{ width: "100%", maxWidth: "500px", height: "300px", margin: "0 auto" }}>
+            {typeof window !== "undefined" && (
+              !splineError ? (
+                <Spline
+                  scene="https://prod.spline.design/0fc3ccf2-6131-4754-a821-e00b70790d20/scene.splinecode"
+                  onError={() => setSplineError(true)}
+                />
+              ) : (
+                <div style={{ color: "#52B788", textAlign: "center", padding: "20px" }}>
+                  💊 RxBuddy
+                </div>
+              )
+            )}
           </div>
 
           {/* ---- Search Bar ---- */}
