@@ -1,8 +1,26 @@
 import Head from "next/head";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import Spline from "@splinetool/react-spline";
 import { BackgroundGradientAnimation } from "../components/ui/background-gradient-animation";
+
+const Spline = dynamic(() => import("@splinetool/react-spline"), {
+  ssr: false,
+  loading: () => (
+    <div
+      style={{
+        width: "100%",
+        height: "300px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "#52B788",
+      }}
+    >
+      Loading 3D scene...
+    </div>
+  ),
+});
 
 const CATEGORIES = [
   "Drug Interactions",
