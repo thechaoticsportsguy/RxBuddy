@@ -567,70 +567,30 @@ def _generate_ai_answer(question: str) -> str:
     try:
         client = anthropic.Anthropic(api_key=api_key)
 
-        # Build the prompt with all 5 hallucination guardrails
+        # Build the prompt - FDA data supplements clinical knowledge, doesn't restrict it
         if fda_context:
-            # We have FDA data - ground the answer in it
-            prompt = f"""You are a licensed pharmacist answering a patient question.
+            # We have FDA data - use it as primary source but allow clinical knowledge
+            prompt = f"""You are a licensed clinical pharmacist. Answer this specific patient question accurately.
 
-TECHNIQUE 1 - UNCERTAINTY IS OK:
-If you are not certain about any aspect of this medication question, say "I don't have enough verified information to answer this confidently" instead of guessing. Patient safety is more important than giving an answer.
-
-TECHNIQUE 2 - FDA GROUNDING:
-You must base your answer PRIMARILY on the following FDA label data. If the FDA data doesn't address the question, say "The FDA label doesn't specifically address this."
-
-FDA LABEL DATA:
+Use this FDA label data as your PRIMARY source if relevant:
 {fda_context}
 
+If the FDA label doesn't directly address the question, use your established clinical pharmacology knowledge to answer. You are a pharmacist — you have medical training beyond just the FDA label.
+
+CRITICAL: Never say "I don't have enough information" for well-known drug interactions like ibuprofen + alcohol, acetaminophen + liver, or NSAIDs + bleeding. These are established medical facts that any pharmacist knows.
+
+Only say "consult a pharmacist" for genuinely rare or complex interactions not covered by standard pharmacology.
+
 PATIENT QUESTION: {question}
 
-TECHNIQUE 4 - CHAIN OF THOUGHT:
-Before answering, think through:
-1. What drug(s) are involved?
-2. What is the specific concern?
-3. What does the FDA label say about this?
-4. What is the evidence-based answer?
-
-Now provide your structured answer in this EXACT format (use | to separate items):
+Provide your structured answer in this EXACT format (use | to separate items):
 
 DIRECT: [One clear sentence answering their specific question - start with Yes/No if applicable]
-DO: [Specific action based on FDA data] | [Another specific action] | [Third specific action]
-AVOID: [Specific thing to avoid per FDA data] | [Another thing to avoid] | [Third thing to avoid]
-DOCTOR: [Specific warning sign from FDA data] | [Another warning sign]
-SOURCES: [FDA label / DailyMed / Clinical guideline / Insufficient data]
-CONFIDENCE: [HIGH if directly supported by FDA data above / MEDIUM if general medical knowledge / LOW if insufficient data - always recommend consulting pharmacist for LOW]
-
-IMPORTANT RULES:
-- Be SPECIFIC to the drugs and situations mentioned
-- Do NOT use generic advice like "follow package directions"
-- Each item should be actionable and specific
-- Keep each item under 15 words
-- Separate items with | character"""
-        else:
-            # No FDA data available - use general medical knowledge with caution
-            prompt = f"""You are a licensed pharmacist answering a patient question.
-
-TECHNIQUE 1 - UNCERTAINTY IS OK:
-If you are not certain about any aspect of this medication question, say "I don't have enough verified information to answer this confidently" instead of guessing. Patient safety is more important than giving an answer.
-
-NOTE: No FDA label data was found for this question. Use your general medical knowledge but be appropriately cautious.
-
-PATIENT QUESTION: {question}
-
-TECHNIQUE 4 - CHAIN OF THOUGHT:
-Before answering, think through:
-1. What drug(s) are involved?
-2. What is the specific concern?
-3. What is the evidence-based answer?
-4. How confident am I without FDA data?
-
-Now provide your structured answer in this EXACT format (use | to separate items):
-
-DIRECT: [One clear sentence answering their specific question - start with Yes/No if applicable, or admit uncertainty if appropriate]
 DO: [Specific action for this drug/situation] | [Another specific action] | [Third specific action]
 AVOID: [Specific thing to avoid for this drug] | [Another thing to avoid] | [Third thing to avoid]
 DOCTOR: [Specific warning sign for this situation] | [Another warning sign]
-SOURCES: [General medical knowledge / Insufficient data]
-CONFIDENCE: [MEDIUM for general medical knowledge without FDA data / LOW if uncertain - recommend consulting pharmacist]
+SOURCES: [FDA label / Clinical pharmacology / Established medical knowledge]
+CONFIDENCE: [HIGH if supported by FDA data or established pharmacology / MEDIUM if general guidance / LOW only for truly rare situations]
 
 IMPORTANT RULES:
 - Be SPECIFIC to the drugs and situations mentioned
@@ -638,7 +598,35 @@ IMPORTANT RULES:
 - Each item should be actionable and specific
 - Keep each item under 15 words
 - Separate items with | character
-- Since no FDA data is available, be appropriately cautious"""
+- Answer confidently for common drug questions — you are a trained pharmacist"""
+        else:
+            # No FDA data available - use clinical pharmacology knowledge
+            prompt = f"""You are a licensed clinical pharmacist. Answer this specific patient question accurately.
+
+Use your established clinical pharmacology knowledge to answer. You are a trained pharmacist with medical expertise.
+
+CRITICAL: Never say "I don't have enough information" for well-known drug interactions like ibuprofen + alcohol, acetaminophen + liver, or NSAIDs + bleeding. These are established medical facts that any pharmacist knows.
+
+Only say "consult a pharmacist" for genuinely rare or complex interactions not covered by standard pharmacology.
+
+PATIENT QUESTION: {question}
+
+Provide your structured answer in this EXACT format (use | to separate items):
+
+DIRECT: [One clear sentence answering their specific question - start with Yes/No if applicable]
+DO: [Specific action for this drug/situation] | [Another specific action] | [Third specific action]
+AVOID: [Specific thing to avoid for this drug] | [Another thing to avoid] | [Third thing to avoid]
+DOCTOR: [Specific warning sign for this situation] | [Another warning sign]
+SOURCES: [Clinical pharmacology / Established medical knowledge]
+CONFIDENCE: [HIGH for established pharmacology facts / MEDIUM for general guidance / LOW only for truly rare situations]
+
+IMPORTANT RULES:
+- Be SPECIFIC to the drugs and situations mentioned
+- Do NOT use generic advice like "follow package directions"
+- Each item should be actionable and specific
+- Keep each item under 15 words
+- Separate items with | character
+- Answer confidently for common drug questions — you are a trained pharmacist"""
 
         logger.info("[Claude] Sending question with FDA grounding to claude-sonnet-4-20250514: %.80s...", question)
 

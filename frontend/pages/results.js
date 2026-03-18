@@ -60,8 +60,14 @@ function parseBullets(lines) {
  * DO: [item] | [item] | [item]
  * AVOID: [item] | [item] | [item]
  * DOCTOR: [item] | [item]
+ * 
+ * IMPORTANT: Never returns generic placeholder bullets - only what Claude actually returned.
  */
 function parseClaudeAnswer(answer, structured = null) {
+  // Debug: log raw answer to console
+  console.log("[parseClaudeAnswer] Raw answer:", answer);
+  console.log("[parseClaudeAnswer] Structured data:", structured);
+
   // If we have structured data from the API, use it directly
   if (structured && typeof structured === "object") {
     const direct = structured.direct || "";
@@ -69,7 +75,7 @@ function parseClaudeAnswer(answer, structured = null) {
     if (/^\s*yes\b/i.test(direct)) yesNo = "Yes";
     else if (/^\s*no\b/i.test(direct)) yesNo = "No";
 
-    return {
+    const result = {
       yesNo,
       lead: direct,
       whatToDo: Array.isArray(structured.do) ? structured.do : [],
@@ -83,7 +89,10 @@ function parseClaudeAnswer(answer, structured = null) {
         (structured.doctor?.length)
       ),
       full: structured.raw || String(answer || ""),
+      isPlainText: false,
     };
+    console.log("[parseClaudeAnswer] Parsed from structured:", result);
+    return result;
   }
 
   // Fallback: parse raw text answer
@@ -127,7 +136,7 @@ function parseClaudeAnswer(answer, structured = null) {
     if (/^\s*yes\b/i.test(direct)) yesNo = "Yes";
     else if (/^\s*no\b/i.test(direct)) yesNo = "No";
 
-    return {
+    const result = {
       yesNo,
       lead: direct || text.split("\n")[0],
       whatToDo: doItems,
@@ -137,10 +146,13 @@ function parseClaudeAnswer(answer, structured = null) {
       sources,
       parsedAnything: Boolean(doItems.length || avoidItems.length || doctorItems.length),
       full: text,
+      isPlainText: false,
     };
+    console.log("[parseClaudeAnswer] Parsed from text (structured format):", result);
+    return result;
   }
 
-  // Final fallback: try old markdown parsing
+  // Try old markdown parsing for "What to do:", "What to avoid:", etc.
   const first = text.split("\n").slice(0, 2).join(" ").trim();
   let yesNo = null;
   if (/^\s*yes\b/i.test(first)) yesNo = "Yes";
@@ -176,16 +188,38 @@ function parseClaudeAnswer(answer, structured = null) {
   const seeDoctorIf = parseBullets(sections.seeDoctorIf);
   const parsedAnything = whatToDo.length || whatToAvoid.length || seeDoctorIf.length;
 
+  // If markdown parsing found sections, use them
+  if (parsedAnything) {
+    const result = { 
+      yesNo, 
+      lead: first, 
+      whatToDo, 
+      whatToAvoid, 
+      seeDoctorIf, 
+      confidence: "MEDIUM",
+      sources: "",
+      parsedAnything: true, 
+      full: text,
+      isPlainText: false,
+    };
+    console.log("[parseClaudeAnswer] Parsed from markdown sections:", result);
+    return result;
+  }
+
+  // FINAL FALLBACK: This is plain text with no structured format
+  // Display it as a paragraph - DO NOT add generic bullets
+  console.log("[parseClaudeAnswer] Plain text answer (no structure found)");
   return { 
     yesNo, 
-    lead: first, 
-    whatToDo, 
-    whatToAvoid, 
-    seeDoctorIf, 
-    confidence: "MEDIUM",  // Default for fallback parsing
+    lead: text,  // Use full text as lead
+    whatToDo: [],  // Empty - no generic bullets!
+    whatToAvoid: [],  // Empty - no generic bullets!
+    seeDoctorIf: [],  // Empty - no generic bullets!
+    confidence: "MEDIUM",
     sources: "",
-    parsedAnything: Boolean(parsedAnything), 
-    full: text 
+    parsedAnything: false,  // Mark that we didn't parse structured sections
+    full: text,
+    isPlainText: true,  // Flag to indicate this should be displayed as paragraph
   };
 }
 
@@ -559,7 +593,7 @@ export default function ResultsPage() {
                   <input
                     value={headerQuery}
                     onChange={(e) => setHeaderQuery(e.target.value)}
-                    placeholder="Search your medication question…"
+                    placeholder="Search your medication question..."
                     className="ml-3 w-full bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400"
                   />
                 </div>
@@ -585,7 +619,7 @@ export default function ResultsPage() {
                 <input
                   value={headerQuery}
                   onChange={(e) => setHeaderQuery(e.target.value)}
-                  placeholder="Search your medication question…"
+                  placeholder="Search your medication question..."
                   className="ml-3 w-full bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400"
                 />
               </div>
@@ -629,17 +663,17 @@ export default function ResultsPage() {
                       <tbody className="divide-y divide-slate-200">
                         <tr>
                           <td className="px-3 py-2 font-semibold text-slate-800">Pain relief / fever</td>
-                          <td className="px-3 py-2 text-slate-700">4–6 hours</td>
+                          <td className="px-3 py-2 text-slate-700">4-6 hours</td>
                         </tr>
                         <tr>
-                          <td className="px-3 py-2 font-semibold text-slate-800">Anti‑inflammatory</td>
-                          <td className="px-3 py-2 text-slate-700">6–12 hours</td>
+                          <td className="px-3 py-2 font-semibold text-slate-800">Anti-inflammatory</td>
+                          <td className="px-3 py-2 text-slate-700">6-12 hours</td>
                         </tr>
                       </tbody>
                     </table>
                   </div>
                   <p className="mt-3 text-xs leading-relaxed text-slate-500">
-                    Placeholders for now (we’ll auto-detect drugs + real mechanisms next).
+                    Placeholders for now (we'll auto-detect drugs + real mechanisms next).
                   </p>
                 </div>
               </div>
@@ -654,33 +688,33 @@ export default function ResultsPage() {
                     {/* Source label */}
                     {source === "database" ? (
                       <span className="rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-emerald-700 ring-1 ring-emerald-200">
-                        💊 RxBuddy Answer
+                        RxBuddy Answer
                       </span>
                     ) : (
                       <span className="rounded-full bg-violet-50 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-violet-700 ring-1 ring-violet-200">
-                        🤖 AI Answer
+                        AI Answer
                       </span>
                     )}
                     {/* Saved to DB badge */}
                     {savedToDb && (
                       <span className="rounded-full bg-green-50 px-2 py-1 text-[10px] font-medium text-green-700 ring-1 ring-green-200">
-                        ✅ Added to database
+                        Added to database
                       </span>
                     )}
                     {/* Confidence badge */}
                     {topAnswer?.confidence === "HIGH" && (
                       <span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-medium text-emerald-700 ring-1 ring-emerald-200">
-                        ✅ FDA Verified
+                        FDA Verified
                       </span>
                     )}
                     {topAnswer?.confidence === "MEDIUM" && (
                       <span className="rounded-full bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-700 ring-1 ring-amber-200">
-                        ⚠️ General Guidance
+                        General Guidance
                       </span>
                     )}
                     {topAnswer?.confidence === "LOW" && (
                       <span className="rounded-full bg-rose-50 px-2 py-1 text-[10px] font-medium text-rose-700 ring-1 ring-rose-200">
-                        ❓ Consult Pharmacist
+                        Consult Pharmacist
                       </span>
                     )}
                   </div>
@@ -704,17 +738,17 @@ export default function ResultsPage() {
 
                 <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Question</p>
-                  <p className="mt-1 text-sm font-semibold text-slate-900">{q || "—"}</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-900">{q || "-"}</p>
                 </div>
 
                 {loading ? (
                   <div className="mt-6 flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4">
                     <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-200 border-t-brand-500" />
-                    <p className="text-sm font-medium text-slate-600">Generating your answer…</p>
+                    <p className="text-sm font-medium text-slate-600">Generating your answer...</p>
                   </div>
                 ) : error ? (
                   <div className="mt-6 rounded-xl border border-rose-200 bg-rose-50 p-4">
-                    <p className="text-sm font-semibold text-rose-900">Couldn’t load results</p>
+                    <p className="text-sm font-semibold text-rose-900">Couldn't load results</p>
                     <p className="mt-1 text-sm text-rose-700">{error}</p>
                     <p className="mt-3 text-xs text-rose-700">
                       API base: <code className="rounded bg-rose-100 px-2 py-0.5 font-mono">{API_BASE}</code>
@@ -727,7 +761,7 @@ export default function ResultsPage() {
                         {topAnswer?.yesNo ? `${topAnswer.yesNo},` : "Direct answer"}
                       </p>
                       <p className="mt-1 text-sm font-medium text-slate-700">
-                        {topAnswer?.lead || (results?.[0]?.answer ? "Answer generated from Claude." : "Generating answer…")}
+                        {topAnswer?.lead || (results?.[0]?.answer ? "Answer generated from Claude." : "Generating answer...")}
                       </p>
                       {/* Sources citation */}
                       {topAnswer?.sources && (
@@ -737,53 +771,60 @@ export default function ResultsPage() {
                       )}
                     </div>
 
-                    <div className="mt-5 space-y-4">
-                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                        <p className="text-sm font-extrabold text-emerald-900">What to Do</p>
-                        <ul className="mt-3 space-y-2 text-sm text-emerald-950">
-                          {(topAnswer?.whatToDo?.length ? topAnswer.whatToDo : ["Follow the package directions.", "Use the lowest effective dose.", "If you’re unsure, ask your pharmacist."]).map(
-                            (b, i) => (
-                              <li key={i} className="flex gap-2">
-                                <span className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
-                                <span className="leading-relaxed">{b}</span>
-                              </li>
-                            )
-                          )}
-                        </ul>
-                      </div>
+                    {/* Show structured bullet sections ONLY if we have actual parsed content */}
+                    {topAnswer?.parsedAnything && (
+                      <div className="mt-5 space-y-4">
+                        {/* What to Do - only show if we have items */}
+                        {topAnswer?.whatToDo?.length > 0 && (
+                          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                            <p className="text-sm font-extrabold text-emerald-900">What to Do</p>
+                            <ul className="mt-3 space-y-2 text-sm text-emerald-950">
+                              {topAnswer.whatToDo.map((b, i) => (
+                                <li key={i} className="flex gap-2">
+                                  <span className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
+                                  <span className="leading-relaxed">{b}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
 
-                      <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
-                        <p className="text-sm font-extrabold text-rose-900">What to Avoid</p>
-                        <ul className="mt-3 space-y-2 text-sm text-rose-950">
-                          {(topAnswer?.whatToAvoid?.length ? topAnswer.whatToAvoid : ["Avoid taking more than the max daily dose.", "Avoid combining products with the same ingredient.", "Avoid alcohol if it worsens side effects."]).map(
-                            (b, i) => (
-                              <li key={i} className="flex gap-2">
-                                <span className="shrink-0 text-rose-700">⚠️</span>
-                                <span className="leading-relaxed">{b}</span>
-                              </li>
-                            )
-                          )}
-                        </ul>
-                      </div>
+                        {/* What to Avoid - only show if we have items */}
+                        {topAnswer?.whatToAvoid?.length > 0 && (
+                          <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
+                            <p className="text-sm font-extrabold text-rose-900">What to Avoid</p>
+                            <ul className="mt-3 space-y-2 text-sm text-rose-950">
+                              {topAnswer.whatToAvoid.map((b, i) => (
+                                <li key={i} className="flex gap-2">
+                                  <span className="shrink-0 text-rose-700">!</span>
+                                  <span className="leading-relaxed">{b}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
 
-                      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-                        <p className="text-sm font-extrabold text-amber-900">See a Doctor If</p>
-                        <ul className="mt-3 space-y-2 text-sm text-amber-950">
-                          {(topAnswer?.seeDoctorIf?.length ? topAnswer.seeDoctorIf : ["Symptoms are severe or getting worse.", "You have chest pain, trouble breathing, or fainting.", "You’re pregnant or have kidney/liver disease."]).map(
-                            (b, i) => (
-                              <li key={i} className="flex gap-2">
-                                <span className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-amber-500" />
-                                <span className="leading-relaxed">{b}</span>
-                              </li>
-                            )
-                          )}
-                        </ul>
+                        {/* See a Doctor If - only show if we have items */}
+                        {topAnswer?.seeDoctorIf?.length > 0 && (
+                          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                            <p className="text-sm font-extrabold text-amber-900">See a Doctor If</p>
+                            <ul className="mt-3 space-y-2 text-sm text-amber-950">
+                              {topAnswer.seeDoctorIf.map((b, i) => (
+                                <li key={i} className="flex gap-2">
+                                  <span className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-amber-500" />
+                                  <span className="leading-relaxed">{b}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
                       </div>
-                    </div>
+                    )}
 
-                    {results?.[0]?.answer && topAnswer && !topAnswer.parsedAnything && (
+                    {/* For plain text answers without structured format, show full answer */}
+                    {results?.[0]?.answer && topAnswer && (topAnswer.isPlainText || !topAnswer.parsedAnything) && (
                       <div className="mt-6 rounded-xl border border-slate-200 bg-white p-4">
-                        <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Full answer</p>
+                        <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Detailed Answer</p>
                         <div className="mt-3 prose prose-sm prose-slate max-w-none">
                           <ReactMarkdown>{String(results[0].answer)}</ReactMarkdown>
                         </div>
@@ -802,11 +843,11 @@ export default function ResultsPage() {
 
                 {pubmedLoading ? (
                   <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-sm font-medium text-slate-600">Fetching PubMed articles…</p>
+                    <p className="text-sm font-medium text-slate-600">Fetching PubMed articles...</p>
                   </div>
                 ) : pubmedError ? (
                   <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4">
-                    <p className="text-sm font-semibold text-rose-900">Couldn’t load PubMed</p>
+                    <p className="text-sm font-semibold text-rose-900">Couldn't load PubMed</p>
                     <p className="mt-1 text-sm text-rose-700">{pubmedError}</p>
                   </div>
                 ) : articles.length === 0 ? (
