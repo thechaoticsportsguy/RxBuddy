@@ -846,11 +846,90 @@ def _post_process_cached_answer(answer_text: str) -> str:
     """
     Post-process cached answers to clean up raw markdown bullets
     and preserve section headers as bold labels.
+    
+    BUG 2 FIX: Also handles inline dash format like:
+    "What to do: - item1 - item2 What to avoid: - item3"
     """
     if not answer_text:
         return answer_text
     
-    lines = answer_text.split("\n")
+    text = answer_text
+    
+    # BUG 2 FIX: First, handle inline dash lists
+    # Pattern: "Header: - item - item - item NextHeader:" or end of string
+    # Common headers to look for
+    section_headers = [
+        "What to do", "What to avoid", "See a doctor if", "Get medical help",
+        "Important notes", "Important note", "Warning", "Warnings",
+        "Do", "Avoid", "Doctor", "Answer", "Why", "Verdict"
+    ]
+    
+    # Check if text contains inline dash pattern (header followed by dashes without newlines)
+    if " - " in text and not "\n- " in text:
+        # This looks like an inline format, let's reformat it
+        result_lines = []
+        remaining = text
+        
+        while remaining:
+            # Find the next section header
+            best_match = None
+            best_pos = len(remaining)
+            
+            for header in section_headers:
+                # Look for "Header:" pattern
+                patterns = [f"{header}:", f"{header.lower()}:", f"{header.upper()}:"]
+                for pattern in patterns:
+                    pos = remaining.find(pattern)
+                    if pos != -1 and pos < best_pos:
+                        best_pos = pos
+                        best_match = (pos, len(pattern), header)
+            
+            if best_match:
+                pos, pattern_len, header = best_match
+                
+                # Add any text before this header
+                if pos > 0:
+                    prefix = remaining[:pos].strip()
+                    if prefix:
+                        result_lines.append(prefix)
+                
+                # Find where this section ends (next header or end)
+                section_start = pos + pattern_len
+                next_header_pos = len(remaining)
+                
+                for next_header in section_headers:
+                    for pattern in [f"{next_header}:", f"{next_header.lower()}:", f"{next_header.upper()}:"]:
+                        next_pos = remaining.find(pattern, section_start)
+                        if next_pos != -1 and next_pos < next_header_pos:
+                            next_header_pos = next_pos
+                
+                # Extract this section's content
+                section_content = remaining[section_start:next_header_pos].strip()
+                
+                # Add the header as bold
+                result_lines.append(f"\n**{header}:**")
+                
+                # Split content by " - " and make bullet points
+                if " - " in section_content:
+                    items = section_content.split(" - ")
+                    for item in items:
+                        item = item.strip()
+                        if item:
+                            result_lines.append(f"- {item}")
+                elif section_content:
+                    result_lines.append(section_content)
+                
+                remaining = remaining[next_header_pos:]
+            else:
+                # No more headers, add remaining text
+                if remaining.strip():
+                    result_lines.append(remaining.strip())
+                break
+        
+        text = "\n".join(result_lines)
+    
+    # Now process line by line for any remaining formatting
+    lines = text.split("\n")
     processed_lines = []
     
     for line in lines:
@@ -861,8 +940,8 @@ def _post_process_cached_answer(answer_text: str) -> str:
             processed_lines.append("")
             continue
         
-        # Convert section headers (lines ending with :) to bold
-        if stripped.endswith(":") and len(stripped) < 50:
+        # Convert section headers (lines ending with :) to bold if not already bold
+        if stripped.endswith(":") and len(stripped) < 50 and not stripped.startswith("**"):
             processed_lines.append(f"**{stripped}**")
             continue
         
@@ -1347,129 +1426,113 @@ def _log_search(query: str, matched_question_id: int | None) -> None:
         pass
 
 
-# ---------- Drug Image Endpoint (BUG 4 Fix) ----------
-RXNORM_RXCUI_URL = "https://rxnav.nlm.nih.gov/REST/rxcui.json"
-OPENFDA_NDC_URL = "https://api.fda.gov/drug/ndc.json"
+# ---------- Drug Image Endpoint (BUG 3 Fix - Category-Based SVG Pills) ----------
 
-# Generic pharmacy icon SVG (fallback)
-GENERIC_PHARMACY_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
-  <rect x="10" y="30" width="80" height="60" rx="10" fill="#52B788"/>
-  <rect x="25" y="10" width="50" height="30" rx="5" fill="#2D6A4F"/>
-  <rect x="40" y="45" width="20" height="30" fill="white"/>
-  <rect x="35" y="55" width="30" height="10" fill="white"/>
-</svg>"""
+# Drug category classification for visual icons
+HIGH_RISK_DRUGS = {"warfarin", "methotrexate", "lithium", "digoxin", "insulin", "heparin", "phenytoin", "theophylline"}
+CONTROLLED_DRUGS = {"oxycodone", "hydrocodone", "adderall", "xanax", "valium", "morphine", "codeine", "fentanyl", "tramadol", "alprazolam", "diazepam", "amphetamine", "methylphenidate", "ritalin"}
+ANTIBIOTIC_DRUGS = {"amoxicillin", "azithromycin", "ciprofloxacin", "doxycycline", "penicillin", "metronidazole", "clindamycin", "cephalexin", "levofloxacin", "sulfamethoxazole"}
+PRESCRIPTION_DRUGS = {"metformin", "lisinopril", "atorvastatin", "metoprolol", "sertraline", "fluoxetine", "escitalopram", "omeprazole", "losartan", "amlodipine", "levothyroxine", "gabapentin", "prednisone", "sildenafil", "tadalafil"}
+# OTC = everything else (ibuprofen, acetaminophen, aspirin, etc.)
 
+# Category colors for pill SVGs
+CATEGORY_COLORS = {
+    "OTC": {"fill": "#52B788", "stroke": "#2D6A4F"},  # Green
+    "PRESCRIPTION": {"fill": "#3B82F6", "stroke": "#1E40AF"},  # Blue
+    "HIGH_RISK": {"fill": "#EF4444", "stroke": "#991B1B"},  # Red
+    "ANTIBIOTIC": {"fill": "#F97316", "stroke": "#C2410C"},  # Orange
+    "CONTROLLED": {"fill": "#8B5CF6", "stroke": "#5B21B6"},  # Purple
+}
 
-def _get_rxcui(drug_name: str) -> str | None:
-    """Get RxCUI from RxNorm for a drug name."""
-    if not drug_name:
-        return None
-    try:
-        resp = http_requests.get(
-            RXNORM_RXCUI_URL,
-            params={"name": drug_name},
-            headers={"User-Agent": "RxBuddy/1.0"},
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            id_group = data.get("idGroup", {})
-            rxnorm_ids = id_group.get("rxnormId", [])
-            if rxnorm_ids:
-                return rxnorm_ids[0]
-    except Exception as e:
-        logger.warning("[RxNorm] Error getting RxCUI for '%s': %s", drug_name, e)
-    return None
-
-
-def _get_drug_image_url(drug_name: str) -> str | None:
-    """
-    Try to get a drug image URL from OpenFDA using NDC data.
-    Returns image URL if found, None otherwise.
-    """
-    if not drug_name:
-        return None
+def _get_pill_svg(category: str) -> str:
+    """Generate a clean pill capsule SVG with category-appropriate colors."""
+    colors = CATEGORY_COLORS.get(category, CATEGORY_COLORS["OTC"])
+    fill = colors["fill"]
+    stroke = colors["stroke"]
     
-    try:
-        # Search OpenFDA NDC endpoint for the drug
-        resp = http_requests.get(
-            OPENFDA_NDC_URL,
-            params={
-                "search": f'generic_name:"{drug_name}" OR brand_name:"{drug_name}"',
-                "limit": 1
-            },
-            headers={"User-Agent": "RxBuddy/1.0"},
-            timeout=10,
-        )
-        
-        if resp.status_code == 200:
-            data = resp.json()
-            results = data.get("results", [])
-            if results:
-                # OpenFDA doesn't directly provide images, but we can construct
-                # a DailyMed image URL if we have the NDC
-                packaging = results[0].get("packaging", [])
-                if packaging:
-                    # Try to find an image from the packaging data
-                    for pkg in packaging:
-                        if pkg.get("marketing_start_date"):
-                            # DailyMed might have images - return None to use fallback
-                            pass
-    except Exception as e:
-        logger.warning("[OpenFDA] Error getting image for '%s': %s", drug_name, e)
+    # Clean pill capsule SVG - horizontal orientation
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60" width="60" height="60">
+  <!-- Pill shadow -->
+  <ellipse cx="30" cy="52" rx="20" ry="4" fill="rgba(0,0,0,0.15)"/>
+  <!-- Pill body - left half (colored) -->
+  <path d="M10 30 C10 19 18 12 30 12 L30 48 C18 48 10 41 10 30" fill="{fill}" stroke="{stroke}" stroke-width="1.5"/>
+  <!-- Pill body - right half (white) -->
+  <path d="M30 12 C42 12 50 19 50 30 C50 41 42 48 30 48 L30 12" fill="#FFFFFF" stroke="{stroke}" stroke-width="1.5"/>
+  <!-- Center divider line -->
+  <line x1="30" y1="12" x2="30" y2="48" stroke="{stroke}" stroke-width="1"/>
+  <!-- Shine highlight on colored side -->
+  <ellipse cx="20" cy="22" rx="6" ry="3" fill="rgba(255,255,255,0.35)"/>
+  <!-- Shine highlight on white side -->
+  <ellipse cx="40" cy="22" rx="6" ry="3" fill="rgba(255,255,255,0.5)"/>
+</svg>'''
+
+
+def _get_drug_category(drug_name: str) -> str:
+    """
+    Classify a drug into a category based on keyword matching.
+    Returns: OTC, PRESCRIPTION, HIGH_RISK, ANTIBIOTIC, or CONTROLLED
+    """
+    if not drug_name:
+        return "OTC"
     
-    return None
+    drug_lower = drug_name.lower().strip()
+    
+    # Check each category (order matters - check high risk first)
+    if drug_lower in HIGH_RISK_DRUGS:
+        return "HIGH_RISK"
+    if drug_lower in CONTROLLED_DRUGS:
+        return "CONTROLLED"
+    if drug_lower in ANTIBIOTIC_DRUGS:
+        return "ANTIBIOTIC"
+    if drug_lower in PRESCRIPTION_DRUGS:
+        return "PRESCRIPTION"
+    
+    # Default to OTC for common OTC drugs and unknowns
+    return "OTC"
 
 
 class DrugImageResponse(BaseModel):
     drug_name: str
-    image_url: str | None = None
-    rxcui: str | None = None
-    fallback: bool = False
-    svg_data: str | None = None
+    category: str = "OTC"  # OTC, PRESCRIPTION, HIGH_RISK, ANTIBIOTIC, CONTROLLED
+    category_label: str = "Over-the-Counter"
+    svg_data: str
 
 
 @app.get("/drug-image", response_model=DrugImageResponse)
 def get_drug_image(name: str) -> DrugImageResponse:
     """
-    Get drug image for a given drug name.
+    Get drug category and SVG pill icon for a given drug name.
     
-    1. Tries RxNorm for RxCUI
-    2. Tries OpenFDA NDC for image
-    3. Falls back to generic pharmacy icon SVG
+    BUG 3 FIX: Returns category-based colored pill SVG instead of broken image URLs.
+    Categories:
+    - OTC (green): ibuprofen, acetaminophen, aspirin, etc.
+    - PRESCRIPTION (blue): metformin, lisinopril, atorvastatin, etc.
+    - HIGH_RISK (red): warfarin, methotrexate, lithium, etc.
+    - ANTIBIOTIC (orange): amoxicillin, azithromycin, ciprofloxacin, etc.
+    - CONTROLLED (purple): oxycodone, xanax, adderall, etc.
     """
     drug_name = name.strip().lower() if name else ""
     
-    if not drug_name:
-        return DrugImageResponse(
-            drug_name="",
-            fallback=True,
-            svg_data=GENERIC_PHARMACY_SVG,
-        )
-    
     # Convert brand to generic if known
-    generic_name = BRAND_TO_GENERIC.get(drug_name, drug_name)
+    generic_name = BRAND_TO_GENERIC.get(drug_name, drug_name) if drug_name else ""
     
-    # Try to get RxCUI
-    rxcui = _get_rxcui(generic_name)
+    # Get category
+    category = _get_drug_category(generic_name)
     
-    # Try to get image URL from OpenFDA
-    image_url = _get_drug_image_url(generic_name)
+    # Category labels for display
+    category_labels = {
+        "OTC": "Over-the-Counter",
+        "PRESCRIPTION": "Prescription",
+        "HIGH_RISK": "High-Risk",
+        "ANTIBIOTIC": "Antibiotic",
+        "CONTROLLED": "Controlled",
+    }
     
-    if image_url:
-        return DrugImageResponse(
-            drug_name=generic_name,
-            image_url=image_url,
-            rxcui=rxcui,
-            fallback=False,
-        )
-    
-    # Fallback to generic SVG
     return DrugImageResponse(
-        drug_name=generic_name,
-        rxcui=rxcui,
-        fallback=True,
-        svg_data=GENERIC_PHARMACY_SVG,
+        drug_name=generic_name or "unknown",
+        category=category,
+        category_label=category_labels.get(category, "Over-the-Counter"),
+        svg_data=_get_pill_svg(category),
     )
 
 

@@ -6,7 +6,7 @@ import ReactMarkdown from "react-markdown";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
-// BUG 4 FIX: DrugImage component that fetches from backend /drug-image endpoint
+// BUG 3 FIX: DrugImage component with category-based SVG pills
 function DrugImage({ drugName, className = "" }) {
   const [imageData, setImageData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -34,38 +34,60 @@ function DrugImage({ drugName, className = "" }) {
     fetchImage();
   }, [drugName]);
 
+  // Category label colors for the badge
+  const categoryColors = {
+    OTC: "bg-emerald-100 text-emerald-700",
+    PRESCRIPTION: "bg-blue-100 text-blue-700",
+    HIGH_RISK: "bg-red-100 text-red-700",
+    ANTIBIOTIC: "bg-orange-100 text-orange-700",
+    CONTROLLED: "bg-purple-100 text-purple-700",
+  };
+
   if (loading) {
     // Loading skeleton
     return (
-      <div className={`animate-pulse bg-slate-200 rounded-lg ${className}`} style={{ width: 60, height: 60 }} />
+      <div className={`flex flex-col items-center ${className}`}>
+        <div className="animate-pulse bg-slate-200 rounded-lg" style={{ width: 60, height: 60 }} />
+        <div className="animate-pulse bg-slate-200 rounded h-3 w-12 mt-1" />
+      </div>
     );
   }
 
-  if (imageData?.image_url) {
-    return (
-      <img 
-        src={imageData.image_url} 
-        alt={imageData.drug_name || drugName} 
-        className={`rounded-lg object-cover ${className}`}
-        style={{ width: 60, height: 60 }}
-      />
-    );
-  }
-
+  // BUG 3 FIX: Always render SVG pill with category label
   if (imageData?.svg_data) {
+    const colorClass = categoryColors[imageData.category] || categoryColors.OTC;
     return (
-      <div 
-        className={`rounded-lg ${className}`}
-        style={{ width: 60, height: 60 }}
-        dangerouslySetInnerHTML={{ __html: imageData.svg_data }}
-      />
+      <div className={`flex flex-col items-center ${className}`}>
+        <div 
+          style={{ width: 60, height: 60 }}
+          dangerouslySetInnerHTML={{ __html: imageData.svg_data }}
+        />
+        <span className={`mt-1 px-1.5 py-0.5 rounded text-[9px] font-medium ${colorClass}`}>
+          {imageData.category_label || "OTC"}
+        </span>
+      </div>
     );
   }
 
-  // Fallback: generic pill icon
+  // Fallback: default green pill SVG
+  const defaultSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 60" width="60" height="60">
+    <ellipse cx="30" cy="52" rx="20" ry="4" fill="rgba(0,0,0,0.15)"/>
+    <path d="M10 30 C10 19 18 12 30 12 L30 48 C18 48 10 41 10 30" fill="#52B788" stroke="#2D6A4F" stroke-width="1.5"/>
+    <path d="M30 12 C42 12 50 19 50 30 C50 41 42 48 30 48 L30 12" fill="#FFFFFF" stroke="#2D6A4F" stroke-width="1.5"/>
+    <line x1="30" y1="12" x2="30" y2="48" stroke="#2D6A4F" stroke-width="1"/>
+    <ellipse cx="20" cy="22" rx="6" ry="3" fill="rgba(255,255,255,0.35)"/>
+    <ellipse cx="40" cy="22" rx="6" ry="3" fill="rgba(255,255,255,0.5)"/>
+  </svg>`;
+  
   return (
-    <div className={`flex items-center justify-center bg-emerald-100 rounded-lg ${className}`} style={{ width: 60, height: 60 }}>
-      <span className="text-2xl">💊</span>
+    <div className={`flex flex-col items-center ${className}`}>
+      <div 
+        style={{ width: 60, height: 60 }}
+        dangerouslySetInnerHTML={{ __html: defaultSvg }}
+      />
+      <span className="mt-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-emerald-100 text-emerald-700">
+        OTC
+      </span>
     </div>
   );
 }
@@ -581,7 +603,7 @@ export default function ResultsPage() {
   }
 
   // Verdict styling — maps each verdict to colours + icon
-  // BUG 1 FIX: Added MAYBE (yellow) and CONSULT_PHARMACIST (blue), with CONSULT_PHARMACIST as fallback
+  // BUG 1 FIX: All verdict types with proper colors
   const verdictStyles = {
     YES:                 { bg: "bg-emerald-50",  border: "border-emerald-300", text: "text-emerald-800", icon: "✅", label: "YES" },
     USUALLY_YES:         { bg: "bg-emerald-50",  border: "border-emerald-300", text: "text-emerald-800", icon: "✅", label: "USUALLY YES" },
@@ -591,21 +613,67 @@ export default function ResultsPage() {
     CONSULT_PHARMACIST:  { bg: "bg-blue-50",     border: "border-blue-300",    text: "text-blue-800",    icon: "💊", label: "CONSULT PHARMACIST" },
   };
 
-  // BUG 1 FIX: Always show a verdict - fallback to CONSULT_PHARMACIST if null/missing
+  // BUG 1 FIX: Robust verdict extraction - checks multiple locations and ALWAYS returns a valid verdict
   const getVerdict = () => {
-    // First check structured.verdict from backend
     const first = results?.[0];
-    if (first?.structured?.verdict && verdictStyles[first.structured.verdict]) {
-      return verdictStyles[first.structured.verdict];
+    
+    // Debug logging
+    console.log("[Verdict Debug] first result:", first);
+    console.log("[Verdict Debug] structured:", first?.structured);
+    console.log("[Verdict Debug] structured.verdict:", first?.structured?.verdict);
+    console.log("[Verdict Debug] parsedAnswer:", parsedAnswer);
+    
+    // 1. Check structured.verdict from backend API response
+    if (first?.structured?.verdict) {
+      const v = first.structured.verdict;
+      if (verdictStyles[v]) {
+        console.log("[Verdict] Using structured.verdict:", v);
+        return verdictStyles[v];
+      }
     }
-    // Then check parsed verdict from frontend
-    if (parsedAnswer?.verdict && verdictStyles[parsedAnswer.verdict]) {
-      return verdictStyles[parsedAnswer.verdict];
+    
+    // 2. Check if verdict is directly on the result object (some API formats)
+    if (first?.verdict) {
+      const v = first.verdict;
+      if (verdictStyles[v]) {
+        console.log("[Verdict] Using first.verdict:", v);
+        return verdictStyles[v];
+      }
     }
-    // Fallback: CONSULT_PHARMACIST (never blank)
+    
+    // 3. Check parsedAnswer.verdict from frontend parsing
+    if (parsedAnswer?.verdict) {
+      const v = parsedAnswer.verdict;
+      if (verdictStyles[v]) {
+        console.log("[Verdict] Using parsedAnswer.verdict:", v);
+        return verdictStyles[v];
+      }
+    }
+    
+    // 4. Try to extract verdict from answer text directly
+    const answerText = first?.answer || "";
+    if (answerText) {
+      const upperText = answerText.toUpperCase();
+      if (upperText.includes("ANSWER: YES") || upperText.includes("YES, YOU CAN") || upperText.includes("YES YOU CAN")) {
+        console.log("[Verdict] Extracted YES from answer text");
+        return verdictStyles.YES;
+      }
+      if (upperText.includes("ANSWER: NO") || upperText.includes("NO, YOU SHOULD NOT") || upperText.includes("DO NOT TAKE")) {
+        console.log("[Verdict] Extracted NO from answer text");
+        return verdictStyles.NO;
+      }
+      if (upperText.includes("MAYBE") || upperText.includes("IT DEPENDS") || upperText.includes("DEPENDS ON")) {
+        console.log("[Verdict] Extracted MAYBE from answer text");
+        return verdictStyles.MAYBE;
+      }
+    }
+    
+    // 5. FALLBACK: Always return CONSULT_PHARMACIST (never null, never blank)
+    console.log("[Verdict] Using fallback: CONSULT_PHARMACIST");
     return verdictStyles.CONSULT_PHARMACIST;
   };
 
+  // BUG 1 FIX: Always compute verdict when we have results
   const currentVerdict = results?.length > 0 ? getVerdict() : null;
 
   return (
@@ -704,28 +772,38 @@ export default function ResultsPage() {
             </div>
           ) : (
             <>
-              {/* ANSWER BLOCK — big YES / NO / MAYBE / CONSULT PHARMACIST - BUG 1 FIX: Always shows, never blank */}
-              {currentVerdict && (
-                <div className={`mb-4 rounded-xl border-2 ${currentVerdict.border} ${currentVerdict.bg} p-5 shadow-sm`}>
+              {/* BUG 1 FIX: VERDICT BANNER - Always renders at TOP, never hidden, never blank */}
+              {/* This banner MUST be the first thing users see after the question card */}
+              {currentVerdict ? (
+                <div className={`mb-4 rounded-xl border-2 ${currentVerdict.border} ${currentVerdict.bg} p-5 shadow-md`}>
                   <div className="flex items-start gap-3">
                     <span className="text-3xl leading-none">{currentVerdict.icon}</span>
                     <div className="flex-1 min-w-0">
                       <span className={`text-xl font-bold ${currentVerdict.text}`}>{currentVerdict.label}</span>
-                      {/* BUG 2 FIX: Use structured.direct or parsedAnswer.why */}
-                      {(results?.[0]?.structured?.direct || parsedAnswer?.why) && (
-                        <p className="mt-2 text-base text-slate-700 leading-relaxed">
-                          {results?.[0]?.structured?.direct || parsedAnswer?.why}
-                        </p>
-                      )}
+                      {/* Show the explanation from structured.direct, parsedAnswer.why, or first sentence of answer */}
+                      {(() => {
+                        const explanation = results?.[0]?.structured?.direct 
+                          || parsedAnswer?.why 
+                          || (results?.[0]?.answer ? results[0].answer.split('.')[0] + '.' : null);
+                        return explanation ? (
+                          <p className="mt-2 text-base text-slate-700 leading-relaxed">{explanation}</p>
+                        ) : null;
+                      })()}
                     </div>
                   </div>
                 </div>
-              )}
-
-              {/* Fallback if no verdict parsed but we have a "why" */}
-              {!currentVerdict && parsedAnswer?.why && (
-                <div className="mb-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                  <p className="text-base text-slate-800">{parsedAnswer.why}</p>
+              ) : (
+                /* Fallback banner if somehow currentVerdict is still null - should never happen */
+                <div className="mb-4 rounded-xl border-2 border-blue-300 bg-blue-50 p-5 shadow-md">
+                  <div className="flex items-start gap-3">
+                    <span className="text-3xl leading-none">💊</span>
+                    <div className="flex-1 min-w-0">
+                      <span className="text-xl font-bold text-blue-800">CONSULT PHARMACIST</span>
+                      <p className="mt-2 text-base text-slate-700 leading-relaxed">
+                        Please consult with a pharmacist or healthcare provider for personalized advice about this medication question.
+                      </p>
+                    </div>
+                  </div>
                 </div>
               )}
 
