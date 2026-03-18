@@ -28,7 +28,10 @@ load_dotenv()
 # We fetch the top 1,000 drug names from RxNorm once at startup.
 # These are added to the spell checker so drug names aren't flagged as misspelled.
 RXNORM_DISPLAYNAMES_URL = "https://rxnav.nlm.nih.gov/REST/Prescribe/displaynames.json"
+RXNORM_RXCUI_URL = "https://rxnav.nlm.nih.gov/REST/rxcui.json"
 OPENFDA_LABEL_URL = "https://api.fda.gov/drug/label.json"
+MEDLINEPLUS_CONNECT_URL = "https://connect.medlineplus.gov/application"
+RXIMAGE_API_URL = "https://rximage.nlm.nih.gov/api/rximage/1/rxbase"
 _medical_terms: set[str] = set()
 _spell_checker: SpellChecker | None = None
 
@@ -206,12 +209,13 @@ def _fetch_fda_label(drug_name: str) -> dict | None:
         return None
 
 
-def _build_fda_context(fda_data: dict, question: str) -> str:
+def _build_fda_context(fda_data: dict | None, question: str, medlineplus_data: dict | None = None) -> str:
     """
     Build a context string from FDA label data for Claude.
     Only includes sections relevant to the question.
+    Appends MedlinePlus patient-friendly summary at the bottom if available.
     """
-    if not fda_data:
+    if not fda_data and not medlineplus_data:
         return ""
     
     q_lower = question.lower()
@@ -246,12 +250,21 @@ def _build_fda_context(fda_data: dict, question: str) -> str:
             sections.append(f"CONTRAINDICATIONS: {fda_data['contraindications'][:500]}")
     
     # If no specific sections matched, include warnings and dosage as default
-    if len(sections) == 1:
+    if fda_data and len(sections) == 1:
         if fda_data.get("warnings"):
             sections.append(f"WARNINGS: {fda_data['warnings'][:400]}")
         if fda_data.get("dosage_and_administration"):
             sections.append(f"DOSAGE: {fda_data['dosage_and_administration'][:400]}")
-    
+
+    # Append MedlinePlus patient-friendly summary for additional grounding
+    if medlineplus_data:
+        if medlineplus_data.get("summary"):
+            sections.append(f"MEDLINEPLUS SUMMARY: {medlineplus_data['summary']}")
+        if medlineplus_data.get("usage"):
+            sections.append(f"MEDLINEPLUS USAGE: {medlineplus_data['usage']}")
+        if medlineplus_data.get("side_effects"):
+            sections.append(f"MEDLINEPLUS SIDE EFFECTS: {medlineplus_data['side_effects']}")
+
     return "\n".join(sections)
 
 
@@ -288,6 +301,126 @@ def _fetch_rxnorm_drug_names(limit: int = 1000) -> set[str]:
     except Exception as e:
         logger.warning("[RxNorm] Failed to fetch drug names: %s", e)
         return set()
+
+
+def _fetch_rxcui(drug_name: str) -> str | None:
+    """
+    Look up RxCUI for a drug name using the RxNorm API.
+    Returns the RxCUI string or None if not found.
+    """
+    if not drug_name:
+        return None
+    try:
+        resp = http_requests.get(
+            RXNORM_RXCUI_URL,
+            params={"name": drug_name, "allSourcesFlag": "0"},
+            headers={"User-Agent": "RxBuddy/1.0"},
+            timeout=8,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        rxcui = data.get("idGroup", {}).get("rxnormId", [None])[0]
+        if rxcui:
+            logger.info("[RxNorm] RxCUI for '%s': %s", drug_name, rxcui)
+        return rxcui
+    except Exception as e:
+        logger.warning("[RxNorm] Failed to fetch RxCUI for '%s': %s", drug_name, e)
+        return None
+
+
+def _fetch_medlineplus(drug_name: str) -> dict | None:
+    """
+    Fetch patient-friendly drug information from MedlinePlus Connect.
+    Uses the drug's RxCUI as the lookup key.
+    Returns dict with keys: summary, usage, side_effects — or None if unavailable.
+    """
+    if not drug_name:
+        return None
+    try:
+        rxcui = _fetch_rxcui(drug_name)
+        if not rxcui:
+            return None
+
+        resp = http_requests.get(
+            MEDLINEPLUS_CONNECT_URL,
+            params={
+                "mainSearchCriteria.v.cs": "2.16.840.1.113883.6.88",
+                "mainSearchCriteria.v.c": rxcui,
+                "knowledgeResponseType": "application/json",
+            },
+            headers={"User-Agent": "RxBuddy/1.0"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        # MedlinePlus Connect returns a feed with entry list
+        feed = data.get("feed", {})
+        entries = feed.get("entry", [])
+        if not entries:
+            return None
+
+        entry = entries[0]
+        summary = entry.get("summary", {}).get("_value", "")
+        title = entry.get("title", {}).get("_value", "")
+
+        # Extract content sections — MedlinePlus wraps HTML; strip tags for plain text
+        content = entry.get("content", {}).get("_value", "")
+        clean = re.sub(r"<[^>]+>", " ", content)
+        clean = re.sub(r"\s+", " ", clean).strip()
+
+        # Keep it concise for Claude context (max 600 chars)
+        result = {
+            "summary": (summary or title)[:300],
+            "usage": clean[:300] if clean else "",
+            "side_effects": "",  # Extracted from content if present
+        }
+
+        # Try to pull a side-effects sentence from content
+        lower_clean = clean.lower()
+        se_idx = lower_clean.find("side effect")
+        if se_idx != -1:
+            result["side_effects"] = clean[se_idx: se_idx + 250]
+
+        has_data = any(result[k] for k in ("summary", "usage", "side_effects"))
+        if not has_data:
+            return None
+
+        logger.info("[MedlinePlus] Fetched info for '%s'", drug_name)
+        return result
+
+    except Exception as e:
+        logger.warning("[MedlinePlus] Failed for '%s': %s", drug_name, e)
+        return None
+
+
+def _fetch_pill_image(drug_name: str) -> str | None:
+    """
+    Fetch a real pill photo URL from NIH RxImageAccess API.
+    Returns the thumbnail image URL string or None if not found.
+    Falls back gracefully — never raises.
+    """
+    if not drug_name:
+        return None
+    try:
+        resp = http_requests.get(
+            RXIMAGE_API_URL,
+            params={"name": drug_name, "resolution": "thumbnail"},
+            headers={"User-Agent": "RxBuddy/1.0"},
+            timeout=8,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        images = data.get("nlmRxImages", [])
+        if images:
+            image_url = images[0].get("imageUrl")
+            if image_url:
+                logger.info("[RxImage] Found pill image for '%s': %s", drug_name, image_url)
+                return image_url
+        return None
+    except Exception as e:
+        logger.warning("[RxImage] Failed for '%s': %s", drug_name, e)
+        return None
 
 
 def _init_spell_checker() -> None:
@@ -694,12 +827,13 @@ def _generate_ai_answer(question: str) -> str:
 
     logger.info("[Claude] API key found (first 8 chars): %s...", api_key[:8] if len(api_key) > 8 else "***")
 
-    # Ground answers in FDA data — extract all drugs, fetch label for primary
+    # Ground answers in FDA + MedlinePlus data — extract all drugs, fetch label for primary
     drug_names = _extract_drug_names(question)
     drug_name = drug_names[0] if drug_names else _extract_drug_name(question)
     query_intent = _classify_query_intent(question)
     fda_data = _fetch_fda_label(drug_name) if drug_name else None
-    fda_context = _build_fda_context(fda_data, question) if fda_data else ""
+    medlineplus_data = _fetch_medlineplus(drug_name) if drug_name else None
+    fda_context = _build_fda_context(fda_data, question, medlineplus_data)
 
     import anthropic
 
@@ -1805,6 +1939,116 @@ def get_drug_image(name: str) -> DrugImageResponse:
         category_label=category_labels.get(category, "Over-the-Counter"),
         svg_data=_get_pill_svg(category),
     )
+
+
+# ---------- Pill Image endpoint ----------
+
+class PillImageResponse(BaseModel):
+    drug_name: str
+    image_url: Optional[str] = None
+    source: str = "fallback"
+
+
+@app.get("/pill-image", response_model=PillImageResponse)
+def get_pill_image(name: str) -> PillImageResponse:
+    """
+    Get a real pill photo URL from NIH RxImageAccess.
+    Falls back to { image_url: null, source: 'fallback' } if not found —
+    the frontend should render the SVG pill icon in that case.
+    """
+    drug_name = name.strip().lower() if name else ""
+    if not drug_name:
+        raise HTTPException(status_code=400, detail="name parameter is required.")
+
+    generic_name = BRAND_TO_GENERIC.get(drug_name, drug_name)
+    image_url = _fetch_pill_image(generic_name)
+
+    return PillImageResponse(
+        drug_name=generic_name,
+        image_url=image_url,
+        source="rximage" if image_url else "fallback",
+    )
+
+
+# ---------- Drug Index endpoint ----------
+
+# In-memory cache so repeated /drug-index calls don't hammer external APIs
+_drug_index_cache: dict[str, list] = {}
+
+# Master drug list for the index — all known drugs across all categories
+_ALL_KNOWN_DRUGS: list[str] = sorted(set(
+    list(BRAND_TO_GENERIC.values()) + [
+        "acetaminophen", "ibuprofen", "aspirin", "naproxen", "diphenhydramine",
+        "loratadine", "cetirizine", "fexofenadine", "omeprazole", "famotidine",
+        "esomeprazole", "metformin", "lisinopril", "atorvastatin", "metoprolol",
+        "sertraline", "fluoxetine", "escitalopram", "losartan", "amlodipine",
+        "levothyroxine", "gabapentin", "prednisone", "sildenafil", "tadalafil",
+        "warfarin", "methotrexate", "lithium", "digoxin", "insulin", "heparin",
+        "phenytoin", "theophylline", "oxycodone", "hydrocodone", "alprazolam",
+        "diazepam", "morphine", "codeine", "fentanyl", "tramadol", "amphetamine",
+        "methylphenidate", "amoxicillin", "azithromycin", "ciprofloxacin",
+        "doxycycline", "penicillin", "metronidazole", "clindamycin", "cephalexin",
+        "levofloxacin", "sulfamethoxazole", "rosuvastatin", "zolpidem",
+    ]
+))
+
+_CATEGORY_LABELS = {
+    "OTC": "Over-the-Counter",
+    "PRESCRIPTION": "Prescription",
+    "HIGH_RISK": "High-Risk",
+    "ANTIBIOTIC": "Antibiotic",
+    "CONTROLLED": "Controlled",
+}
+
+
+class DrugIndexEntry(BaseModel):
+    drug_name: str
+    category: str
+    category_label: str
+    image_url: Optional[str] = None
+    svg_data: str
+
+
+class DrugIndexResponse(BaseModel):
+    letter: Optional[str] = None
+    total: int
+    drugs: list[DrugIndexEntry]
+
+
+@app.get("/drug-index", response_model=DrugIndexResponse)
+def get_drug_index(letter: Optional[str] = None) -> DrugIndexResponse:
+    """
+    Returns all known drugs, optionally filtered by first letter.
+    Results are cached in memory after first call per letter.
+    Each entry includes: drug_name, category, category_label, image_url, svg_data.
+    """
+    cache_key = (letter or "ALL").upper()
+
+    if cache_key in _drug_index_cache:
+        cached = _drug_index_cache[cache_key]
+        return DrugIndexResponse(letter=letter, total=len(cached), drugs=cached)
+
+    filtered = _ALL_KNOWN_DRUGS
+    if letter:
+        letter_upper = letter.strip().upper()
+        filtered = [d for d in _ALL_KNOWN_DRUGS if d.upper().startswith(letter_upper)]
+
+    entries: list[DrugIndexEntry] = []
+    for drug in filtered:
+        category = _get_drug_category(drug)
+        image_url = _fetch_pill_image(drug)
+        entries.append(DrugIndexEntry(
+            drug_name=drug,
+            category=category,
+            category_label=_CATEGORY_LABELS.get(category, "Over-the-Counter"),
+            image_url=image_url,
+            svg_data=_get_pill_svg(category),
+        ))
+
+    _drug_index_cache[cache_key] = entries
+    logger.info("[DrugIndex] Built index for letter=%s — %d drugs", cache_key, len(entries))
+
+    return DrugIndexResponse(letter=letter, total=len(entries), drugs=entries)
 
 
 @app.post("/log", response_model=LogResponse)
