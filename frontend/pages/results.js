@@ -781,10 +781,33 @@ export default function ResultsPage() {
                     <div className="flex-1 min-w-0">
                       <span className={`text-xl font-bold ${currentVerdict.text}`}>{currentVerdict.label}</span>
                       {/* Show the explanation from structured.direct, parsedAnswer.why, or first sentence of answer */}
+                      {/* ISSUE 1 FIX: Strip markdown before displaying */}
                       {(() => {
-                        const explanation = results?.[0]?.structured?.direct 
+                        let explanation = results?.[0]?.structured?.direct 
                           || parsedAnswer?.why 
                           || (results?.[0]?.answer ? results[0].answer.split('.')[0] + '.' : null);
+                        
+                        if (explanation) {
+                          // ISSUE 1 FIX: Strip markdown formatting
+                          explanation = explanation
+                            .replace(/#{1,6}\s*/g, '')  // Remove # headers
+                            .replace(/\*\*/g, '')       // Remove bold **
+                            .replace(/__/g, '')         // Remove bold __
+                            .replace(/\*/g, '')         // Remove italic *
+                            .replace(/_/g, ' ')         // Replace _ with space
+                            .replace(/`/g, '')          // Remove code backticks
+                            .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')  // Remove links, keep text
+                            .replace(/^[-*•]\s*/gm, '') // Remove bullet points
+                            .trim();
+                          
+                          // Only show first 1-2 sentences (up to ~200 chars)
+                          const sentences = explanation.match(/[^.!?]+[.!?]+/g) || [explanation];
+                          explanation = sentences.slice(0, 2).join(' ').trim();
+                          if (explanation.length > 200) {
+                            explanation = explanation.substring(0, 197) + '...';
+                          }
+                        }
+                        
                         return explanation ? (
                           <p className="mt-2 text-base text-slate-700 leading-relaxed">{explanation}</p>
                         ) : null;

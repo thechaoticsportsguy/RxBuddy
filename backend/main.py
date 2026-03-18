@@ -788,12 +788,41 @@ class StructuredAnswer(BaseModel):
     sources: str = ""  # FDA label, DailyMed, etc.
 
 
-def _extract_verdict(text: str) -> str:
+def _extract_verdict(text: str, question: str = "") -> str:
     """
     Robustly extract verdict from answer text.
     Always returns one of: YES, NO, MAYBE, CONSULT_PHARMACIST
+    
+    ISSUE 4 FIX: For informational questions (dosage, side effects, what is, how to),
+    return CONSULT_PHARMACIST instead of trying to extract YES/NO.
     """
     if not text:
+        return "CONSULT_PHARMACIST"
+    
+    # ISSUE 4 FIX: Check if question is informational (not yes/no)
+    # These questions should NOT get YES/NO verdicts
+    q_lower = question.lower() if question else ""
+    
+    # Informational question indicators - should get CONSULT_PHARMACIST
+    informational_keywords = [
+        "dosage", "dose", "how much", "how many", "how to take",
+        "side effects", "what is", "what are", "how does", "explain",
+        "when to take", "how long", "what happens", "why does",
+        "ingredients", "storage", "expire", "half-life"
+    ]
+    
+    # Binary question indicators - can get YES/NO
+    binary_keywords = [
+        "can i", "is it safe", "should i", "is it okay", "is it ok",
+        "can you", "will it", "does it", "are there", "is there"
+    ]
+    
+    # If question contains informational keywords but NO binary keywords,
+    # return CONSULT_PHARMACIST immediately
+    has_informational = any(kw in q_lower for kw in informational_keywords)
+    has_binary = any(kw in q_lower for kw in binary_keywords)
+    
+    if has_informational and not has_binary:
         return "CONSULT_PHARMACIST"
     
     upper_text = text.upper()
@@ -849,11 +878,53 @@ def _post_process_cached_answer(answer_text: str) -> str:
     
     BUG 2 FIX: Also handles inline dash format like:
     "What to do: - item1 - item2 What to avoid: - item3"
+    
+    ISSUE 2 FIX: Filters out leaked Claude reasoning/system prompt text.
     """
     if not answer_text:
         return answer_text
     
     text = answer_text
+    
+    # ISSUE 2 FIX: Remove leaked Claude reasoning and system prompt fragments
+    # These patterns indicate corrupted DB entries with exposed internal prompts
+    leaked_patterns = [
+        r"STEP\s*\d+[-:]?\d*\s*[:—-]?",  # "STEP 1-3:", "STEP 1:", "STEP 2"
+        r"INTENT\s*CLASSIFICATION",
+        r"Primary\s*Intent\s*:",
+        r"\*\*Primary\s*Intent\s*:",
+        r"NEEDS\s*REVIEW\s*\*\*",
+        r"CROSS-EXAMINATION\s*CHECK",
+        r"CONTRADICTION\s*BLOCK",
+        r"SIMPLICITY\s*RULE",
+        r"FINAL\s*SELF-AUDIT",
+        r"MISMATCH\s*PREVENTION",
+        r"SAFETY\s*FILTER",
+        r"DO\s*NOT\s*HALLUCINATE",
+        r"VALID\s*INTENT\s*CATEGORIES",
+    ]
+    
+    for pattern in leaked_patterns:
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
+    
+    # Also remove lines that are entirely system prompt artifacts
+    lines = text.split("\n")
+    filtered_lines = []
+    for line in lines:
+        line_upper = line.strip().upper()
+        # Skip lines that look like system prompt instructions
+        if any(skip in line_upper for skip in [
+            "STEP 1", "STEP 2", "STEP 3", "STEP 4", "STEP 5",
+            "STEP 6", "STEP 7", "STEP 8", "STEP 9", "STEP 10", "STEP 11",
+            "INTENT CLASSIFICATION", "PRIMARY INTENT:",
+            "READ THE FULL QUESTION", "EXTRACT THE CORE ASK",
+            "ANSWER THE EXACT QUESTION", "CROSS-EXAMINATION",
+            "CONTRADICTION BLOCK", "SIMPLICITY RULE",
+        ]):
+            continue
+        filtered_lines.append(line)
+    
+    text = "\n".join(filtered_lines)
     
     # BUG 2 FIX: First, handle inline dash lists
     # Pattern: "Header: - item - item - item NextHeader:" or end of string
@@ -962,7 +1033,7 @@ def _post_process_cached_answer(answer_text: str) -> str:
     return "\n".join(processed_lines)
 
 
-def _parse_structured_answer(answer_text: str) -> StructuredAnswer:
+def _parse_structured_answer(answer_text: str, question: str = "") -> StructuredAnswer:
     """
     Parse Claude's structured answer format into StructuredAnswer object.
     
@@ -974,6 +1045,9 @@ def _parse_structured_answer(answer_text: str) -> StructuredAnswer:
     
     Also supports legacy formats. Falls back gracefully if format doesn't match.
     Always returns a valid verdict (never null).
+    
+    ISSUE 4 FIX: Accepts question parameter to determine if this is an
+    informational question that should get CONSULT_PHARMACIST verdict.
     """
     result = StructuredAnswer(raw=answer_text, verdict="CONSULT_PHARMACIST")
     
@@ -985,7 +1059,8 @@ def _parse_structured_answer(answer_text: str) -> StructuredAnswer:
     result.raw = text
     
     # Extract verdict robustly - this ALWAYS returns a valid verdict
-    result.verdict = _extract_verdict(text)
+    # ISSUE 4 FIX: Pass question to detect informational vs binary questions
+    result.verdict = _extract_verdict(text, question)
     
     lines = text.split("\n")
     
@@ -1169,7 +1244,7 @@ def search(req: SearchRequest) -> SearchResponse:
                     tags=exact_match.tags,
                     score=1.0,
                     answer=exact_match.answer,
-                    structured=_parse_structured_answer(exact_match.answer),
+                    structured=_parse_structured_answer(exact_match.answer, exact_match.question),
                 )
             ],
             did_you_mean=None,
@@ -1246,7 +1321,7 @@ def search(req: SearchRequest) -> SearchResponse:
                                 tags=[str(t) for t in (row.get("tags") or [])],
                                 score=best_score,
                                 answer=str(row["answer"]),
-                                structured=_parse_structured_answer(str(row["answer"])),
+                                structured=_parse_structured_answer(str(row["answer"]), str(row["question"])),
                             )
                         ],
                         did_you_mean=did_you_mean,
@@ -1281,7 +1356,7 @@ def search(req: SearchRequest) -> SearchResponse:
                                 tags=[category.lower()],
                                 score=1.0,
                                 answer=live_answer,
-                                structured=_parse_structured_answer(live_answer),
+                                structured=_parse_structured_answer(live_answer, original_query),
                             )
                         ]
                         _log_search(user_query, new_id)
@@ -1302,7 +1377,7 @@ def search(req: SearchRequest) -> SearchResponse:
                         tags=[],
                         score=best_score,
                         answer=live_answer,
-                        structured=_parse_structured_answer(live_answer),
+                        structured=_parse_structured_answer(live_answer, original_query),
                     )
                 ]
                 _log_search(user_query, None)
@@ -1379,7 +1454,7 @@ def search(req: SearchRequest) -> SearchResponse:
                 tags=[str(t) for t in tags],
                 score=score_by_id.get(int(qid)),
                 answer=answer_text,
-                structured=_parse_structured_answer(answer_text) if answer_text else None,
+                structured=_parse_structured_answer(answer_text, str(r["question"])) if answer_text else None,
             )
         )
 
