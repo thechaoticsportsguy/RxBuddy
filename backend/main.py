@@ -872,7 +872,7 @@ def _extract_verdict(text: str, question: str = "") -> str:
     if any(phrase in upper_text for phrase in [
         "YES, YOU CAN", "YES YOU CAN", "IT IS SAFE", "GENERALLY SAFE",
         "USUALLY SAFE", "TYPICALLY SAFE", "YES,", "ANSWER: YES",
-        "✅ SAFE", "SAFETY LEVEL\N✅", "SAFETY LEVEL: SAFE"
+        "✅ SAFE", "SAFETY LEVEL", "SAFETY LEVEL: SAFE"
     ]):
         return "SAFE"
 
