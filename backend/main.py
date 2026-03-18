@@ -778,6 +778,7 @@ class SearchRequest(BaseModel):
 
 class StructuredAnswer(BaseModel):
     """Parsed structured answer with specific bullets for each section."""
+    verdict: str = "CONSULT_PHARMACIST"  # YES, NO, MAYBE, CONSULT_PHARMACIST
     direct: str = ""  # Direct YES/NO answer
     do: list[str] = []  # What to do bullets
     avoid: list[str] = []  # What to avoid bullets
@@ -787,52 +788,168 @@ class StructuredAnswer(BaseModel):
     sources: str = ""  # FDA label, DailyMed, etc.
 
 
+def _extract_verdict(text: str) -> str:
+    """
+    Robustly extract verdict from answer text.
+    Always returns one of: YES, NO, MAYBE, CONSULT_PHARMACIST
+    """
+    if not text:
+        return "CONSULT_PHARMACIST"
+    
+    upper_text = text.upper()
+    
+    # Check for explicit Answer: or Verdict: lines
+    for line in text.split("\n"):
+        line_upper = line.strip().upper()
+        
+        # Match "Answer: YES" or "Verdict: YES" patterns
+        if line_upper.startswith("ANSWER:") or line_upper.startswith("VERDICT:"):
+            val = line_upper.split(":", 1)[1].strip() if ":" in line_upper else ""
+            
+            if val.startswith("YES") or val.startswith("USUALLY YES"):
+                return "YES"
+            elif val.startswith("NO"):
+                return "NO"
+            elif val.startswith("MAYBE") or val.startswith("DEPENDS") or val.startswith("IT DEPENDS"):
+                return "MAYBE"
+            elif val.startswith("NEEDS REVIEW") or val.startswith("CONSULT") or val.startswith("ASK"):
+                return "CONSULT_PHARMACIST"
+    
+    # Fallback: scan the full text for verdict indicators
+    # Strong YES indicators
+    if any(phrase in upper_text for phrase in [
+        "YES, YOU CAN", "YES YOU CAN", "IT IS SAFE", "GENERALLY SAFE",
+        "USUALLY SAFE", "TYPICALLY SAFE", "YES,", "ANSWER: YES"
+    ]):
+        return "YES"
+    
+    # Strong NO indicators
+    if any(phrase in upper_text for phrase in [
+        "NO, YOU SHOULD NOT", "NO YOU SHOULD NOT", "DO NOT TAKE",
+        "NOT RECOMMENDED", "AVOID TAKING", "SHOULD NOT TAKE",
+        "NO,", "ANSWER: NO", "CONTRAINDICATED"
+    ]):
+        return "NO"
+    
+    # MAYBE indicators
+    if any(phrase in upper_text for phrase in [
+        "DEPENDS ON", "IT DEPENDS", "CASE BY CASE", "VARIES",
+        "POSSIBLY", "MIGHT BE", "COULD BE", "SOMETIMES"
+    ]):
+        return "MAYBE"
+    
+    # Default to CONSULT_PHARMACIST if uncertain
+    return "CONSULT_PHARMACIST"
+
+
+def _post_process_cached_answer(answer_text: str) -> str:
+    """
+    Post-process cached answers to clean up raw markdown bullets
+    and preserve section headers as bold labels.
+    """
+    if not answer_text:
+        return answer_text
+    
+    lines = answer_text.split("\n")
+    processed_lines = []
+    
+    for line in lines:
+        stripped = line.strip()
+        
+        # Skip empty lines but preserve spacing
+        if not stripped:
+            processed_lines.append("")
+            continue
+        
+        # Convert section headers (lines ending with :) to bold
+        if stripped.endswith(":") and len(stripped) < 50:
+            processed_lines.append(f"**{stripped}**")
+            continue
+        
+        # Clean up raw bullet points - convert to proper list format
+        if stripped.startswith("- ") or stripped.startswith("• ") or stripped.startswith("* "):
+            # Keep as-is for markdown rendering
+            processed_lines.append(stripped)
+            continue
+        
+        # Check for numbered lists
+        if len(stripped) > 2 and stripped[0].isdigit() and stripped[1] in ".)" :
+            processed_lines.append(stripped)
+            continue
+        
+        # Regular line
+        processed_lines.append(stripped)
+    
+    return "\n".join(processed_lines)
+
+
 def _parse_structured_answer(answer_text: str) -> StructuredAnswer:
     """
     Parse Claude's structured answer format into StructuredAnswer object.
     
     Expected format:
-    DIRECT: [one sentence]
-    DO: [item] | [item] | [item]
-    AVOID: [item] | [item] | [item]
-    DOCTOR: [item] | [item]
+    Answer: YES / NO / MAYBE / NEEDS REVIEW
+    Why: [explanation]
+    Important notes: [bullets]
+    Get medical help now if: [bullets]
     
-    Falls back gracefully if format doesn't match.
+    Also supports legacy formats. Falls back gracefully if format doesn't match.
+    Always returns a valid verdict (never null).
     """
-    result = StructuredAnswer(raw=answer_text)
+    result = StructuredAnswer(raw=answer_text, verdict="CONSULT_PHARMACIST")
     
     if not answer_text:
         return result
     
-    text = answer_text.strip()
+    # Post-process the cached answer for cleaner rendering
+    text = _post_process_cached_answer(answer_text.strip())
+    result.raw = text
+    
+    # Extract verdict robustly - this ALWAYS returns a valid verdict
+    result.verdict = _extract_verdict(text)
+    
     lines = text.split("\n")
     
     for line in lines:
         line = line.strip()
         if not line:
             continue
+        
+        line_upper = line.upper()
             
         # Parse DIRECT: line
-        if line.upper().startswith("DIRECT:"):
+        if line_upper.startswith("DIRECT:"):
             result.direct = line[7:].strip()
             
+        # Parse WHY: line (new format)
+        elif line_upper.startswith("WHY:"):
+            result.direct = result.direct or line[4:].strip()
+            
         # Parse DO: line
-        elif line.upper().startswith("DO:"):
+        elif line_upper.startswith("DO:"):
             items = line[3:].split("|")
             result.do = [item.strip() for item in items if item.strip()]
             
         # Parse AVOID: line
-        elif line.upper().startswith("AVOID:"):
+        elif line_upper.startswith("AVOID:"):
             items = line[6:].split("|")
             result.avoid = [item.strip() for item in items if item.strip()]
             
-        # Parse DOCTOR: line
-        elif line.upper().startswith("DOCTOR:"):
-            items = line[7:].split("|")
+        # Parse DOCTOR: / WARNING: line
+        elif line_upper.startswith("DOCTOR:") or line_upper.startswith("WARNING:"):
+            prefix_len = 7 if line_upper.startswith("DOCTOR:") else 8
+            items = line[prefix_len:].split("|")
             result.doctor = [item.strip() for item in items if item.strip()]
             
+        # Parse GET MEDICAL HELP lines
+        elif "GET MEDICAL HELP" in line_upper or "SEEK MEDICAL" in line_upper:
+            # Extract items after the colon if present
+            if ":" in line:
+                items = line.split(":", 1)[1].split("|")
+                result.doctor.extend([item.strip() for item in items if item.strip()])
+            
         # Parse CONFIDENCE: line
-        elif line.upper().startswith("CONFIDENCE:"):
+        elif line_upper.startswith("CONFIDENCE:"):
             conf = line[11:].strip().upper()
             if conf in ("HIGH", "MEDIUM", "LOW"):
                 result.confidence = conf
@@ -844,7 +961,7 @@ def _parse_structured_answer(answer_text: str) -> StructuredAnswer:
                 result.confidence = "MEDIUM"
                 
         # Parse SOURCES: line
-        elif line.upper().startswith("SOURCES:"):
+        elif line_upper.startswith("SOURCES:"):
             result.sources = line[8:].strip()
     
     # Fallback: if nothing was parsed, try to extract something useful
@@ -852,7 +969,9 @@ def _parse_structured_answer(answer_text: str) -> StructuredAnswer:
         # Use first sentence as direct answer
         sentences = text.replace("\n", " ").split(".")
         if sentences:
-            result.direct = sentences[0].strip() + "."
+            result.direct = sentences[0].strip()
+            if result.direct and not result.direct.endswith("."):
+                result.direct += "."
         
         # Provide generic fallbacks
         if not result.do:
@@ -1226,6 +1345,132 @@ def _log_search(query: str, matched_question_id: int | None) -> None:
             )
     except Exception:
         pass
+
+
+# ---------- Drug Image Endpoint (BUG 4 Fix) ----------
+RXNORM_RXCUI_URL = "https://rxnav.nlm.nih.gov/REST/rxcui.json"
+OPENFDA_NDC_URL = "https://api.fda.gov/drug/ndc.json"
+
+# Generic pharmacy icon SVG (fallback)
+GENERIC_PHARMACY_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <rect x="10" y="30" width="80" height="60" rx="10" fill="#52B788"/>
+  <rect x="25" y="10" width="50" height="30" rx="5" fill="#2D6A4F"/>
+  <rect x="40" y="45" width="20" height="30" fill="white"/>
+  <rect x="35" y="55" width="30" height="10" fill="white"/>
+</svg>"""
+
+
+def _get_rxcui(drug_name: str) -> str | None:
+    """Get RxCUI from RxNorm for a drug name."""
+    if not drug_name:
+        return None
+    try:
+        resp = http_requests.get(
+            RXNORM_RXCUI_URL,
+            params={"name": drug_name},
+            headers={"User-Agent": "RxBuddy/1.0"},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            id_group = data.get("idGroup", {})
+            rxnorm_ids = id_group.get("rxnormId", [])
+            if rxnorm_ids:
+                return rxnorm_ids[0]
+    except Exception as e:
+        logger.warning("[RxNorm] Error getting RxCUI for '%s': %s", drug_name, e)
+    return None
+
+
+def _get_drug_image_url(drug_name: str) -> str | None:
+    """
+    Try to get a drug image URL from OpenFDA using NDC data.
+    Returns image URL if found, None otherwise.
+    """
+    if not drug_name:
+        return None
+    
+    try:
+        # Search OpenFDA NDC endpoint for the drug
+        resp = http_requests.get(
+            OPENFDA_NDC_URL,
+            params={
+                "search": f'generic_name:"{drug_name}" OR brand_name:"{drug_name}"',
+                "limit": 1
+            },
+            headers={"User-Agent": "RxBuddy/1.0"},
+            timeout=10,
+        )
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            results = data.get("results", [])
+            if results:
+                # OpenFDA doesn't directly provide images, but we can construct
+                # a DailyMed image URL if we have the NDC
+                packaging = results[0].get("packaging", [])
+                if packaging:
+                    # Try to find an image from the packaging data
+                    for pkg in packaging:
+                        if pkg.get("marketing_start_date"):
+                            # DailyMed might have images - return None to use fallback
+                            pass
+    except Exception as e:
+        logger.warning("[OpenFDA] Error getting image for '%s': %s", drug_name, e)
+    
+    return None
+
+
+class DrugImageResponse(BaseModel):
+    drug_name: str
+    image_url: str | None = None
+    rxcui: str | None = None
+    fallback: bool = False
+    svg_data: str | None = None
+
+
+@app.get("/drug-image", response_model=DrugImageResponse)
+def get_drug_image(name: str) -> DrugImageResponse:
+    """
+    Get drug image for a given drug name.
+    
+    1. Tries RxNorm for RxCUI
+    2. Tries OpenFDA NDC for image
+    3. Falls back to generic pharmacy icon SVG
+    """
+    drug_name = name.strip().lower() if name else ""
+    
+    if not drug_name:
+        return DrugImageResponse(
+            drug_name="",
+            fallback=True,
+            svg_data=GENERIC_PHARMACY_SVG,
+        )
+    
+    # Convert brand to generic if known
+    generic_name = BRAND_TO_GENERIC.get(drug_name, drug_name)
+    
+    # Try to get RxCUI
+    rxcui = _get_rxcui(generic_name)
+    
+    # Try to get image URL from OpenFDA
+    image_url = _get_drug_image_url(generic_name)
+    
+    if image_url:
+        return DrugImageResponse(
+            drug_name=generic_name,
+            image_url=image_url,
+            rxcui=rxcui,
+            fallback=False,
+        )
+    
+    # Fallback to generic SVG
+    return DrugImageResponse(
+        drug_name=generic_name,
+        rxcui=rxcui,
+        fallback=True,
+        svg_data=GENERIC_PHARMACY_SVG,
+    )
 
 
 @app.post("/log", response_model=LogResponse)

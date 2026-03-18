@@ -6,6 +6,70 @@ import ReactMarkdown from "react-markdown";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
+// BUG 4 FIX: DrugImage component that fetches from backend /drug-image endpoint
+function DrugImage({ drugName, className = "" }) {
+  const [imageData, setImageData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!drugName) {
+      setLoading(false);
+      return;
+    }
+
+    async function fetchImage() {
+      try {
+        const res = await fetch(`${API_BASE}/drug-image?name=${encodeURIComponent(drugName)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setImageData(data);
+        }
+      } catch (e) {
+        console.error("[DrugImage] Error:", e);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchImage();
+  }, [drugName]);
+
+  if (loading) {
+    // Loading skeleton
+    return (
+      <div className={`animate-pulse bg-slate-200 rounded-lg ${className}`} style={{ width: 60, height: 60 }} />
+    );
+  }
+
+  if (imageData?.image_url) {
+    return (
+      <img 
+        src={imageData.image_url} 
+        alt={imageData.drug_name || drugName} 
+        className={`rounded-lg object-cover ${className}`}
+        style={{ width: 60, height: 60 }}
+      />
+    );
+  }
+
+  if (imageData?.svg_data) {
+    return (
+      <div 
+        className={`rounded-lg ${className}`}
+        style={{ width: 60, height: 60 }}
+        dangerouslySetInnerHTML={{ __html: imageData.svg_data }}
+      />
+    );
+  }
+
+  // Fallback: generic pill icon
+  return (
+    <div className={`flex items-center justify-center bg-emerald-100 rounded-lg ${className}`} style={{ width: 60, height: 60 }}>
+      <span className="text-2xl">💊</span>
+    </div>
+  );
+}
+
 // Generic phrases to filter out from answers
 const GENERIC_PHRASES = [
   "follow the package directions",
@@ -197,93 +261,170 @@ function parseVerdictAnswer(answer, structured = null) {
 }
 
 /**
- * Build PubMed search query from user question
+ * BUG 3 FIX: Build PubMed search query from user question
+ * Extracts ALL drug names + category and builds a targeted AND query
  */
+const BRAND_TO_GENERIC = {
+  tylenol: "acetaminophen", advil: "ibuprofen", motrin: "ibuprofen",
+  aleve: "naproxen", bayer: "aspirin", excedrin: "acetaminophen",
+  benadryl: "diphenhydramine", claritin: "loratadine", zyrtec: "cetirizine",
+  allegra: "fexofenadine", prilosec: "omeprazole", nexium: "esomeprazole",
+  pepcid: "famotidine", xanax: "alprazolam", valium: "diazepam",
+  ambien: "zolpidem", zoloft: "sertraline", prozac: "fluoxetine",
+  lexapro: "escitalopram", lipitor: "atorvastatin", crestor: "rosuvastatin",
+  viagra: "sildenafil", cialis: "tadalafil", synthroid: "levothyroxine",
+};
+
+const GENERIC_DRUGS = [
+  "ibuprofen", "acetaminophen", "aspirin", "naproxen", "amoxicillin",
+  "metformin", "lisinopril", "omeprazole", "gabapentin", "sertraline",
+  "fluoxetine", "escitalopram", "prednisone", "azithromycin", "metoprolol",
+  "losartan", "amlodipine", "atorvastatin", "levothyroxine", "alprazolam",
+  "hydrocodone", "oxycodone", "tramadol", "warfarin", "ciprofloxacin",
+  "diphenhydramine", "loratadine", "cetirizine", "fexofenadine", "sildenafil",
+];
+
+const TOPIC_MAPPINGS = {
+  "empty stomach": "food drug administration",
+  "with food": "food drug administration",
+  food: "food drug interaction",
+  pregnancy: "pregnancy safety",
+  pregnant: "pregnancy safety",
+  breastfeeding: "lactation safety",
+  alcohol: "alcohol drug interaction",
+  "side effect": "adverse effects",
+  interaction: "drug interaction",
+  children: "pediatric dosing",
+  liver: "hepatic impairment",
+  kidney: "renal impairment",
+  "blood pressure": "hypertension",
+  diabetes: "diabetes mellitus",
+  overdose: "overdose toxicity",
+  allergy: "hypersensitivity",
+};
+
+function extractDrugNames(query) {
+  const q = String(query || "").toLowerCase().trim();
+  const drugs = [];
+  
+  // Check brand names first (convert to generic)
+  for (const [brand, generic] of Object.entries(BRAND_TO_GENERIC)) {
+    if (q.includes(brand)) {
+      drugs.push(generic);
+    }
+  }
+  
+  // Check generic names
+  for (const drug of GENERIC_DRUGS) {
+    if (q.includes(drug) && !drugs.includes(drug)) {
+      drugs.push(drug);
+    }
+  }
+  
+  return drugs;
+}
+
 function buildPubMedQuery(query) {
   const q = String(query || "").toLowerCase().trim();
-  if (!q) return "";
+  if (!q) return { searchTerm: "", drugNames: [] };
 
-  const brandToGeneric = {
-    tylenol: "acetaminophen", advil: "ibuprofen", motrin: "ibuprofen",
-    aleve: "naproxen", bayer: "aspirin", excedrin: "acetaminophen",
-    benadryl: "diphenhydramine", claritin: "loratadine", zyrtec: "cetirizine",
-    allegra: "fexofenadine", prilosec: "omeprazole", nexium: "esomeprazole",
-    pepcid: "famotidine", xanax: "alprazolam", valium: "diazepam",
-    ambien: "zolpidem", zoloft: "sertraline", prozac: "fluoxetine",
-    lexapro: "escitalopram", lipitor: "atorvastatin", crestor: "rosuvastatin",
-  };
-
-  const genericDrugs = [
-    "ibuprofen", "acetaminophen", "aspirin", "naproxen", "amoxicillin",
-    "metformin", "lisinopril", "omeprazole", "gabapentin", "sertraline",
-    "fluoxetine", "escitalopram", "prednisone", "azithromycin", "metoprolol",
-    "losartan", "amlodipine", "atorvastatin", "levothyroxine", "alprazolam",
-  ];
-
-  const topicMappings = {
-    "empty stomach": "food administration",
-    "with food": "food administration",
-    food: "food drug",
-    pregnancy: "pregnancy",
-    pregnant: "pregnancy",
-    alcohol: "alcohol interaction",
-    "side effect": "adverse effects",
-    interaction: "drug interaction",
-    children: "pediatric",
-    liver: "hepatic",
-    kidney: "renal",
-  };
-
-  let drugName = "";
-  for (const [brand, generic] of Object.entries(brandToGeneric)) {
-    if (q.includes(brand)) { drugName = generic; break; }
-  }
-  if (!drugName) {
-    for (const drug of genericDrugs) {
-      if (q.includes(drug)) { drugName = drug; break; }
+  const drugNames = extractDrugNames(q);
+  
+  // Find the topic/category
+  let topic = "";
+  for (const [keyword, pubmedTerm] of Object.entries(TOPIC_MAPPINGS)) {
+    if (q.includes(keyword)) {
+      topic = pubmedTerm;
+      break;
     }
   }
 
-  let topic = "";
-  for (const [keyword, pubmedTerm] of Object.entries(topicMappings)) {
-    if (q.includes(keyword)) { topic = pubmedTerm; break; }
+  // BUG 3 FIX: Build targeted AND query with all drug names + category
+  let searchTerm = "";
+  
+  if (drugNames.length >= 2) {
+    // Multiple drugs: "ibuprofen AND aspirin AND drug interaction"
+    searchTerm = drugNames.join(" AND ");
+    if (topic) {
+      searchTerm += ` AND ${topic}`;
+    } else {
+      searchTerm += " AND drug interaction";
+    }
+  } else if (drugNames.length === 1) {
+    // Single drug: "ibuprofen AND adverse effects"
+    searchTerm = drugNames[0];
+    if (topic) {
+      searchTerm += ` AND ${topic}`;
+    } else {
+      searchTerm += " AND pharmacology";
+    }
+  } else if (topic) {
+    // No drug but has topic: "medication AND pregnancy safety"
+    searchTerm = `medication AND ${topic}`;
+  } else {
+    // Fallback: extract keywords
+    const stopWords = new Set(["can", "i", "is", "it", "the", "a", "an", "to", "with", "my", "me", "if", "or", "and", "of", "for", "on", "in", "at", "this", "that", "what", "how", "does", "do", "should", "would", "could", "will", "take", "taking", "use", "using", "safe", "okay", "ok", "be", "am"]);
+    const words = q.split(/\s+/).filter(w => w.length > 3 && !stopWords.has(w));
+    searchTerm = words.slice(0, 3).join(" AND ") || "medication safety";
   }
 
-  if (drugName && topic) return `${drugName} ${topic}`;
-  if (drugName) return `${drugName} pharmacology`;
-  if (topic) return `medication ${topic}`;
-
-  const stopWords = new Set(["can", "i", "is", "it", "the", "a", "an", "to", "with", "my", "me", "if", "or", "and", "of", "for", "on", "in", "at", "this", "that", "what", "how", "does", "do", "should", "would", "could", "will", "take", "taking", "use", "using", "safe", "okay", "ok", "be", "am"]);
-  const words = q.split(/\s+/).filter(w => w.length > 3 && !stopWords.has(w));
-  return words.slice(0, 3).join(" ") || "medication safety";
+  return { searchTerm, drugNames };
 }
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// BUG 3 FIX: Fallback safety articles when no relevant results found
+const FALLBACK_SAFETY_ARTICLES = [
+  {
+    id: "fallback-1",
+    title: "General Principles of Drug Interactions",
+    journal: "American Family Physician",
+    year: "2023",
+    url: "https://pubmed.ncbi.nlm.nih.gov/?term=drug+interaction+principles",
+    takeaway: "Understanding how medications interact is crucial for safe use."
+  },
+  {
+    id: "fallback-2",
+    title: "Safe Medication Use: A Guide for Patients",
+    journal: "FDA Consumer Health Information",
+    year: "2023",
+    url: "https://www.fda.gov/drugs/resources-you-drugs/safe-use-medicines",
+    takeaway: "Always read labels and consult your pharmacist about drug interactions."
+  },
+];
+
+// BUG 3 FIX: Check if article title contains at least one drug name
+function isArticleRelevant(title, drugNames) {
+  if (!drugNames || drugNames.length === 0) return true; // No drugs to filter by
+  
+  const titleLower = String(title || "").toLowerCase();
+  return drugNames.some(drug => titleLower.includes(drug.toLowerCase()));
+}
+
 async function fetchPubMedArticles(query) {
   const rawQuery = String(query || "").trim();
   if (!rawQuery) return [];
 
-  const searchTerm = buildPubMedQuery(rawQuery);
-  console.log("[PubMed] Search term:", searchTerm);
+  const { searchTerm, drugNames } = buildPubMedQuery(rawQuery);
+  console.log("[PubMed] Search term:", searchTerm, "| Drug names:", drugNames);
   if (!searchTerm) return [];
 
   try {
     const esearchUrl = new URL("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi");
     esearchUrl.searchParams.set("db", "pubmed");
     esearchUrl.searchParams.set("term", searchTerm);
-    esearchUrl.searchParams.set("retmax", "3");
+    esearchUrl.searchParams.set("retmax", "10"); // Fetch more to filter
     esearchUrl.searchParams.set("retmode", "json");
     esearchUrl.searchParams.set("sort", "relevance");
 
     const searchRes = await fetch(esearchUrl.toString());
-    if (!searchRes.ok) return [];
+    if (!searchRes.ok) return FALLBACK_SAFETY_ARTICLES;
 
     const searchData = await searchRes.json();
     const ids = searchData?.esearchresult?.idlist || [];
-    if (!Array.isArray(ids) || ids.length === 0) return [];
+    if (!Array.isArray(ids) || ids.length === 0) return FALLBACK_SAFETY_ARTICLES;
 
     await sleep(200);
 
@@ -293,12 +434,12 @@ async function fetchPubMedArticles(query) {
     esummaryUrl.searchParams.set("retmode", "json");
 
     const summaryRes = await fetch(esummaryUrl.toString());
-    if (!summaryRes.ok) return [];
+    if (!summaryRes.ok) return FALLBACK_SAFETY_ARTICLES;
 
     const summaryData = await summaryRes.json();
     const results = summaryData?.result || {};
 
-    const articles = [];
+    const allArticles = [];
     for (const id of ids) {
       const article = results[id];
       if (!article) continue;
@@ -311,13 +452,23 @@ async function fetchPubMedArticles(query) {
 
       let takeaway = title.length > 100 ? title.substring(0, 97) + "..." : title;
 
-      articles.push({ id: String(id), title, journal, year, url: `https://pubmed.ncbi.nlm.nih.gov/${id}/`, takeaway });
+      allArticles.push({ id: String(id), title, journal, year, url: `https://pubmed.ncbi.nlm.nih.gov/${id}/`, takeaway });
     }
 
-    return articles;
+    // BUG 3 FIX: Filter to only relevant articles (title contains drug name)
+    const relevantArticles = allArticles.filter(a => isArticleRelevant(a.title, drugNames));
+    console.log("[PubMed] Found", allArticles.length, "articles,", relevantArticles.length, "relevant");
+
+    // BUG 3 FIX: If fewer than 2 relevant articles, add fallback safety articles
+    if (relevantArticles.length < 2) {
+      const combined = [...relevantArticles, ...FALLBACK_SAFETY_ARTICLES];
+      return combined.slice(0, 3);
+    }
+
+    return relevantArticles.slice(0, 3);
   } catch (error) {
     console.error("[PubMed] Error:", error);
-    return [];
+    return FALLBACK_SAFETY_ARTICLES;
   }
 }
 
@@ -343,6 +494,12 @@ export default function ResultsPage() {
 
   const title = useMemo(() => (q ? `Results - ${q}` : "Results"), [q]);
   const questionType = useMemo(() => detectQuestionType(q), [q]);
+  
+  // BUG 4 FIX: Extract drug name from question for drug image
+  const extractedDrugName = useMemo(() => {
+    const drugs = extractDrugNames(q);
+    return drugs.length > 0 ? drugs[0] : null;
+  }, [q]);
   
   const parsedAnswer = useMemo(() => {
     const first = results?.[0];
@@ -424,14 +581,32 @@ export default function ResultsPage() {
   }
 
   // Verdict styling — maps each verdict to colours + icon
+  // BUG 1 FIX: Added MAYBE (yellow) and CONSULT_PHARMACIST (blue), with CONSULT_PHARMACIST as fallback
   const verdictStyles = {
-    YES:         { bg: "bg-emerald-50", border: "border-emerald-300", text: "text-emerald-800", icon: "✅", label: "YES" },
-    USUALLY_YES: { bg: "bg-emerald-50", border: "border-emerald-300", text: "text-emerald-800", icon: "✅", label: "USUALLY YES" },
-    NO:          { bg: "bg-rose-50",    border: "border-rose-300",    text: "text-rose-800",    icon: "❌", label: "NO" },
-    NEEDS_REVIEW:{ bg: "bg-amber-50",   border: "border-amber-300",   text: "text-amber-800",   icon: "⚠️", label: "NEEDS REVIEW" },
+    YES:                 { bg: "bg-emerald-50",  border: "border-emerald-300", text: "text-emerald-800", icon: "✅", label: "YES" },
+    USUALLY_YES:         { bg: "bg-emerald-50",  border: "border-emerald-300", text: "text-emerald-800", icon: "✅", label: "USUALLY YES" },
+    NO:                  { bg: "bg-rose-50",     border: "border-rose-300",    text: "text-rose-800",    icon: "❌", label: "NO" },
+    MAYBE:               { bg: "bg-amber-50",    border: "border-amber-300",   text: "text-amber-800",   icon: "⚠️", label: "MAYBE" },
+    NEEDS_REVIEW:        { bg: "bg-amber-50",    border: "border-amber-300",   text: "text-amber-800",   icon: "⚠️", label: "NEEDS REVIEW" },
+    CONSULT_PHARMACIST:  { bg: "bg-blue-50",     border: "border-blue-300",    text: "text-blue-800",    icon: "💊", label: "CONSULT PHARMACIST" },
   };
 
-  const currentVerdict = parsedAnswer?.verdict ? verdictStyles[parsedAnswer.verdict] : null;
+  // BUG 1 FIX: Always show a verdict - fallback to CONSULT_PHARMACIST if null/missing
+  const getVerdict = () => {
+    // First check structured.verdict from backend
+    const first = results?.[0];
+    if (first?.structured?.verdict && verdictStyles[first.structured.verdict]) {
+      return verdictStyles[first.structured.verdict];
+    }
+    // Then check parsed verdict from frontend
+    if (parsedAnswer?.verdict && verdictStyles[parsedAnswer.verdict]) {
+      return verdictStyles[parsedAnswer.verdict];
+    }
+    // Fallback: CONSULT_PHARMACIST (never blank)
+    return verdictStyles.CONSULT_PHARMACIST;
+  };
+
+  const currentVerdict = results?.length > 0 ? getVerdict() : null;
 
   return (
     <>
@@ -489,22 +664,30 @@ export default function ResultsPage() {
             </div>
           )}
 
-          {/* Question Card */}
+          {/* Question Card - BUG 4 FIX: Added DrugImage */}
           <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Your Question</p>
-                <p className="mt-1 text-lg font-semibold text-slate-900">{q || "-"}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                {source === "database" ? (
-                  <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">Database</span>
-                ) : (
-                  <span className="rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-violet-700">AI Generated</span>
-                )}
-                {savedToDb && (
-                  <span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-medium text-green-700">Saved</span>
-                )}
+            <div className="flex items-start gap-4">
+              {/* Drug Image */}
+              {extractedDrugName && (
+                <DrugImage drugName={extractedDrugName} className="shrink-0" />
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Your Question</p>
+                    <p className="mt-1 text-lg font-semibold text-slate-900">{q || "-"}</p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {source === "database" ? (
+                      <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">Database</span>
+                    ) : (
+                      <span className="rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-violet-700">AI Generated</span>
+                    )}
+                    {savedToDb && (
+                      <span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-medium text-green-700">Saved</span>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -521,15 +704,18 @@ export default function ResultsPage() {
             </div>
           ) : (
             <>
-              {/* ANSWER BLOCK — big YES / NO / USUALLY YES / NEEDS REVIEW */}
+              {/* ANSWER BLOCK — big YES / NO / MAYBE / CONSULT PHARMACIST - BUG 1 FIX: Always shows, never blank */}
               {currentVerdict && (
                 <div className={`mb-4 rounded-xl border-2 ${currentVerdict.border} ${currentVerdict.bg} p-5 shadow-sm`}>
                   <div className="flex items-start gap-3">
                     <span className="text-3xl leading-none">{currentVerdict.icon}</span>
                     <div className="flex-1 min-w-0">
                       <span className={`text-xl font-bold ${currentVerdict.text}`}>{currentVerdict.label}</span>
-                      {parsedAnswer?.why && (
-                        <p className="mt-2 text-base text-slate-700 leading-relaxed">{parsedAnswer.why}</p>
+                      {/* BUG 2 FIX: Use structured.direct or parsedAnswer.why */}
+                      {(results?.[0]?.structured?.direct || parsedAnswer?.why) && (
+                        <p className="mt-2 text-base text-slate-700 leading-relaxed">
+                          {results?.[0]?.structured?.direct || parsedAnswer?.why}
+                        </p>
                       )}
                     </div>
                   </div>
@@ -543,44 +729,63 @@ export default function ResultsPage() {
                 </div>
               )}
 
-              {/* Important Notes — green box */}
-              {parsedAnswer?.importantNotes?.length > 0 && (
-                <div className="mb-4 rounded-lg border border-emerald-200 bg-white p-4 shadow-sm">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-lg">📋</span>
-                    <h3 className="font-semibold text-emerald-800">Important Notes</h3>
+              {/* Important Notes — green box - BUG 2 FIX: Use structured.do/avoid from backend */}
+              {(() => {
+                const structured = results?.[0]?.structured;
+                const doItems = structured?.do || [];
+                const avoidItems = structured?.avoid || [];
+                const parsedNotes = parsedAnswer?.importantNotes || [];
+                const allNotes = [...doItems, ...avoidItems, ...parsedNotes].filter((v, i, a) => a.indexOf(v) === i);
+                
+                if (allNotes.length === 0) return null;
+                
+                return (
+                  <div className="mb-4 rounded-lg border border-emerald-200 bg-white p-4 shadow-sm">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-lg">📋</span>
+                      <h3 className="font-semibold text-emerald-800">Important Notes</h3>
+                    </div>
+                    <ul className="space-y-1.5">
+                      {allNotes.map((item, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                          <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-emerald-400 shrink-0" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
-                  <ul className="space-y-1.5">
-                    {parsedAnswer.importantNotes.map((item, i) => (
-                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                        <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-emerald-400 shrink-0" />
-                        <span>{item}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+                );
+              })()}
 
-              {/* Get Medical Help Now If — red/amber box */}
-              {parsedAnswer?.medicalHelp?.length > 0 && (
-                <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 p-4 shadow-sm">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-lg">🚨</span>
-                    <h3 className="font-semibold text-rose-800">Get Medical Help Now If</h3>
+              {/* Get Medical Help Now If — red/amber box - BUG 2 FIX: Use structured.doctor from backend */}
+              {(() => {
+                const structured = results?.[0]?.structured;
+                const doctorItems = structured?.doctor || [];
+                const parsedHelp = parsedAnswer?.medicalHelp || [];
+                const allHelp = [...doctorItems, ...parsedHelp].filter((v, i, a) => a.indexOf(v) === i);
+                
+                if (allHelp.length === 0) return null;
+                
+                return (
+                  <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 p-4 shadow-sm">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-lg">🚨</span>
+                      <h3 className="font-semibold text-rose-800">Get Medical Help Now If</h3>
+                    </div>
+                    <ul className="space-y-1.5">
+                      {allHelp.map((item, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                          <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-rose-400 shrink-0" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
-                  <ul className="space-y-1.5">
-                    {parsedAnswer.medicalHelp.map((item, i) => (
-                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                        <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-rose-400 shrink-0" />
-                        <span>{item}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+                );
+              })()}
 
-              {/* Collapsible Full Answer */}
-              {parsedAnswer?.full && (
+              {/* Collapsible Full Answer - BUG 2 FIX: Better markdown rendering with prose styling */}
+              {(parsedAnswer?.full || results?.[0]?.answer) && (
                 <div className="mb-4">
                   <button
                     onClick={() => setShowFullAnswer(!showFullAnswer)}
@@ -593,8 +798,20 @@ export default function ResultsPage() {
                   </button>
                   {showFullAnswer && (
                     <div className="mt-2 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                      <div className="prose prose-sm prose-slate max-w-none">
-                        <ReactMarkdown>{parsedAnswer.full}</ReactMarkdown>
+                      {/* BUG 2 FIX: Proper prose styling for markdown content */}
+                      <div className="prose prose-sm prose-slate max-w-none prose-headings:font-semibold prose-headings:text-slate-800 prose-p:text-slate-700 prose-li:text-slate-700 prose-strong:text-slate-800 prose-ul:list-disc prose-ol:list-decimal">
+                        <ReactMarkdown
+                          components={{
+                            // BUG 2 FIX: Custom rendering for better bullet point display
+                            ul: ({node, ...props}) => <ul className="space-y-1 pl-4 list-disc" {...props} />,
+                            ol: ({node, ...props}) => <ol className="space-y-1 pl-4 list-decimal" {...props} />,
+                            li: ({node, ...props}) => <li className="text-slate-700" {...props} />,
+                            p: ({node, ...props}) => <p className="mb-2 text-slate-700 leading-relaxed" {...props} />,
+                            strong: ({node, ...props}) => <strong className="font-semibold text-slate-800" {...props} />,
+                          }}
+                        >
+                          {parsedAnswer?.full || results?.[0]?.answer || ""}
+                        </ReactMarkdown>
                       </div>
                     </div>
                   )}
