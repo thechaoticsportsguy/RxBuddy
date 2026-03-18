@@ -601,24 +601,21 @@ VALID INTENT CATEGORIES:
 11. Emergency symptom triage
 12. Unknown / ambiguous
 
-STEP 1 — READ THE FULL QUESTION
-STEP 2 — EXTRACT THE CORE ASK
-STEP 3 — INTENT CHECK
-STEP 4 — ANSWER THE EXACT QUESTION FIRST
-STEP 5 — SAFETY FILTER
-STEP 6 — CROSS-EXAMINATION CHECK
-STEP 7 — CONTRADICTION BLOCK
-STEP 8 — SIMPLICITY RULE
+Read the full question carefully and identify exactly what the patient is asking.
+Classify the intent internally — do NOT output the classification.
+Answer only the exact question asked.
+Apply safety filtering before responding.
+Do not contradict yourself.
+Keep the answer simple and direct.
+Do not hallucinate. If unsure, say NEEDS REVIEW.
+
+IMPORTANT: Output ONLY the final answer. Do NOT include step labels, intent classification, reasoning steps, or any internal notes in your response.
 
 Output format EXACTLY:
 Answer: [YES / NO / USUALLY YES / NEEDS REVIEW]
 Why: [1-2 simple sentences]
 Important notes: [only relevant bullets]
-Get medical help now if: [only truly relevant urgent symptoms]
-
-STEP 9 — DO NOT HALLUCINATE
-STEP 10 — STRICT MISMATCH PREVENTION
-STEP 11 — FINAL SELF-AUDIT"""
+Get medical help now if: [only truly relevant urgent symptoms]"""
 
         if fda_context:
             user_content = (
