@@ -1241,7 +1241,7 @@ def _evaluate_pairwise_interactions(drugs: list[str]) -> tuple[str, dict[str, li
     return "SAFE", summary
 
 
-def _extract_verdict(text: str, question: str = "") -> str:
+def _legacy_extract_verdict_pre_regex(text: str, question: str = "") -> str:
     """
     Robustly extract verdict from answer text.
     Always returns one of: YES, NO, MAYBE, CONSULT_PHARMACIST
@@ -1498,7 +1498,7 @@ def _post_process_cached_answer(answer_text: str) -> str:
     return "\n".join(processed_lines)
 
 
-def _extract_verdict(text: str, question: str = "") -> str:
+def _legacy_extract_verdict_pre_pairwise(text: str, question: str = "") -> str:
     """
     Robustly extract a backend verdict and keep it consistent with the explanation.
     Priority order: AVOID > CAUTION > SAFE > CONSULT_PHARMACIST.
@@ -1767,7 +1767,7 @@ def _parse_structured_answer(answer_text: str, question: str = "") -> Structured
         return result
 
 
-def validate_and_correct_verdict(answer_text: str, verdict: str, question: str = "") -> str:
+def _legacy_validate_and_correct_verdict(answer_text: str, verdict: str, question: str = "") -> str:
     """
     Final backend authority for verdict correction.
     Uses deterministic rules to reconcile the returned verdict with the explanation text.
@@ -1829,7 +1829,13 @@ def validate_and_correct_verdict(answer_text: str, verdict: str, question: str =
 
 
 def build_interaction_summary(question: str) -> dict[str, list[str]]:
-    _, summary = _evaluate_pairwise_interactions(_extract_drug_names(question))
+    drugs = _extract_drug_names(question)
+    if len(drugs) < 2:
+        q_lower = question.lower()
+        for known in _ALL_KNOWN_DRUGS:
+            if known in q_lower and known not in drugs:
+                drugs.append(known)
+    _, summary = _evaluate_pairwise_interactions(list(dict.fromkeys(drugs)))
     return summary
 
 
@@ -1869,7 +1875,14 @@ def _extract_verdict(text: str, question: str = "") -> str:
     if _contains_any(q_lower, SIDE_EFFECT_TERMS):
         return "CAUTION"
 
-    pairwise_verdict, _ = _evaluate_pairwise_interactions(_extract_drug_names(question))
+    drugs = _extract_drug_names(question)
+    if len(drugs) < 2:
+        for known in _ALL_KNOWN_DRUGS:
+            if known in q_lower and known not in drugs:
+                drugs.append(known)
+    drugs = list(dict.fromkeys(drugs))
+
+    pairwise_verdict, _ = _evaluate_pairwise_interactions(drugs)
     if pairwise_verdict == "AVOID":
         return "AVOID"
     if pairwise_verdict == "CAUTION":
@@ -1919,7 +1932,8 @@ def _extract_verdict(text: str, question: str = "") -> str:
         return "CAUTION"
 
     if pairwise_verdict == "SAFE":
-        return "SAFE"
+        if not _contains_any(lower_text, CAUTION_PHRASES) and not _contains_any(lower_text, AVOID_PHRASES):
+            return "SAFE"
 
     return "CONSULT_PHARMACIST"
 
@@ -1952,6 +1966,8 @@ def validate_and_correct_verdict(
         return "CAUTION"
     if normalized_verdict == "SAFE" and _contains_any(combined_text, SAFE_PHRASES):
         return "SAFE"
+    if normalized_verdict == "SAFE" and _contains_any(combined_text, CAUTION_PHRASES + AVOID_PHRASES):
+        return "CAUTION"
     if normalized_verdict == "SAFE" and not _contains_any(combined_text, CAUTION_PHRASES) and not _contains_any(combined_text, AVOID_PHRASES):
         return "SAFE"
     if normalized_verdict in {"AVOID", "CAUTION", "CONSULT_PHARMACIST"}:
