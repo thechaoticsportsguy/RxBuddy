@@ -605,12 +605,34 @@ export default function ResultsPage() {
   // Verdict styling — maps each verdict to colours + icon
   // BUG 1 FIX: All verdict types with proper colors
   const verdictStyles = {
-    YES:                 { bg: "bg-emerald-50",  border: "border-emerald-300", text: "text-emerald-800", icon: "✅", label: "YES" },
-    USUALLY_YES:         { bg: "bg-emerald-50",  border: "border-emerald-300", text: "text-emerald-800", icon: "✅", label: "USUALLY YES" },
-    NO:                  { bg: "bg-rose-50",     border: "border-rose-300",    text: "text-rose-800",    icon: "❌", label: "NO" },
-    MAYBE:               { bg: "bg-amber-50",    border: "border-amber-300",   text: "text-amber-800",   icon: "⚠️", label: "MAYBE" },
-    NEEDS_REVIEW:        { bg: "bg-amber-50",    border: "border-amber-300",   text: "text-amber-800",   icon: "⚠️", label: "NEEDS REVIEW" },
-    CONSULT_PHARMACIST:  { bg: "bg-blue-50",     border: "border-blue-300",    text: "text-blue-800",    icon: "💊", label: "CONSULT PHARMACIST" },
+    SAFE: {
+      bg: "bg-green-50 border-green-200",
+      border: "border-green-200",
+      text: "text-green-700",
+      icon: "✅",
+      label: "SAFE"
+    },
+    CAUTION: {
+      bg: "bg-yellow-50 border-yellow-200",
+      border: "border-yellow-200",
+      text: "text-yellow-700",
+      icon: "⚠️",
+      label: "USE WITH CAUTION"
+    },
+    AVOID: {
+      bg: "bg-red-50 border-red-200",
+      border: "border-red-200",
+      text: "text-red-700",
+      icon: "❌",
+      label: "AVOID / CONTRAINDICATED"
+    },
+    CONSULT_PHARMACIST: {
+      bg: "bg-blue-50 border-blue-200",
+      border: "border-blue-200",
+      text: "text-blue-700",
+      icon: "💊",
+      label: "CONSULT PHARMACIST"
+    }
   };
 
   // BUG 1 FIX: Robust verdict extraction - checks multiple locations and ALWAYS returns a valid verdict
@@ -654,17 +676,17 @@ export default function ResultsPage() {
     const answerText = first?.answer || "";
     if (answerText) {
       const upperText = answerText.toUpperCase();
-      if (upperText.includes("ANSWER: YES") || upperText.includes("YES, YOU CAN") || upperText.includes("YES YOU CAN")) {
-        console.log("[Verdict] Extracted YES from answer text");
-        return verdictStyles.YES;
+      if (upperText.includes("✅ SAFE") || upperText.includes("ANSWER: YES") || upperText.includes("YES, YOU CAN") || upperText.includes("IT IS SAFE")) {
+        console.log("[Verdict] Extracted SAFE from answer text");
+        return verdictStyles.SAFE;
       }
-      if (upperText.includes("ANSWER: NO") || upperText.includes("NO, YOU SHOULD NOT") || upperText.includes("DO NOT TAKE")) {
-        console.log("[Verdict] Extracted NO from answer text");
-        return verdictStyles.NO;
+      if (upperText.includes("❌ AVOID") || upperText.includes("AVOID / CONTRAINDICATED") || upperText.includes("ANSWER: NO") || upperText.includes("DO NOT TAKE") || upperText.includes("CONTRAINDICATED")) {
+        console.log("[Verdict] Extracted AVOID from answer text");
+        return verdictStyles.AVOID;
       }
-      if (upperText.includes("MAYBE") || upperText.includes("IT DEPENDS") || upperText.includes("DEPENDS ON")) {
-        console.log("[Verdict] Extracted MAYBE from answer text");
-        return verdictStyles.MAYBE;
+      if (upperText.includes("⚠️ USE WITH CAUTION") || upperText.includes("USE WITH CAUTION") || upperText.includes("IT DEPENDS") || upperText.includes("DEPENDS ON")) {
+        console.log("[Verdict] Extracted CAUTION from answer text");
+        return verdictStyles.CAUTION;
       }
     }
     

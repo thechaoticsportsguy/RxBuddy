@@ -537,6 +537,37 @@ def _truncate_words(text: str, max_words: int) -> str:
     return (" ".join(words[:max_words])).strip()
 
 
+def _validate_ai_answer(question: str, answer: str) -> str:
+    api_key = _anthropic_api_key()
+    if not api_key:
+        return answer
+    import anthropic
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        validation_prompt = f"""Check this medication answer for accuracy:
+
+ORIGINAL QUESTION: {question}
+ANSWER TO CHECK: {answer}
+
+Verify:
+1. Does the answer ONLY mention drugs from the original question?
+2. Does it directly answer the question type (dosing/interaction/pregnancy/side effects)?
+3. Is there any unrelated medication mentioned?
+
+If any issue found → rewrite the answer correctly following the same output structure.
+If answer is correct → return it unchanged.
+Return ONLY the final answer, no commentary."""
+
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=600,
+            messages=[{"role": "user", "content": validation_prompt}],
+        )
+        return (response.content[0].text or "").strip() or answer
+    except Exception:
+        return answer
+
+
 def _generate_ai_answer(question: str) -> str:
     """
     Generate a structured, specific answer using Anthropic Claude.
@@ -568,54 +599,50 @@ def _generate_ai_answer(question: str) -> str:
         client = anthropic.Anthropic(api_key=api_key)
 
         # System prompt for intent-classified medication answering
-        system_prompt = """You are a medication question answering engine.
+        system_prompt = """You are a clinical-grade medication assistant.
 
-Your job is to answer the USER'S EXACT QUESTION only.
-Do not answer a related question.
-Do not answer based on one keyword alone.
-Do not switch topics.
-Do not confuse:
-- drug interaction questions
-- overdose questions
-- side effect questions
-- missed dose questions
-- allergy questions
-- pregnancy questions
-- food/alcohol questions
-- emergency symptom questions
+STRICT RULES:
+- ONLY answer about the exact drug(s) mentioned in the question
+- NEVER introduce a different drug not in the question
+- If unsure, say "I don't have enough information" — do NOT guess
+- Always match the user's intent:
+  - Dosing question → give exact dosing FIRST
+  - Interaction question → give clear interaction level FIRST
+  - Pregnancy question → give safety status FIRST
+- NEVER output internal reasoning, steps, or audit text
 
-ABSOLUTE RULE:
-Before answering, you must classify the user's question into exactly one primary intent category.
+OUTPUT STRUCTURE:
 
-VALID INTENT CATEGORIES:
-1. Drug interaction / compatibility
-2. Overdose / poisoning
-3. Side effects
-4. Missed dose
-5. How to take / timing
-6. Contraindication / when not to use
-7. Food / alcohol interaction
-8. Pregnancy / breastfeeding
-9. Storage
-10. General drug information
-11. Emergency symptom triage
-12. Unknown / ambiguous
+[DIRECT ANSWER]
+1 sentence. Clear. No fluff.
 
-Read the full question carefully and identify exactly what the patient is asking.
-Classify the intent internally — do NOT output the classification.
-Answer only the exact question asked.
-Apply safety filtering before responding.
-Do not contradict yourself.
-Keep the answer simple and direct.
-Do not hallucinate. If unsure, say NEEDS REVIEW.
+[CLINICAL SUMMARY]
+Bullet points (3-5 max)
+Include dose ranges, timing, or interaction severity where relevant
 
-IMPORTANT: Output ONLY the final answer. Do NOT include step labels, intent classification, reasoning steps, or any internal notes in your response.
+[SAFETY LEVEL]
+Choose ONE:
+✅ Safe
+⚠️ Use with caution
+❌ Avoid / Contraindicated
 
-Output format EXACTLY:
-Answer: [YES / NO / USUALLY YES / NEEDS REVIEW]
-Why: [1-2 simple sentences]
-Important notes: [only relevant bullets]
-Get medical help now if: [only truly relevant urgent symptoms]"""
+[WHEN TO SEEK HELP]
+Only include if clinically relevant
+
+[CONFIDENCE]
+High / Medium / Low
+
+VALIDATION (do this silently before outputting):
+- Are all drugs mentioned the same as in the question?
+- Does the answer directly match the question type?
+- Is there any unrelated drug mentioned?
+If any issue → correct before outputting.
+
+DO NOT:
+- Use generic disclaimers at the top
+- Say "consult your doctor" before giving the answer
+- Output any drug not mentioned in the question
+- Output STEP labels, audit text, or internal reasoning"""
 
         if fda_context:
             user_content = (
@@ -647,6 +674,7 @@ Get medical help now if: [only truly relevant urgent symptoms]"""
             raise RuntimeError("Claude returned an empty response.")
 
         answer = _truncate_words(text, 300)  # Increased limit for new format
+        answer = _validate_ai_answer(question, answer)
         logger.info("[Claude] SUCCESS! Generated answer (%d words): %.200s", len(answer.split()), answer)
         print(f"[Claude] ANSWER: {answer}")  # Also print to stdout for Railway logs
         return answer
@@ -773,7 +801,7 @@ class SearchRequest(BaseModel):
 
 class StructuredAnswer(BaseModel):
     """Parsed structured answer with specific bullets for each section."""
-    verdict: str = "CONSULT_PHARMACIST"  # YES, NO, MAYBE, CONSULT_PHARMACIST
+    verdict: str = "CONSULT_PHARMACIST"  # SAFE, AVOID, CAUTION, CONSULT_PHARMACIST
     direct: str = ""  # Direct YES/NO answer
     do: list[str] = []  # What to do bullets
     avoid: list[str] = []  # What to avoid bullets
@@ -831,37 +859,40 @@ def _extract_verdict(text: str, question: str = "") -> str:
             val = line_upper.split(":", 1)[1].strip() if ":" in line_upper else ""
             
             if val.startswith("YES") or val.startswith("USUALLY YES"):
-                return "YES"
+                return "SAFE"
             elif val.startswith("NO"):
-                return "NO"
+                return "AVOID"
             elif val.startswith("MAYBE") or val.startswith("DEPENDS") or val.startswith("IT DEPENDS"):
-                return "MAYBE"
+                return "CAUTION"
             elif val.startswith("NEEDS REVIEW") or val.startswith("CONSULT") or val.startswith("ASK"):
                 return "CONSULT_PHARMACIST"
-    
+
     # Fallback: scan the full text for verdict indicators
-    # Strong YES indicators
+    # Strong SAFE indicators
     if any(phrase in upper_text for phrase in [
         "YES, YOU CAN", "YES YOU CAN", "IT IS SAFE", "GENERALLY SAFE",
-        "USUALLY SAFE", "TYPICALLY SAFE", "YES,", "ANSWER: YES"
+        "USUALLY SAFE", "TYPICALLY SAFE", "YES,", "ANSWER: YES",
+        "✅ SAFE", "SAFETY LEVEL\N✅", "SAFETY LEVEL: SAFE"
     ]):
-        return "YES"
-    
-    # Strong NO indicators
+        return "SAFE"
+
+    # Strong AVOID indicators
     if any(phrase in upper_text for phrase in [
         "NO, YOU SHOULD NOT", "NO YOU SHOULD NOT", "DO NOT TAKE",
         "NOT RECOMMENDED", "AVOID TAKING", "SHOULD NOT TAKE",
-        "NO,", "ANSWER: NO", "CONTRAINDICATED"
+        "NO,", "ANSWER: NO", "CONTRAINDICATED",
+        "❌ AVOID", "AVOID / CONTRAINDICATED"
     ]):
-        return "NO"
-    
-    # MAYBE indicators
+        return "AVOID"
+
+    # CAUTION indicators
     if any(phrase in upper_text for phrase in [
         "DEPENDS ON", "IT DEPENDS", "CASE BY CASE", "VARIES",
-        "POSSIBLY", "MIGHT BE", "COULD BE", "SOMETIMES"
+        "POSSIBLY", "MIGHT BE", "COULD BE", "SOMETIMES",
+        "⚠️ USE WITH CAUTION", "USE WITH CAUTION"
     ]):
-        return "MAYBE"
-    
+        return "CAUTION"
+
     # Default to CONSULT_PHARMACIST if uncertain
     return "CONSULT_PHARMACIST"
 
