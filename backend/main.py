@@ -821,7 +821,16 @@ def _extract_verdict(text: str, question: str = "") -> str:
     """
     if not text:
         return "CONSULT_PHARMACIST"
-    
+
+    # SAFETY OVERRIDE: dangerous combinations always return AVOID regardless of other signals
+    danger_phrases = [
+        "avoid taking", "do not take", "not recommended",
+        "bleeding risk", "contraindicated", "should not be taken together",
+        "dangerous combination", "increased risk of bleeding"
+    ]
+    if any(phrase in text.lower() for phrase in danger_phrases):
+        return "AVOID"
+
     # ISSUE 4 FIX: Check if question is informational (not yes/no)
     # These questions should NOT get YES/NO verdicts
     q_lower = question.lower() if question else ""
