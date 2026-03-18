@@ -602,8 +602,6 @@ export default function ResultsPage() {
     router.push(`/results?q=${encodeURIComponent(nextQ)}&engine=${encodeURIComponent(engine)}`);
   }
 
-  // Verdict styling — maps each verdict to colours + icon
-  // BUG 1 FIX: All verdict types with proper colors
   const verdictStyles = {
     SAFE: {
       bg: "bg-green-50 border-green-200",
@@ -617,14 +615,14 @@ export default function ResultsPage() {
       border: "border-yellow-200",
       text: "text-yellow-700",
       icon: "⚠️",
-      label: "USE WITH CAUTION"
+      label: "CAUTION"
     },
     AVOID: {
       bg: "bg-red-50 border-red-200",
       border: "border-red-200",
       text: "text-red-700",
       icon: "❌",
-      label: "AVOID / CONTRAINDICATED"
+      label: "AVOID"
     },
     CONSULT_PHARMACIST: {
       bg: "bg-blue-50 border-blue-200",
@@ -635,68 +633,22 @@ export default function ResultsPage() {
     }
   };
 
-  // BUG 1 FIX: Robust verdict extraction - checks multiple locations and ALWAYS returns a valid verdict
-  const getVerdict = () => {
-    const first = results?.[0];
-    
-    // Debug logging
-    console.log("[Verdict Debug] first result:", first);
-    console.log("[Verdict Debug] structured:", first?.structured);
-    console.log("[Verdict Debug] structured.verdict:", first?.structured?.verdict);
-    console.log("[Verdict Debug] parsedAnswer:", parsedAnswer);
-    
-    // 1. Check structured.verdict from backend API response
-    if (first?.structured?.verdict) {
-      const v = first.structured.verdict;
-      if (verdictStyles[v]) {
-        console.log("[Verdict] Using structured.verdict:", v);
-        return verdictStyles[v];
-      }
+  const currentVerdictKey = useMemo(() => {
+    if (!results?.length) return null;
+    const rawBackendVerdict = results[0]?.structured?.verdict;
+    console.log("[Verdict] Raw backend verdict:", rawBackendVerdict);
+    if (!rawBackendVerdict || !verdictStyles[rawBackendVerdict]) {
+      throw new Error(`Invalid or missing backend verdict: ${rawBackendVerdict ?? "undefined"}`);
     }
-    
-    // 2. Check if verdict is directly on the result object (some API formats)
-    if (first?.verdict) {
-      const v = first.verdict;
-      if (verdictStyles[v]) {
-        console.log("[Verdict] Using first.verdict:", v);
-        return verdictStyles[v];
-      }
-    }
-    
-    // 3. Check parsedAnswer.verdict from frontend parsing
-    if (parsedAnswer?.verdict) {
-      const v = parsedAnswer.verdict;
-      if (verdictStyles[v]) {
-        console.log("[Verdict] Using parsedAnswer.verdict:", v);
-        return verdictStyles[v];
-      }
-    }
-    
-    // 4. Try to extract verdict from answer text directly
-    const answerText = first?.answer || "";
-    if (answerText) {
-      const upperText = answerText.toUpperCase();
-      if (upperText.includes("✅ SAFE") || upperText.includes("ANSWER: YES") || upperText.includes("YES, YOU CAN") || upperText.includes("IT IS SAFE")) {
-        console.log("[Verdict] Extracted SAFE from answer text");
-        return verdictStyles.SAFE;
-      }
-      if (upperText.includes("❌ AVOID") || upperText.includes("AVOID / CONTRAINDICATED") || upperText.includes("ANSWER: NO") || upperText.includes("DO NOT TAKE") || upperText.includes("CONTRAINDICATED")) {
-        console.log("[Verdict] Extracted AVOID from answer text");
-        return verdictStyles.AVOID;
-      }
-      if (upperText.includes("⚠️ USE WITH CAUTION") || upperText.includes("USE WITH CAUTION") || upperText.includes("IT DEPENDS") || upperText.includes("DEPENDS ON")) {
-        console.log("[Verdict] Extracted CAUTION from answer text");
-        return verdictStyles.CAUTION;
-      }
-    }
-    
-    // 5. FALLBACK: Always return CONSULT_PHARMACIST (never null, never blank)
-    console.log("[Verdict] Using fallback: CONSULT_PHARMACIST");
-    return verdictStyles.CONSULT_PHARMACIST;
-  };
+    return rawBackendVerdict;
+  }, [results]);
 
-  // BUG 1 FIX: Always compute verdict when we have results
-  const currentVerdict = results?.length > 0 ? getVerdict() : null;
+  const currentVerdict = currentVerdictKey ? verdictStyles[currentVerdictKey] : null;
+
+  useEffect(() => {
+    if (!currentVerdictKey) return;
+    console.log("[Verdict] Rendered UI verdict:", currentVerdictKey);
+  }, [currentVerdictKey]);
 
   return (
     <>

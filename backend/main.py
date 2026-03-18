@@ -101,13 +101,27 @@ def _extract_drug_names(question: str) -> list[str]:
 
 
 def _classify_query_intent(question: str) -> str:
-    """Rule-based intent classification. Returns intent key or 'general'."""
+    """
+    Deterministic intent classifier used before interaction logic.
+    Returns one of: interaction, dosage, side_effects, safety_general, general.
+    """
     q_lower = question.lower()
-    scores: dict[str, int] = {}
-    for intent, keywords in _INTENT_SIGNALS.items():
-        scores[intent] = sum(1 for kw in keywords if kw in q_lower)
-    best = max(scores, key=lambda k: scores[k])
-    return best if scores[best] > 0 else "general"
+    drugs = _extract_drug_names(question)
+
+    dosage_terms = ("how much", "dose", "dosage", "mg", "milligram", "maximum dose", "max dose")
+    side_effect_terms = ("side effect", "side effects", "adverse effect", "adverse effects", "reaction", "reactions")
+    safety_general_terms = ("water", "food", "with food", "empty stomach", "pregnant", "pregnancy", "breastfeed", "nursing")
+    interaction_terms = ("interact", "interaction", "combine", "mix", "together", "with", "can i take")
+
+    if any(term in q_lower for term in dosage_terms):
+        return "dosage"
+    if any(term in q_lower for term in side_effect_terms):
+        return "side_effects"
+    if len(drugs) >= 2 and any(term in q_lower for term in interaction_terms):
+        return "interaction"
+    if any(term in q_lower for term in safety_general_terms):
+        return "safety_general"
+    return "general"
 
 
 def _build_intent_query(question: str, intent: str, drugs: list[str]) -> str:
@@ -932,6 +946,9 @@ FORMAT RULES:
 - Do not return bullets outside the DO / AVOID / DOCTOR lines
 - If there is a moderate interaction or monitoring need, VERDICT must be CAUTION
 - If there is a serious interaction, contraindication, or major harm risk, VERDICT must be AVOID
+- Only include notes relevant to the detected interaction or intent
+- Do not include generic warnings or unrelated drug information
+- Keep the explanation to 1-2 sentences and the bullets to 2-4 total relevant points
 
 FINAL VALIDATION (run silently before output):
 1. Do drugs in answer match drugs in question?
@@ -1740,6 +1757,7 @@ def _parse_structured_answer(answer_text: str, question: str = "") -> Structured
             question,
             interaction_summary=result.interaction_summary,
         )
+        result = _format_structured_answer_for_ui(result, question)
 
         return result
 
@@ -1764,6 +1782,7 @@ def _parse_structured_answer(answer_text: str, question: str = "") -> Structured
             question,
             interaction_summary=result.interaction_summary,
         )
+        result = _format_structured_answer_for_ui(result, question)
         return result
 
 
@@ -1839,6 +1858,51 @@ def build_interaction_summary(question: str) -> dict[str, list[str]]:
     return summary
 
 
+def _format_structured_answer_for_ui(structured: StructuredAnswer, question: str = "") -> StructuredAnswer:
+    """
+    Remove generic noise and keep the response focused for the UI.
+    Output target:
+    - verdict
+    - 1-2 sentence explanation
+    - 2-4 relevant bullet points max
+    """
+    generic_noise = (
+        "consult your pharmacist",
+        "ask your pharmacist",
+        "talk to your doctor",
+        "ask your doctor",
+        "for emergencies",
+        "seek medical attention immediately",
+        "always read the label",
+        "follow package directions",
+        "follow the package directions",
+        "use the lowest effective dose",
+        "keep out of reach of children",
+    )
+
+    def _is_relevant(item: str) -> bool:
+        lower = item.lower().strip()
+        if not lower:
+            return False
+        return not any(phrase in lower for phrase in generic_noise)
+
+    def _limit(items: list[str], count: int) -> list[str]:
+        filtered = [item.strip() for item in items if _is_relevant(item)]
+        deduped: list[str] = []
+        for item in filtered:
+            if item not in deduped:
+                deduped.append(item)
+        return deduped[:count]
+
+    sentences = re.split(r"(?<=[.!?])\s+", (structured.direct or "").strip())
+    structured.direct = " ".join([s.strip() for s in sentences if s.strip()][:2]).strip()
+
+    structured.do = _limit(structured.do, 2)
+    structured.avoid = _limit(structured.avoid, 1)
+    structured.doctor = _limit(structured.doctor, 1)
+    return structured
+
+
 def _extract_verdict(text: str, question: str = "") -> str:
     """
     Final deterministic backend verdict extraction.
@@ -1850,6 +1914,7 @@ def _extract_verdict(text: str, question: str = "") -> str:
     normalized_text = text.replace("\r\n", "\n")
     lower_text = normalized_text.lower()
     q_lower = question.lower() if question else ""
+    query_intent = _classify_query_intent(question)
 
     def _extract_explicit_verdict(raw_text: str) -> str | None:
         for raw_line in raw_text.split("\n"):
@@ -1870,23 +1935,27 @@ def _extract_verdict(text: str, question: str = "") -> str:
                     return "CONSULT_PHARMACIST"
         return None
 
-    if _contains_any(q_lower, DOSAGE_TERMS):
+    if query_intent == "dosage" or _contains_any(q_lower, DOSAGE_TERMS):
         return "CONSULT_PHARMACIST"
-    if _contains_any(q_lower, SIDE_EFFECT_TERMS):
+    if query_intent == "side_effects" or _contains_any(q_lower, SIDE_EFFECT_TERMS):
         return "CAUTION"
+    if query_intent == "safety_general" and ("water" in q_lower or "food" in q_lower):
+        if not _contains_any(lower_text, AVOID_PHRASES) and not _contains_any(lower_text, CAUTION_PHRASES):
+            return "SAFE"
 
-    drugs = _extract_drug_names(question)
-    if len(drugs) < 2:
-        for known in _ALL_KNOWN_DRUGS:
-            if known in q_lower and known not in drugs:
-                drugs.append(known)
-    drugs = list(dict.fromkeys(drugs))
-
-    pairwise_verdict, _ = _evaluate_pairwise_interactions(drugs)
-    if pairwise_verdict == "AVOID":
-        return "AVOID"
-    if pairwise_verdict == "CAUTION":
-        return "CAUTION"
+    pairwise_verdict = "CONSULT_PHARMACIST"
+    if query_intent == "interaction":
+        drugs = _extract_drug_names(question)
+        if len(drugs) < 2:
+            for known in _ALL_KNOWN_DRUGS:
+                if known in q_lower and known not in drugs:
+                    drugs.append(known)
+        drugs = list(dict.fromkeys(drugs))
+        pairwise_verdict, _ = _evaluate_pairwise_interactions(drugs)
+        if pairwise_verdict == "AVOID":
+            return "AVOID"
+        if pairwise_verdict == "CAUTION":
+            return "CAUTION"
 
     if _contains_any(lower_text, AVOID_PHRASES):
         return "AVOID"
@@ -1931,7 +2000,7 @@ def _extract_verdict(text: str, question: str = "") -> str:
     )):
         return "CAUTION"
 
-    if pairwise_verdict == "SAFE":
+    if query_intent == "interaction" and pairwise_verdict == "SAFE":
         if not _contains_any(lower_text, CAUTION_PHRASES) and not _contains_any(lower_text, AVOID_PHRASES):
             return "SAFE"
 
@@ -1951,19 +2020,23 @@ def validate_and_correct_verdict(
     normalized_verdict = (verdict or "").strip().upper() or "CONSULT_PHARMACIST"
     combined_text = f"{question}\n{answer_text}".lower()
     summary = interaction_summary or build_interaction_summary(question)
+    query_intent = _classify_query_intent(question)
 
-    if _contains_any(combined_text, DOSAGE_TERMS):
+    if query_intent == "dosage" or _contains_any(combined_text, DOSAGE_TERMS):
         return "CONSULT_PHARMACIST"
-    if summary.get("avoid_pairs"):
+    if query_intent == "interaction" and summary.get("avoid_pairs"):
         return "AVOID"
     if _contains_any(combined_text, AVOID_PHRASES):
         return "AVOID"
-    if summary.get("caution_pairs"):
+    if query_intent == "interaction" and summary.get("caution_pairs"):
         return "CAUTION"
     if _contains_any(combined_text, CAUTION_PHRASES):
         return "CAUTION"
-    if _contains_any(combined_text, INFORMATIONAL_TERMS):
+    if query_intent == "side_effects" or _contains_any(combined_text, INFORMATIONAL_TERMS):
         return "CAUTION"
+    if query_intent == "safety_general" and ("water" in combined_text or "food" in combined_text):
+        if not _contains_any(combined_text, CAUTION_PHRASES) and not _contains_any(combined_text, AVOID_PHRASES):
+            return "SAFE"
     if normalized_verdict == "SAFE" and _contains_any(combined_text, SAFE_PHRASES):
         return "SAFE"
     if normalized_verdict == "SAFE" and _contains_any(combined_text, CAUTION_PHRASES + AVOID_PHRASES):
