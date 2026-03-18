@@ -219,7 +219,11 @@ def _save_question_to_db(question: str, answer: str, category: str) -> int | Non
     """
     Save a new question + answer to the questions table.
     Returns the new question ID or None on failure.
+    
+    After saving, rebuilds the TF-IDF index so the new question is searchable.
     """
+    logger.info("[Self-Learning] Saving new question to database: %.80s", question)
+    
     try:
         with engine.connect() as conn:
             from sqlalchemy import text
@@ -230,7 +234,11 @@ def _save_question_to_db(question: str, answer: str, category: str) -> int | Non
         q_lower = question.lower()
         tags = [category.lower()]
         # Add common drug names if found
-        common_drugs = ["ibuprofen", "tylenol", "acetaminophen", "aspirin", "naproxen", "amoxicillin"]
+        common_drugs = [
+            "ibuprofen", "tylenol", "acetaminophen", "aspirin", "naproxen", 
+            "amoxicillin", "metformin", "lisinopril", "omeprazole", "gabapentin",
+            "sertraline", "xanax", "alprazolam", "prednisone", "advil", "aleve",
+        ]
         for drug in common_drugs:
             if drug in q_lower:
                 tags.append(drug)
@@ -246,8 +254,20 @@ def _save_question_to_db(question: str, answer: str, category: str) -> int | Non
                     created_at=_utc_now(),
                 )
             )
-        logger.info("[Self-Learning] Saved new question #%d: %.60s...", next_id, question)
+        
+        logger.info("[Self-Learning] Successfully saved question #%d with answer length: %d chars", 
+                    next_id, len(answer))
+        
+        # Rebuild TF-IDF index so the new question is immediately searchable
+        try:
+            from ml.tfidf_search import rebuild_index
+            rebuild_index()
+            logger.info("[Self-Learning] TF-IDF index rebuilt to include new question")
+        except Exception as rebuild_err:
+            logger.warning("[Self-Learning] Could not rebuild TF-IDF index: %s", rebuild_err)
+        
         return next_id
+        
     except Exception as e:
         logger.error("[Self-Learning] Failed to save question: %s", e, exc_info=True)
         return None
@@ -366,9 +386,13 @@ def _truncate_words(text: str, max_words: int) -> str:
 
 def _generate_ai_answer(question: str) -> str:
     """
-    Generate a specific, actionable answer using Anthropic Claude.
-    The answer is tailored to the exact question asked.
-    Output is kept under ~200 words.
+    Generate a structured, specific answer using Anthropic Claude.
+    
+    Returns answer in a parseable format:
+    DIRECT: [one sentence direct answer]
+    DO: [action 1] | [action 2] | [action 3]
+    AVOID: [thing 1] | [thing 2] | [thing 3]
+    DOCTOR: [warning 1] | [warning 2]
     """
     api_key = _anthropic_api_key()
     if not api_key:
@@ -382,20 +406,24 @@ def _generate_ai_answer(question: str) -> str:
     try:
         client = anthropic.Anthropic(api_key=api_key)
 
-        prompt = f"""You are a licensed pharmacist answering this SPECIFIC patient question. 
-Give a DIRECT, SPECIFIC answer to exactly what they asked. Do NOT give generic medication advice.
+        prompt = f"""You are a licensed pharmacist answering this SPECIFIC patient question.
+Give a DIRECT answer to exactly what they asked - not generic advice.
 
 Patient Question: {question}
 
-Instructions:
-1. Start with a clear YES/NO or direct answer to their specific question
-2. Explain WHY with specific reasoning related to their question
-3. Give 2-3 specific "What to Do" points for their situation
-4. Give 2-3 specific "What to Avoid" points for their situation  
-5. Give 1-2 "See a Doctor If" warning signs specific to their concern
+You MUST respond in this EXACT format (use | to separate items):
 
-Keep your answer under 200 words. Be specific to the drugs, conditions, or situations they mentioned.
-Do not give generic advice like "follow package directions" - give actionable guidance for their exact question."""
+DIRECT: [One clear sentence answering their specific question - start with Yes/No if applicable]
+DO: [Specific action for this drug/situation] | [Another specific action] | [Third specific action]
+AVOID: [Specific thing to avoid for this drug] | [Another thing to avoid] | [Third thing to avoid]
+DOCTOR: [Specific warning sign for this situation] | [Another warning sign]
+
+IMPORTANT RULES:
+- Be SPECIFIC to the drugs and situations mentioned in their question
+- Do NOT use generic advice like "follow package directions" or "consult your pharmacist"
+- Each DO/AVOID/DOCTOR item should be actionable and specific to their question
+- Keep each item under 15 words
+- Separate items with | character"""
 
         logger.info("[Claude] Sending question to claude-sonnet-4-20250514: %.80s...", question)
 
@@ -541,6 +569,77 @@ class SearchRequest(BaseModel):
     top_k: int = Field(5, ge=1, le=10, description="How many results to return (1 to 10).")
 
 
+class StructuredAnswer(BaseModel):
+    """Parsed structured answer with specific bullets for each section."""
+    direct: str = ""  # Direct YES/NO answer
+    do: list[str] = []  # What to do bullets
+    avoid: list[str] = []  # What to avoid bullets
+    doctor: list[str] = []  # See a doctor if bullets
+    raw: str = ""  # Original raw answer text
+
+
+def _parse_structured_answer(answer_text: str) -> StructuredAnswer:
+    """
+    Parse Claude's structured answer format into StructuredAnswer object.
+    
+    Expected format:
+    DIRECT: [one sentence]
+    DO: [item] | [item] | [item]
+    AVOID: [item] | [item] | [item]
+    DOCTOR: [item] | [item]
+    
+    Falls back gracefully if format doesn't match.
+    """
+    result = StructuredAnswer(raw=answer_text)
+    
+    if not answer_text:
+        return result
+    
+    text = answer_text.strip()
+    lines = text.split("\n")
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+            
+        # Parse DIRECT: line
+        if line.upper().startswith("DIRECT:"):
+            result.direct = line[7:].strip()
+            
+        # Parse DO: line
+        elif line.upper().startswith("DO:"):
+            items = line[3:].split("|")
+            result.do = [item.strip() for item in items if item.strip()]
+            
+        # Parse AVOID: line
+        elif line.upper().startswith("AVOID:"):
+            items = line[6:].split("|")
+            result.avoid = [item.strip() for item in items if item.strip()]
+            
+        # Parse DOCTOR: line
+        elif line.upper().startswith("DOCTOR:"):
+            items = line[7:].split("|")
+            result.doctor = [item.strip() for item in items if item.strip()]
+    
+    # Fallback: if nothing was parsed, try to extract something useful
+    if not result.direct and not result.do and not result.avoid:
+        # Use first sentence as direct answer
+        sentences = text.replace("\n", " ").split(".")
+        if sentences:
+            result.direct = sentences[0].strip() + "."
+        
+        # Provide generic fallbacks
+        if not result.do:
+            result.do = ["Follow your medication's specific dosing instructions"]
+        if not result.avoid:
+            result.avoid = ["Avoid exceeding the recommended dose"]
+        if not result.doctor:
+            result.doctor = ["Symptoms worsen or don't improve"]
+    
+    return result
+
+
 class QuestionMatch(BaseModel):
     id: int
     question: str
@@ -548,6 +647,7 @@ class QuestionMatch(BaseModel):
     tags: list[str] = []
     score: Optional[float] = None
     answer: Optional[str] = None
+    structured: Optional[StructuredAnswer] = None  # Parsed structured answer
 
 
 class SearchResponse(BaseModel):
@@ -599,8 +699,11 @@ def answer(req: AnswerRequest) -> AnswerResponse:
 
 # ---------- 5) ML search ----------
 # TF-IDF search is a great baseline: fast, simple, and works well on FAQs.
-from ml.tfidf_search import search as tfidf_search
+from ml.tfidf_search import search as tfidf_search, find_exact_match, rebuild_index as rebuild_tfidf_index
 from ml.knn_search import search as knn_search
+
+# Near-exact match threshold (95% similarity = treat as same question)
+NEAR_EXACT_THRESHOLD = 0.95
 
 
 @app.post("/search", response_model=SearchResponse)
@@ -609,17 +712,45 @@ def search(req: SearchRequest) -> SearchResponse:
     Takes a user query and returns the top 5 matching questions.
 
     How it works:
-    1) Normalize query (fix misspellings, slang, filler words) — zero API calls
-    2) Run spell check and generate "did you mean?" suggestion
-    3) Use TF-IDF + cosine similarity to find the best matching question IDs
-    4) Check confidence threshold:
+    1) Check for exact/near-exact match FIRST (instant return if found)
+    2) Normalize query (fix misspellings, slang, filler words) — zero API calls
+    3) Run spell check and generate "did you mean?" suggestion
+    4) Use TF-IDF + cosine similarity to find the best matching question IDs
+    5) Check confidence threshold:
        - If best score >= 0.35 → return database results (source="database")
        - If best score < 0.35 → generate live Claude answer (source="ai_generated")
-    5) Self-learning: if AI-generated and valid pharmacy question, save to DB
+    6) Self-learning: if AI-generated and valid pharmacy question, save to DB + rebuild index
     """
     user_query = req.query.strip()
     if not user_query:
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
+
+    logger.info("[Search] Checking exact match for: %.80s", user_query)
+
+    # STEP 1: Check for exact match FIRST (before any processing)
+    exact_match = find_exact_match(user_query)
+    if exact_match and exact_match.answer:
+        logger.info("[Search] Exact match found: Q#%d — returning from database", exact_match.id)
+        _log_search(user_query, exact_match.id)
+        return SearchResponse(
+            query=user_query,
+            results=[
+                QuestionMatch(
+                    id=exact_match.id,
+                    question=exact_match.question,
+                    category=exact_match.category,
+                    tags=exact_match.tags,
+                    score=1.0,
+                    answer=exact_match.answer,
+                    structured=_parse_structured_answer(exact_match.answer),
+                )
+            ],
+            did_you_mean=None,
+            source="database",
+            saved_to_db=False,
+        )
+
+    logger.info("[Search] No exact match — running TF-IDF search")
 
     original_query, cleaned_query = normalize_query(user_query)
     search_query = cleaned_query if cleaned_query else user_query
@@ -634,22 +765,69 @@ def search(req: SearchRequest) -> SearchResponse:
         matches = tfidf_search(search_query, top_k=top_k)
         match_ids = [m.id for m in matches]
         score_by_id = {m.id: float(m.score) for m in matches}
+        # Store answers from TF-IDF matches for near-exact check
+        answer_by_id = {m.id: m.answer for m in matches}
     elif engine_name == "knn":
         try:
             matches2 = knn_search(search_query, top_k=top_k)
             match_ids = [m.id for m in matches2]
             score_by_id = {m.id: float(m.score) for m in matches2}
+            answer_by_id = {}
         except (ModuleNotFoundError, ImportError):
             matches = tfidf_search(user_query, top_k=top_k)
             match_ids = [m.id for m in matches]
             score_by_id = {m.id: float(m.score) for m in matches}
+            answer_by_id = {m.id: m.answer for m in matches}
     else:
         raise HTTPException(status_code=400, detail="engine must be 'tfidf' or 'knn'")
 
     # Get the best match score
     best_score = max(score_by_id.values()) if score_by_id else 0.0
+    logger.info("[Search] TF-IDF best score: %.3f", best_score)
+    
     source = "database"
     saved_to_db = False
+
+    # STEP 2: Check for near-exact match (95%+ similarity)
+    if best_score >= NEAR_EXACT_THRESHOLD and match_ids:
+        best_id = match_ids[0]
+        cached_answer = answer_by_id.get(best_id)
+        if cached_answer:
+            logger.info("[Search] Near-exact match (%.1f%%) — returning from database", best_score * 100)
+            # Fetch full details from DB
+            try:
+                with engine.connect() as conn:
+                    row = conn.execute(
+                        select(
+                            questions_table.c.id,
+                            questions_table.c.question,
+                            questions_table.c.category,
+                            questions_table.c.tags,
+                            questions_table.c.answer,
+                        ).where(questions_table.c.id == best_id)
+                    ).mappings().first()
+                
+                if row and row.get("answer"):
+                    _log_search(user_query, best_id)
+                    return SearchResponse(
+                        query=user_query,
+                        results=[
+                            QuestionMatch(
+                                id=int(row["id"]),
+                                question=str(row["question"]),
+                                category=row.get("category"),
+                                tags=[str(t) for t in (row.get("tags") or [])],
+                                score=best_score,
+                                answer=str(row["answer"]),
+                                structured=_parse_structured_answer(str(row["answer"])),
+                            )
+                        ],
+                        did_you_mean=did_you_mean,
+                        source="database",
+                        saved_to_db=False,
+                    )
+            except Exception as e:
+                logger.error("[Search] Error fetching near-exact match: %s", e)
 
     # Check confidence threshold
     if best_score < CONFIDENCE_THRESHOLD or not match_ids:
@@ -676,6 +854,7 @@ def search(req: SearchRequest) -> SearchResponse:
                                 tags=[category.lower()],
                                 score=1.0,
                                 answer=live_answer,
+                                structured=_parse_structured_answer(live_answer),
                             )
                         ]
                         _log_search(user_query, new_id)
@@ -696,6 +875,7 @@ def search(req: SearchRequest) -> SearchResponse:
                         tags=[],
                         score=best_score,
                         answer=live_answer,
+                        structured=_parse_structured_answer(live_answer),
                     )
                 ]
                 _log_search(user_query, None)
@@ -772,6 +952,7 @@ def search(req: SearchRequest) -> SearchResponse:
                 tags=[str(t) for t in tags],
                 score=score_by_id.get(int(qid)),
                 answer=answer_text,
+                structured=_parse_structured_answer(answer_text) if answer_text else None,
             )
         )
 

@@ -31,11 +31,33 @@ def _anthropic_key() -> str:
 
 
 def _make_prompt(question: str) -> str:
-    return (
-        "You are a friendly pharmacist. Answer this patient question in plain English under 150 words. "
-        "Format your answer in 3 sections: What to do, What to avoid, See a doctor if. "
-        f"Question: {question}"
-    )
+    """
+    Create a prompt that generates answers in our structured format.
+    
+    Output format:
+    DIRECT: [one sentence direct answer]
+    DO: [action 1] | [action 2] | [action 3]
+    AVOID: [thing 1] | [thing 2] | [thing 3]
+    DOCTOR: [warning 1] | [warning 2]
+    """
+    return f"""You are a licensed pharmacist answering this SPECIFIC patient question.
+Give a DIRECT answer to exactly what they asked - not generic advice.
+
+Patient Question: {question}
+
+You MUST respond in this EXACT format (use | to separate items):
+
+DIRECT: [One clear sentence answering their specific question - start with Yes/No if applicable]
+DO: [Specific action for this drug/situation] | [Another specific action] | [Third specific action]
+AVOID: [Specific thing to avoid for this drug] | [Another thing to avoid] | [Third thing to avoid]
+DOCTOR: [Specific warning sign for this situation] | [Another warning sign]
+
+IMPORTANT RULES:
+- Be SPECIFIC to the drugs and situations mentioned in their question
+- Do NOT use generic advice like "follow package directions" or "consult your pharmacist"
+- Each DO/AVOID/DOCTOR item should be actionable and specific to their question
+- Keep each item under 15 words
+- Separate items with | character"""
 
 
 def _generate_answer(question: str) -> str:
@@ -46,7 +68,7 @@ def _generate_answer(question: str) -> str:
 
     resp = client.messages.create(
         model="claude-haiku-4-5",
-        max_tokens=300,
+        max_tokens=400,
         messages=[{"role": "user", "content": prompt}],
     )
 

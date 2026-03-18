@@ -49,10 +49,85 @@ function parseBullets(lines) {
   return out;
 }
 
-function parseClaudeAnswer(answer) {
+/**
+ * Parse Claude's answer - supports both structured (from API) and raw text formats.
+ * 
+ * Structured format from API:
+ * { direct: "...", do: [...], avoid: [...], doctor: [...], raw: "..." }
+ * 
+ * Raw text format:
+ * DIRECT: [sentence]
+ * DO: [item] | [item] | [item]
+ * AVOID: [item] | [item] | [item]
+ * DOCTOR: [item] | [item]
+ */
+function parseClaudeAnswer(answer, structured = null) {
+  // If we have structured data from the API, use it directly
+  if (structured && typeof structured === "object") {
+    const direct = structured.direct || "";
+    let yesNo = null;
+    if (/^\s*yes\b/i.test(direct)) yesNo = "Yes";
+    else if (/^\s*no\b/i.test(direct)) yesNo = "No";
+
+    return {
+      yesNo,
+      lead: direct,
+      whatToDo: Array.isArray(structured.do) ? structured.do : [],
+      whatToAvoid: Array.isArray(structured.avoid) ? structured.avoid : [],
+      seeDoctorIf: Array.isArray(structured.doctor) ? structured.doctor : [],
+      parsedAnything: Boolean(
+        (structured.do?.length) || 
+        (structured.avoid?.length) || 
+        (structured.doctor?.length)
+      ),
+      full: structured.raw || String(answer || ""),
+    };
+  }
+
+  // Fallback: parse raw text answer
   const text = String(answer || "").replace(/\r\n/g, "\n").trim();
   if (!text) return null;
 
+  // Try to parse structured format: DIRECT: / DO: / AVOID: / DOCTOR:
+  let direct = "";
+  let doItems = [];
+  let avoidItems = [];
+  let doctorItems = [];
+
+  const lines = text.split("\n");
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    if (line.toUpperCase().startsWith("DIRECT:")) {
+      direct = line.substring(7).trim();
+    } else if (line.toUpperCase().startsWith("DO:")) {
+      doItems = line.substring(3).split("|").map(s => s.trim()).filter(Boolean);
+    } else if (line.toUpperCase().startsWith("AVOID:")) {
+      avoidItems = line.substring(6).split("|").map(s => s.trim()).filter(Boolean);
+    } else if (line.toUpperCase().startsWith("DOCTOR:")) {
+      doctorItems = line.substring(7).split("|").map(s => s.trim()).filter(Boolean);
+    }
+  }
+
+  // If structured parsing worked, use it
+  if (direct || doItems.length || avoidItems.length || doctorItems.length) {
+    let yesNo = null;
+    if (/^\s*yes\b/i.test(direct)) yesNo = "Yes";
+    else if (/^\s*no\b/i.test(direct)) yesNo = "No";
+
+    return {
+      yesNo,
+      lead: direct || text.split("\n")[0],
+      whatToDo: doItems,
+      whatToAvoid: avoidItems,
+      seeDoctorIf: doctorItems,
+      parsedAnything: Boolean(doItems.length || avoidItems.length || doctorItems.length),
+      full: text,
+    };
+  }
+
+  // Final fallback: try old markdown parsing
   const first = text.split("\n").slice(0, 2).join(" ").trim();
   let yesNo = null;
   if (/^\s*yes\b/i.test(first)) yesNo = "Yes";
@@ -62,10 +137,9 @@ function parseClaudeAnswer(answer) {
     return `${String(h).trim()}:`;
   });
 
-  const lines = normalized.split("\n");
   const sections = { whatToDo: [], whatToAvoid: [], seeDoctorIf: [] };
   let current = null;
-  for (const rawLine of lines) {
+  for (const rawLine of normalized.split("\n")) {
     const line = String(rawLine || "").trim();
     if (!line) continue;
 
@@ -93,184 +167,231 @@ function parseClaudeAnswer(answer) {
 }
 
 /**
- * Extract drug names and medical topics from user query for better PubMed search.
- * Examples:
- *   "can i take ibuprofen with food" → "ibuprofen food interaction"
- *   "is tylenol safe during pregnancy" → "acetaminophen pregnancy safety"
+ * Build a clean 2-4 word PubMed query from user's question.
+ * 
+ * Step 1: Map brand names to generic (tylenol → acetaminophen)
+ * Step 2: Extract medical topic (pregnancy → "pregnancy safety")
+ * Step 3: Build clean query like "acetaminophen pregnancy safety"
  */
 function buildPubMedQuery(query) {
   const q = String(query || "").toLowerCase().trim();
   if (!q) return "";
 
-  // Common drug name mappings (brand → generic for better PubMed results)
-  const drugMappings = {
-    tylenol: "acetaminophen",
-    advil: "ibuprofen",
-    motrin: "ibuprofen",
-    aleve: "naproxen",
-    bayer: "aspirin",
-    excedrin: "acetaminophen caffeine aspirin",
-    nyquil: "dextromethorphan doxylamine",
-    dayquil: "dextromethorphan phenylephrine",
-    mucinex: "guaifenesin",
-    benadryl: "diphenhydramine",
-    claritin: "loratadine",
-    zyrtec: "cetirizine",
-    allegra: "fexofenadine",
-    prilosec: "omeprazole",
-    nexium: "esomeprazole",
-    pepcid: "famotidine",
-    zantac: "ranitidine",
-    lipitor: "atorvastatin",
-    crestor: "rosuvastatin",
-    xanax: "alprazolam",
-    valium: "diazepam",
-    ambien: "zolpidem",
-    viagra: "sildenafil",
-    cialis: "tadalafil",
+  // Brand name → generic name mappings
+  const brandToGeneric = {
+    tylenol: "acetaminophen", advil: "ibuprofen", motrin: "ibuprofen",
+    aleve: "naproxen", bayer: "aspirin", excedrin: "acetaminophen",
+    benadryl: "diphenhydramine", claritin: "loratadine", zyrtec: "cetirizine",
+    allegra: "fexofenadine", prilosec: "omeprazole", nexium: "esomeprazole",
+    pepcid: "famotidine", xanax: "alprazolam", valium: "diazepam",
+    ambien: "zolpidem", zoloft: "sertraline", prozac: "fluoxetine",
+    lexapro: "escitalopram", lipitor: "atorvastatin", crestor: "rosuvastatin",
+    viagra: "sildenafil", cialis: "tadalafil", synthroid: "levothyroxine",
+    metformin: "metformin", lisinopril: "lisinopril", losartan: "losartan",
   };
 
-  // Common generic drug names to detect
+  // Generic drug names to detect
   const genericDrugs = [
     "ibuprofen", "acetaminophen", "aspirin", "naproxen", "amoxicillin",
-    "metformin", "lisinopril", "omeprazole", "gabapentin", "hydrocodone",
-    "oxycodone", "prednisone", "azithromycin", "ciprofloxacin", "metoprolol",
-    "losartan", "amlodipine", "sertraline", "fluoxetine", "escitalopram",
-    "tramadol", "morphine", "codeine", "warfarin", "insulin", "levothyroxine",
+    "metformin", "lisinopril", "omeprazole", "gabapentin", "sertraline",
+    "fluoxetine", "escitalopram", "prednisone", "azithromycin", "metoprolol",
+    "losartan", "amlodipine", "atorvastatin", "levothyroxine", "alprazolam",
   ];
 
-  // Medical topics to extract
-  const topics = {
-    pregnancy: "pregnancy safety",
-    pregnant: "pregnancy safety",
-    breastfeeding: "breastfeeding lactation",
-    nursing: "breastfeeding lactation",
+  // Topic keyword → PubMed search term
+  const topicMappings = {
+    "empty stomach": "food administration",
+    "with food": "food administration", 
+    food: "food drug",
+    eating: "food administration",
+    pregnancy: "pregnancy",
+    pregnant: "pregnancy",
+    breastfeeding: "lactation",
+    nursing: "lactation",
     alcohol: "alcohol interaction",
-    food: "food interaction",
-    eating: "food interaction",
-    "empty stomach": "food timing administration",
-    children: "pediatric dosing",
-    kids: "pediatric dosing",
-    elderly: "geriatric safety",
     "side effect": "adverse effects",
-    "side effects": "adverse effects",
     overdose: "overdose toxicity",
-    "too much": "overdose toxicity",
     interaction: "drug interaction",
-    "mix with": "drug interaction",
-    "take with": "drug interaction combination",
-    allergy: "hypersensitivity allergic reaction",
-    allergic: "hypersensitivity allergic reaction",
-    liver: "hepatotoxicity liver",
-    kidney: "nephrotoxicity renal",
-    heart: "cardiovascular cardiac",
-    blood: "hematologic bleeding",
-    headache: "headache migraine",
-    pain: "analgesic pain relief",
-    fever: "antipyretic fever",
-    sleep: "sedation insomnia",
-    anxiety: "anxiolytic anxiety",
-    depression: "antidepressant",
+    children: "pediatric",
+    elderly: "geriatric",
+    liver: "hepatic",
+    kidney: "renal",
+    sleep: "sleep",
+    anxiety: "anxiety",
+    "blood pressure": "hypertension",
+    diabetes: "diabetes",
+    pain: "analgesic",
+    headache: "headache",
   };
 
-  // Extract drugs found in query
-  const foundDrugs = [];
-
-  // Check brand names first and convert to generic
-  for (const [brand, generic] of Object.entries(drugMappings)) {
+  // Step 1: Find drug name (prefer generic)
+  let drugName = "";
+  
+  // Check brand names first
+  for (const [brand, generic] of Object.entries(brandToGeneric)) {
     if (q.includes(brand)) {
-      foundDrugs.push(generic);
+      drugName = generic;
+      break;
+    }
+  }
+  
+  // If no brand found, check generic names
+  if (!drugName) {
+    for (const drug of genericDrugs) {
+      if (q.includes(drug)) {
+        drugName = drug;
+        break;
+      }
     }
   }
 
-  // Check generic drug names
-  for (const drug of genericDrugs) {
-    if (q.includes(drug) && !foundDrugs.includes(drug)) {
-      foundDrugs.push(drug);
-    }
-  }
-
-  // Extract topics
-  const foundTopics = [];
-  for (const [keyword, topic] of Object.entries(topics)) {
+  // Step 2: Find topic
+  let topic = "";
+  for (const [keyword, pubmedTerm] of Object.entries(topicMappings)) {
     if (q.includes(keyword)) {
-      foundTopics.push(topic);
+      topic = pubmedTerm;
+      break;
     }
   }
 
-  // Build optimized PubMed search term
-  let searchParts = [];
-
-  // Add drugs
-  if (foundDrugs.length > 0) {
-    searchParts.push(...foundDrugs);
+  // Step 3: Build clean 2-4 word query
+  if (drugName && topic) {
+    return `${drugName} ${topic}`;
+  } else if (drugName) {
+    return `${drugName} pharmacology`;
+  } else if (topic) {
+    return `medication ${topic}`;
   }
 
-  // Add topics
-  if (foundTopics.length > 0) {
-    // Only add first 2 topics to avoid over-filtering
-    searchParts.push(...foundTopics.slice(0, 2));
-  }
-
-  // If we found drugs/topics, use them; otherwise fall back to cleaned query
-  if (searchParts.length > 0) {
-    return searchParts.join(" ");
-  }
-
-  // Fallback: remove common filler words and use cleaned query
-  const fillerWords = ["can", "i", "is", "it", "the", "a", "an", "to", "with", "my", "me", "if", "or", "and", "of", "for", "on", "in", "at", "this", "that", "what", "how", "does", "do", "should", "would", "could", "will", "be", "am", "are", "was", "were", "been", "being", "have", "has", "had", "having", "take", "taking", "use", "using", "safe", "okay", "ok"];
-  const words = q.split(/\s+/).filter(w => w.length > 2 && !fillerWords.includes(w));
-  return words.slice(0, 5).join(" ");
+  // Fallback: extract meaningful words
+  const stopWords = new Set([
+    "can", "i", "is", "it", "the", "a", "an", "to", "with", "my", "me", 
+    "if", "or", "and", "of", "for", "on", "in", "at", "this", "that", 
+    "what", "how", "does", "do", "should", "would", "could", "will", 
+    "take", "taking", "use", "using", "safe", "okay", "ok", "be", "am",
+  ]);
+  const words = q.split(/\s+/).filter(w => w.length > 3 && !stopWords.has(w));
+  return words.slice(0, 3).join(" ") || "medication safety";
 }
 
+/**
+ * Helper: wait for specified milliseconds
+ */
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Fetch relevant PubMed articles for a user question.
+ * 
+ * Flow:
+ * 1. Build optimized search query from user question
+ * 2. Call PubMed esearch API to get article IDs
+ * 3. Wait 200ms (NCBI rate limit)
+ * 4. Call PubMed esummary API to get article details
+ * 5. Return formatted article objects
+ */
 async function fetchPubMedArticles(query) {
   const rawQuery = String(query || "").trim();
   if (!rawQuery) return [];
 
-  // Build optimized search term for PubMed
-  const term = buildPubMedQuery(rawQuery);
-  if (!term) return [];
-
+  // Build optimized search term
+  const searchTerm = buildPubMedQuery(rawQuery);
   console.log("[PubMed] Original query:", rawQuery);
-  console.log("[PubMed] Optimized search:", term);
+  console.log("[PubMed] Search term:", searchTerm);
 
-  const esearch = new URL("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi");
-  esearch.searchParams.set("db", "pubmed");
-  esearch.searchParams.set("retmode", "json");
-  esearch.searchParams.set("retmax", "3");
-  esearch.searchParams.set("sort", "relevance");
-  esearch.searchParams.set("term", term);
+  if (!searchTerm) return [];
 
-  const s = await fetch(esearch.toString());
-  if (!s.ok) throw new Error(`PubMed search failed (${s.status})`);
-  const sData = await s.json();
-  const ids = sData?.esearchresult?.idlist || [];
-  if (!Array.isArray(ids) || ids.length === 0) return [];
+  try {
+    // Step 1: Search for article IDs
+    const esearchUrl = new URL("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi");
+    esearchUrl.searchParams.set("db", "pubmed");
+    esearchUrl.searchParams.set("term", searchTerm);
+    esearchUrl.searchParams.set("retmax", "3");
+    esearchUrl.searchParams.set("retmode", "json");
+    esearchUrl.searchParams.set("sort", "relevance");
 
-  const esummary = new URL("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi");
-  esummary.searchParams.set("db", "pubmed");
-  esummary.searchParams.set("retmode", "json");
-  esummary.searchParams.set("id", ids.join(","));
+    console.log("[PubMed] Fetching IDs from:", esearchUrl.toString());
+    const searchRes = await fetch(esearchUrl.toString());
+    
+    if (!searchRes.ok) {
+      console.error("[PubMed] Search failed:", searchRes.status);
+      return [];
+    }
 
-  const u = await fetch(esummary.toString());
-  if (!u.ok) throw new Error(`PubMed summary failed (${u.status})`);
-  const uData = await u.json();
-  const result = uData?.result || {};
+    const searchData = await searchRes.json();
+    const ids = searchData?.esearchresult?.idlist || [];
+    
+    console.log("[PubMed] Found IDs:", ids);
 
-  const articles = [];
-  for (const id of ids) {
-    const r = result?.[id];
-    if (!r) continue;
-    const title = r.title ? String(r.title).replace(/\s+/g, " ").trim() : `PubMed ${id}`;
-    const journal = r.fulljournalname ? String(r.fulljournalname).trim() : (r.source ? String(r.source).trim() : "PubMed");
-    const pubdate = r.pubdate ? String(r.pubdate) : "";
-    const yearMatch = pubdate.match(/\b(19|20)\d{2}\b/);
-    const year = yearMatch ? yearMatch[0] : "";
-    const url = `https://pubmed.ncbi.nlm.nih.gov/${id}/`;
-    const takeaway = title.split(":").slice(0, 2).join(":").trim();
-    articles.push({ id, title, journal, year, takeaway, url });
+    if (!Array.isArray(ids) || ids.length === 0) {
+      console.log("[PubMed] No articles found for:", searchTerm);
+      return [];
+    }
+
+    // Step 2: Wait 200ms to respect NCBI rate limits
+    await sleep(200);
+
+    // Step 3: Get article details
+    const esummaryUrl = new URL("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi");
+    esummaryUrl.searchParams.set("db", "pubmed");
+    esummaryUrl.searchParams.set("id", ids.join(","));
+    esummaryUrl.searchParams.set("retmode", "json");
+
+    console.log("[PubMed] Fetching details from:", esummaryUrl.toString());
+    const summaryRes = await fetch(esummaryUrl.toString());
+    
+    if (!summaryRes.ok) {
+      console.error("[PubMed] Summary failed:", summaryRes.status);
+      return [];
+    }
+
+    const summaryData = await summaryRes.json();
+    const results = summaryData?.result || {};
+
+    // Step 4: Format articles
+    const articles = [];
+    for (const id of ids) {
+      const article = results[id];
+      if (!article) continue;
+
+      // Extract fields from esummary response
+      const title = article.title 
+        ? String(article.title).replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim() 
+        : `PubMed Article ${id}`;
+      
+      const journal = article.fulljournalname 
+        ? String(article.fulljournalname).trim() 
+        : (article.source ? String(article.source).trim() : "PubMed");
+      
+      const pubdate = article.pubdate ? String(article.pubdate) : "";
+      const yearMatch = pubdate.match(/\b(19|20)\d{2}\b/);
+      const year = yearMatch ? yearMatch[0] : "";
+
+      // Generate key takeaway (first 120 chars of title, cleaned up)
+      let takeaway = title.length > 120 
+        ? title.substring(0, 117) + "..." 
+        : title;
+      // Remove trailing period if truncated
+      takeaway = takeaway.replace(/\.{3,}$/, "...");
+
+      articles.push({
+        id: String(id),
+        title,
+        journal,
+        year,
+        url: `https://pubmed.ncbi.nlm.nih.gov/${id}/`,
+        takeaway,
+      });
+    }
+
+    console.log("[PubMed] Returning", articles.length, "articles");
+    return articles;
+
+  } catch (error) {
+    console.error("[PubMed] Error fetching articles:", error);
+    return [];
   }
-  return articles;
 }
 
 export default function ResultsPage() {
@@ -296,7 +417,8 @@ export default function ResultsPage() {
   const topAnswer = useMemo(() => {
     const first = results?.[0];
     if (!first || typeof first.answer !== "string") return null;
-    return parseClaudeAnswer(first.answer);
+    // Pass structured data from API if available
+    return parseClaudeAnswer(first.answer, first.structured);
   }, [results]);
 
   useEffect(() => {
