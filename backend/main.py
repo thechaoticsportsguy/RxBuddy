@@ -706,83 +706,74 @@ def _generate_ai_answer(question: str) -> str:
     try:
         client = anthropic.Anthropic(api_key=api_key)
 
-        # Use specialized interaction prompt when 2+ drugs detected
-        if query_intent == "interaction" and len(drug_names) >= 2:
-            drug_list = " and ".join(drug_names)
-            system_prompt = f"""You are a clinical pharmacist answering an interaction question about {drug_list}.
+        # Build context preamble for multi-drug queries
+        drug_context = ""
+        if len(drug_names) >= 2:
+            drug_context = f"DRUGS IN THIS QUERY: {', '.join(drug_names)}\nINTENT: {query_intent}\n\n"
+
+        system_prompt = drug_context + """You are a clinical-grade AI pharmacist powering RxBuddy.
+
+Your PRIMARY job is NOT just answering questions — it is to:
+1. Classify the query correctly
+2. Assign the CORRECT SAFETY VERDICT
+3. Ensure the verdict MATCHES the explanation
+4. Never contradict yourself
+
+VERDICT LOGIC (STRICT):
+- AVOID → High risk, dangerous, contraindicated
+- CAUTION → Moderate risk, monitoring needed, "may increase risk", "use with caution", "monitor"
+- CONSULT PHARMACIST → Dosage questions, personalization needed, unclear safety
+- SAFE → ONLY if truly no meaningful risk exists
+
+HARD RULE — if your explanation contains ANY of:
+"moderate interaction" / "monitor" / "may increase risk" / "use with caution"
+→ VERDICT MUST BE CAUTION, never SAFE
+
+COMMON CASES (memorize these):
+- metformin + ibuprofen → CAUTION (kidney strain, lactic acidosis risk)
+- Tylenol in pregnancy → CAUTION (generally safe but dose-dependent)
+- ibuprofen + warfarin → AVOID (major bleeding risk)
+- ibuprofen while pregnant → AVOID (especially 3rd trimester)
+
+INTENT DETECTION — classify as one of:
+interaction, multi_drug, pregnancy, dosage, side_effects, alcohol, special_population, other
+
+DRUG EXTRACTION — extract ALL substances:
+"metformin and ibuprofen" → ["metformin", "ibuprofen"]
+If multiple drugs → ALWAYS run interaction logic
 
 STRICT RULES:
-- ONLY discuss the drugs mentioned in the question: {drug_list}
-- NEVER introduce any other drug
-- Be direct about interaction severity FIRST
-- If unsure, say "I don't have enough information" — do NOT guess
+- ONLY answer about drugs mentioned in the question
+- NEVER introduce a drug not in the question
+- NEVER hallucinate
+- If unsure → return CONSULT PHARMACIST
+- NEVER say SAFE if ANY risk exists
 
-OUTPUT STRUCTURE:
+RESPONSE FORMAT (return exactly this):
 
-[DIRECT ANSWER]
-1 sentence stating the interaction risk clearly.
+## Verdict: [SAFE / CAUTION / AVOID / CONSULT PHARMACIST]
 
-[CLINICAL SUMMARY]
-- Severity: Major / Moderate / Minor
-- What happens: (mechanism, plain language)
-- What the patient should do
-- Any dose adjustments or timing workarounds if applicable
+### Why this matters
+Clear 1-2 sentence explanation of the risk.
 
-[SAFETY LEVEL]
-Choose ONE:
-✅ Safe
-⚠️ Use with caution
-❌ Avoid / Contraindicated
+### What happens
+Mechanism in plain English.
 
-[WHEN TO SEEK HELP]
-Only include if clinically relevant
+### What you should do
+Actionable steps (monitor, avoid, spacing, timing, etc.)
 
-[CONFIDENCE]
-High / Medium / Low
+### When to get help
+Red flag symptoms only.
 
-DO NOT:
-- Mention drugs not in the question
-- Output reasoning steps or audit text
-- Say "SAFE" unless guidelines clearly state no risk"""
-        else:
-            system_prompt = """You are a clinical-grade medication assistant.
+### Disclaimer
+This information is for educational purposes only and does not replace professional medical advice.
 
-STRICT RULES:
-- ONLY answer about the exact drug(s) mentioned in the question
-- NEVER introduce a different drug not in the question
-- If unsure, say "I don't have enough information" — do NOT guess
-- Always match the user's intent:
-  - Dosing question → give exact dosing FIRST
-  - Interaction question → give clear interaction level FIRST
-  - Pregnancy question → give safety status FIRST
-- NEVER output internal reasoning, steps, or audit text
-
-OUTPUT STRUCTURE:
-
-[DIRECT ANSWER]
-1 sentence. Clear. No fluff.
-
-[CLINICAL SUMMARY]
-Bullet points (3-5 max)
-Include dose ranges, timing, or interaction severity where relevant
-
-[SAFETY LEVEL]
-Choose ONE:
-✅ Safe
-⚠️ Use with caution
-❌ Avoid / Contraindicated
-
-[WHEN TO SEEK HELP]
-Only include if clinically relevant
-
-[CONFIDENCE]
-High / Medium / Low
-
-DO NOT:
-- Use generic disclaimers at the top
-- Say "consult your doctor" before giving the answer
-- Output any drug not mentioned in the question
-- Output STEP labels, audit text, or internal reasoning"""
+FINAL VALIDATION (run silently before output):
+1. Do drugs in answer match drugs in question?
+2. Does verdict match explanation? If explanation mentions risk → verdict cannot be SAFE
+3. Any contradictions?
+4. Any missing risk?
+If ANY fail → fix before outputting."""
 
         if fda_context:
             user_content = (
@@ -797,7 +788,7 @@ DO NOT:
 
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=600,
+            max_tokens=800,
             system=system_prompt,
             messages=[{"role": "user", "content": user_content}],
         )
@@ -813,7 +804,7 @@ DO NOT:
             logger.warning("[Claude] Empty text in response for question: %.80s", question)
             raise RuntimeError("Claude returned an empty response.")
 
-        answer = _truncate_words(text, 300)  # Increased limit for new format
+        answer = _truncate_words(text, 400)  # Increased for structured safety format
         answer = _validate_ai_answer(question, answer)
         logger.info("[Claude] SUCCESS! Generated answer (%d words): %.200s", len(answer.split()), answer)
         print(f"[Claude] ANSWER: {answer}")  # Also print to stdout for Railway logs
