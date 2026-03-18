@@ -1,6 +1,7 @@
 import Head from "next/head";
 import { useRouter } from "next/router";
 import { useCallback, useEffect, useRef, useState } from "react";
+import Spline from "@splinetool/react-spline";
 import { BackgroundGradientAnimation } from "../components/ui/background-gradient-animation";
 
 const CATEGORIES = [
@@ -528,6 +529,18 @@ export default function HomePage() {
             >
               Your Pocket Pharmacist
             </p>
+          </div>
+
+          <div
+            style={{
+              width: "100%",
+              maxWidth: "500px",
+              height: "300px",
+              margin: "0 auto",
+              position: "relative",
+            }}
+          >
+            <Spline scene="https://prod.spline.design/0fc3ccf2-6131-4754-a821-e00b70790d20/scene.splinecode" />
           </div>
 
           {/* ---- Robot ---- */}
