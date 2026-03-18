@@ -1,30 +1,7 @@
 import Head from "next/head";
-import dynamic from "next/dynamic";
 import { useRouter } from "next/router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BackgroundGradientAnimation } from "../components/ui/background-gradient-animation";
-
-const Spline = dynamic(
-  () => import("@splinetool/react-spline").then((mod) => mod.default),
-  {
-    ssr: false,
-    loading: () => (
-      <div
-        style={{
-          width: "100%",
-          height: "300px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "#52B788",
-          fontSize: "14px",
-        }}
-      >
-        Loading 3D scene...
-      </div>
-    ),
-  },
-);
 
 const CATEGORIES = [
   "Drug Interactions",
@@ -64,6 +41,171 @@ function getSpeechRecognition() {
 }
 
 /* ──────────────────────────────────────────────
+   Pill3D — interactive 3D CSS pill
+   ────────────────────────────────────────────── */
+function Pill3D() {
+  const [rotation, setRotation] = useState({ x: 8, y: -5 });
+  const [isHovered, setIsHovered] = useState(false);
+  const [isClicked, setIsClicked] = useState(false);
+
+  function handleMouseMove(e) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const rotateY = ((e.clientX - centerX) / rect.width) * 30;
+    const rotateX = -((e.clientY - centerY) / rect.height) * 20;
+    setRotation({ x: rotateX, y: rotateY });
+  }
+
+  function handleClick() {
+    setIsClicked(true);
+    setTimeout(() => setIsClicked(false), 600);
+  }
+
+  return (
+    <div
+      className="pill3d-wrapper"
+      style={{ perspective: "800px", width: "320px", margin: "30px auto", cursor: "pointer" }}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={() => {
+        setRotation({ x: 8, y: -5 });
+        setIsHovered(false);
+      }}
+      onMouseEnter={() => setIsHovered(true)}
+      onClick={handleClick}
+    >
+      <div
+        className={isHovered ? "pill3d-hovered" : ""}
+        style={{
+          width: "300px",
+          height: "100px",
+          borderRadius: "50px",
+          display: "flex",
+          transform: isClicked
+            ? `rotateX(${rotation.x}deg) rotateY(360deg)`
+            : `rotateX(${rotation.x}deg) rotateY(${rotation.y}deg)`,
+          transition: isClicked ? "transform 0.6s ease" : "transform 0.1s ease-out",
+          animation: isHovered
+            ? "glowPulse 2s ease-in-out infinite"
+            : "pillFloat 3s ease-in-out infinite, glowPulse 2s ease-in-out infinite",
+          boxShadow: isHovered
+            ? "0 30px 70px rgba(0,0,0,0.5), 0 0 50px rgba(82,183,136,0.5), inset 0 2px 4px rgba(255,255,255,0.4), inset 0 -2px 4px rgba(0,0,0,0.2)"
+            : "0 25px 60px rgba(0,0,0,0.5), inset 0 2px 4px rgba(255,255,255,0.4), inset 0 -2px 4px rgba(0,0,0,0.2)",
+          border: "2px solid #2D6A4F",
+          overflow: "hidden",
+          position: "relative",
+          transformStyle: "preserve-3d",
+        }}
+      >
+        {/* Green left half */}
+        <div
+          style={{
+            width: "50%",
+            height: "100%",
+            background: "linear-gradient(180deg, #6fcf97 0%, #52B788 40%, #2D6A4F 100%)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            position: "relative",
+          }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              height: "45%",
+              background: "linear-gradient(180deg, rgba(255,255,255,0.35) 0%, transparent 100%)",
+              borderRadius: "50px 0 0 0",
+            }}
+          />
+          <span style={{ fontSize: "28px", zIndex: 1, color: "#fff" }}>&#10010;</span>
+        </div>
+
+        {/* Divider seam */}
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: "50%",
+            transform: "translateX(-50%)",
+            width: "2px",
+            height: "100%",
+            background: "linear-gradient(180deg, rgba(45,106,79,0.1) 0%, rgba(45,106,79,0.4) 50%, rgba(45,106,79,0.1) 100%)",
+            zIndex: 2,
+          }}
+        />
+
+        {/* White right half */}
+        <div
+          style={{
+            width: "50%",
+            height: "100%",
+            background: "linear-gradient(180deg, #ffffff 0%, #f0f0f0 40%, #d8d8d8 100%)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            position: "relative",
+          }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              height: "45%",
+              background: "linear-gradient(180deg, rgba(255,255,255,0.6) 0%, transparent 100%)",
+              borderRadius: "0 50px 0 0",
+            }}
+          />
+          <span
+            style={{
+              color: "#2D6A4F",
+              fontWeight: 900,
+              fontSize: "13px",
+              letterSpacing: "2px",
+              zIndex: 1,
+              fontFamily: "'Inter', system-ui, sans-serif",
+            }}
+          >
+            RxBuddy
+          </span>
+        </div>
+
+        {/* Bottom shadow line for depth */}
+        <div
+          style={{
+            position: "absolute",
+            bottom: 0,
+            left: "10%",
+            right: "10%",
+            height: "3px",
+            background: "rgba(0,0,0,0.2)",
+            borderRadius: "50%",
+            filter: "blur(2px)",
+          }}
+        />
+      </div>
+
+      {/* Ground shadow */}
+      <div
+        style={{
+          width: isHovered ? "180px" : "200px",
+          height: "20px",
+          background: "radial-gradient(ellipse, rgba(0,0,0,0.3) 0%, transparent 70%)",
+          margin: "10px auto 0",
+          borderRadius: "50%",
+          filter: "blur(4px)",
+          transition: "width 0.3s ease",
+        }}
+      />
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────
    Main Page
    ────────────────────────────────────────────── */
 export default function HomePage() {
@@ -74,7 +216,6 @@ export default function HomePage() {
   const [supportsVoice, setSupportsVoice] = useState(false);
   const recognitionRef = useRef(null);
   const [typedText, setTypedText] = useState("");
-  const [splineError, setSplineError] = useState(false);
 
   useEffect(() => {
     setSupportsVoice(!!getSpeechRecognition());
@@ -161,6 +302,24 @@ export default function HomePage() {
       </Head>
 
       <style jsx global>{`
+        /* ---- Pill 3D animations ---- */
+        @keyframes pillFloat {
+          0%, 100% { transform: translateY(0px) rotateX(10deg) rotateY(-5deg); }
+          50%      { transform: translateY(-15px) rotateX(10deg) rotateY(-5deg); }
+        }
+        @keyframes glowPulse {
+          0%, 100% { box-shadow: 0 20px 60px rgba(0,0,0,0.4), 0 0 30px rgba(82,183,136,0.3), inset 0 2px 4px rgba(255,255,255,0.4), inset 0 -2px 4px rgba(0,0,0,0.2); }
+          50%      { box-shadow: 0 20px 60px rgba(0,0,0,0.4), 0 0 60px rgba(82,183,136,0.6), inset 0 2px 4px rgba(255,255,255,0.4), inset 0 -2px 4px rgba(0,0,0,0.2); }
+        }
+
+        /* Mobile: scale pill down */
+        @media (max-width: 640px) {
+          .pill3d-wrapper {
+            transform: scale(0.7);
+            transform-origin: top center;
+          }
+        }
+
         /* ---- Page animations ---- */
         @keyframes fadeUp {
           0%   { opacity: 0; transform: translateY(24px); }
@@ -241,19 +400,9 @@ export default function HomePage() {
             </p>
           </div>
 
-          <div style={{ width: "100%", maxWidth: "500px", height: "300px", margin: "0 auto" }}>
-            {typeof window !== "undefined" && (
-              !splineError ? (
-                <Spline
-                  scene="https://prod.spline.design/0fc3ccf2-6131-4754-a821-e00b70790d20/scene.splinecode"
-                  onError={() => setSplineError(true)}
-                />
-              ) : (
-                <div style={{ color: "#52B788", textAlign: "center", padding: "20px" }}>
-                  💊 RxBuddy
-                </div>
-              )
-            )}
+          {/* ---- 3D Pill ---- */}
+          <div className="anim-fade-up" style={{ animationDelay: "0.1s" }}>
+            <Pill3D />
           </div>
 
           {/* ---- Search Bar ---- */}
