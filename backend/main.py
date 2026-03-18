@@ -70,8 +70,78 @@ def _extract_drug_name(question: str) -> str | None:
     for drug in generic_drugs:
         if drug in q_lower:
             return drug
-    
+
     return None
+
+
+def _extract_drug_names(question: str) -> list[str]:
+    """Extract ALL drug names mentioned in a question (not just the first)."""
+    q_lower = question.lower()
+    found: list[str] = []
+
+    for brand, generic in BRAND_TO_GENERIC.items():
+        if brand in q_lower and generic not in found:
+            found.append(generic)
+
+    all_drugs = [
+        "acetaminophen", "ibuprofen", "aspirin", "naproxen", "amoxicillin",
+        "metformin", "lisinopril", "omeprazole", "gabapentin", "sertraline",
+        "fluoxetine", "escitalopram", "prednisone", "azithromycin", "metoprolol",
+        "losartan", "amlodipine", "atorvastatin", "levothyroxine", "alprazolam",
+        "hydrocodone", "oxycodone", "tramadol", "warfarin", "ciprofloxacin",
+    ]
+    for drug in all_drugs:
+        if drug in q_lower and drug not in found:
+            found.append(drug)
+
+    return found
+
+
+def _classify_query_intent(question: str) -> str:
+    """Rule-based intent classification. Returns intent key or 'general'."""
+    q_lower = question.lower()
+    scores: dict[str, int] = {}
+    for intent, keywords in _INTENT_SIGNALS.items():
+        scores[intent] = sum(1 for kw in keywords if kw in q_lower)
+    best = max(scores, key=lambda k: scores[k])
+    return best if scores[best] > 0 else "general"
+
+
+def _build_intent_query(question: str, intent: str, drugs: list[str]) -> str:
+    """Append intent-specific keywords to improve TF-IDF retrieval accuracy."""
+    boost = _INTENT_QUERY_BOOST.get(intent, "")
+    return f"{question} {boost}".strip() if boost else question
+
+
+def _rerank_by_intent(matches: list, drugs: list[str], intent: str) -> list:
+    """
+    Re-rank TF-IDF matches using intent + drug overlap signals.
+    - +0.25 per drug from user query found in matched question
+    - +0.30 if matched question's category matches user intent
+    - -0.40 per drug missing from matched question (interaction queries only)
+    """
+    target_category = _INTENT_TO_CATEGORY.get(intent, "").lower()
+    scored = []
+    for m in matches:
+        adjusted = m.score
+        q_lower = (m.question or "").lower()
+        cat = (m.category or "").lower()
+
+        for drug in drugs:
+            if drug in q_lower:
+                adjusted += 0.25
+
+        if target_category and cat == target_category:
+            adjusted += 0.30
+
+        if intent == "interaction" and len(drugs) >= 2:
+            missing = sum(1 for drug in drugs if drug not in q_lower)
+            adjusted -= missing * 0.40
+
+        scored.append((adjusted, m))
+
+    scored.sort(key=lambda x: -x[0])
+    return [m for _, m in scored]
 
 
 def _fetch_fda_label(drug_name: str) -> dict | None:
@@ -281,6 +351,42 @@ def spell_check_query(query: str) -> str | None:
 
 # ---------- Confidence threshold and self-learning ----------
 CONFIDENCE_THRESHOLD = 0.35  # If best match score is below this, use Claude for live answer
+
+# Intent classification signals — keyword → intent category
+_INTENT_SIGNALS: dict[str, list[str]] = {
+    "interaction": ["interact", "combine", "together", "mix", "take with", "and ", "both"],
+    "dosage": ["dose", "dosage", "how much", "how many", "mg", "milligram", "strength", "maximum dose"],
+    "side_effects": ["side effect", "adverse", "cause", "feel", "happen if", "reaction", "symptom"],
+    "pregnancy": ["pregnant", "pregnancy", "breastfeed", "nursing", "baby", "fetus"],
+    "storage": ["store", "storage", "expire", "expiration", "refrigerat", "shelf life"],
+    "alcohol": ["alcohol", "drink", "beer", "wine", "liquor"],
+    "overdose": ["overdose", "too much", "too many", "maximum", "excess"],
+    "safety": ["safe", "okay to", "is it okay", "can i take", "should i", "dangerous"],
+}
+
+# Extra keywords appended to search query per intent — improves TF-IDF retrieval accuracy
+_INTENT_QUERY_BOOST: dict[str, str] = {
+    "interaction": "interaction drug combination effect",
+    "dosage": "dosage dose mg adults",
+    "side_effects": "side effects adverse reactions symptoms",
+    "pregnancy": "pregnancy safe pregnant breastfeeding",
+    "storage": "storage expiration shelf life",
+    "alcohol": "alcohol drink interaction",
+    "overdose": "overdose maximum dose toxic",
+    "safety": "safety warnings precautions",
+}
+
+# Intent → DB category name (must match PHARMACY_CATEGORIES values exactly)
+_INTENT_TO_CATEGORY: dict[str, str] = {
+    "interaction": "Drug Interactions",
+    "dosage": "Dosage",
+    "side_effects": "Side Effects",
+    "pregnancy": "Pregnancy",
+    "storage": "Storage",
+    "alcohol": "Alcohol",
+    "overdose": "Overdose",
+    "safety": "Warnings",
+}
 
 # 16 pharmacy categories for self-learning classification
 PHARMACY_CATEGORIES = [
@@ -588,18 +694,58 @@ def _generate_ai_answer(question: str) -> str:
 
     logger.info("[Claude] API key found (first 8 chars): %s...", api_key[:8] if len(api_key) > 8 else "***")
 
-    # TECHNIQUE 2: Ground answers in FDA data first
-    drug_name = _extract_drug_name(question)
+    # Ground answers in FDA data — extract all drugs, fetch label for primary
+    drug_names = _extract_drug_names(question)
+    drug_name = drug_names[0] if drug_names else _extract_drug_name(question)
+    query_intent = _classify_query_intent(question)
     fda_data = _fetch_fda_label(drug_name) if drug_name else None
     fda_context = _build_fda_context(fda_data, question) if fda_data else ""
-    
+
     import anthropic
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
 
-        # System prompt for intent-classified medication answering
-        system_prompt = """You are a clinical-grade medication assistant.
+        # Use specialized interaction prompt when 2+ drugs detected
+        if query_intent == "interaction" and len(drug_names) >= 2:
+            drug_list = " and ".join(drug_names)
+            system_prompt = f"""You are a clinical pharmacist answering an interaction question about {drug_list}.
+
+STRICT RULES:
+- ONLY discuss the drugs mentioned in the question: {drug_list}
+- NEVER introduce any other drug
+- Be direct about interaction severity FIRST
+- If unsure, say "I don't have enough information" — do NOT guess
+
+OUTPUT STRUCTURE:
+
+[DIRECT ANSWER]
+1 sentence stating the interaction risk clearly.
+
+[CLINICAL SUMMARY]
+- Severity: Major / Moderate / Minor
+- What happens: (mechanism, plain language)
+- What the patient should do
+- Any dose adjustments or timing workarounds if applicable
+
+[SAFETY LEVEL]
+Choose ONE:
+✅ Safe
+⚠️ Use with caution
+❌ Avoid / Contraindicated
+
+[WHEN TO SEEK HELP]
+Only include if clinically relevant
+
+[CONFIDENCE]
+High / Medium / Low
+
+DO NOT:
+- Mention drugs not in the question
+- Output reasoning steps or audit text
+- Say "SAFE" unless guidelines clearly state no risk"""
+        else:
+            system_prompt = """You are a clinical-grade medication assistant.
 
 STRICT RULES:
 - ONLY answer about the exact drug(s) mentioned in the question
@@ -631,12 +777,6 @@ Only include if clinically relevant
 
 [CONFIDENCE]
 High / Medium / Low
-
-VALIDATION (do this silently before outputting):
-- Are all drugs mentioned the same as in the question?
-- Does the answer directly match the question type?
-- Is there any unrelated drug mentioned?
-If any issue → correct before outputting.
 
 DO NOT:
 - Use generic disclaimers at the top
@@ -1298,12 +1438,42 @@ def search(req: SearchRequest) -> SearchResponse:
     engine_name = (req.engine or "tfidf").strip().lower()
     top_k = int(req.top_k)
 
+    # Extract intent + drugs BEFORE search so we can build a better query
+    drug_names = _extract_drug_names(search_query)
+    query_intent = _classify_query_intent(search_query)
+    enhanced_query = _build_intent_query(search_query, query_intent, drug_names)
+
     if engine_name == "tfidf":
         matches = tfidf_search(search_query, top_k=top_k)
+
+        # Run a second pass with the intent-enhanced query and merge results
+        if enhanced_query != search_query:
+            extra = tfidf_search(enhanced_query, top_k=top_k)
+            seen: dict[int, object] = {m.id: m for m in matches}
+            for m in extra:
+                if m.id not in seen or float(m.score) > float(seen[m.id].score):  # type: ignore[union-attr]
+                    seen[m.id] = m
+            matches = list(seen.values())
+
+        # Re-rank by intent + drug overlap before returning results
+        matches = _rerank_by_intent(matches, drug_names, query_intent)
         match_ids = [m.id for m in matches]
         score_by_id = {m.id: float(m.score) for m in matches}
-        # Store answers from TF-IDF matches for near-exact check
         answer_by_id = {m.id: m.answer for m in matches}
+
+        # Hard rule: multi-drug interaction query must find a question containing ALL drugs.
+        # If the best match is missing any drug → force Claude (wipe match_ids).
+        if query_intent == "interaction" and len(drug_names) >= 2 and matches:
+            best_q_lower = (matches[0].question or "").lower()
+            if not all(d in best_q_lower for d in drug_names):
+                logger.info(
+                    "[IntentFilter] Interaction query %s — best match missing drugs, forcing Claude",
+                    drug_names,
+                )
+                match_ids = []
+                score_by_id = {}
+                answer_by_id = {}
+
     elif engine_name == "knn":
         try:
             matches2 = knn_search(search_query, top_k=top_k)
