@@ -18,6 +18,22 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Boolean, DateTime, Integer, MetaData, Table, Text, create_engine, select
 from sqlalchemy.dialects.postgresql import ARRAY, VARCHAR
 
+# ── Answer Engine v2 ──────────────────────────────────────────────────────────
+# Architecture: answer_engine.py  (intent classifier, citation models, retrieval guard)
+# Cache/TTL:    label_updater.py  (24-h TTL cache, stale-refresh pipeline)
+from answer_engine import (
+    QuestionIntent,
+    classify_intent,
+    check_retrieval_guard,
+    build_citations,
+    build_refused_answer,
+    extract_fda_metadata,
+    Citation,
+    RetrievalStatus,
+    HIGH_RISK_DRUGS,
+)
+import label_updater
+
 
 # ---------- 1) Load secrets from .env ----------
 # `.env` lives in your project root and is NOT committed to GitHub.
@@ -102,26 +118,17 @@ def _extract_drug_names(question: str) -> list[str]:
 
 def _classify_query_intent(question: str) -> str:
     """
-    Deterministic intent classifier used before interaction logic.
-    Returns one of: interaction, dosage, side_effects, safety_general, general.
+    7-type intent classifier — delegates to answer_engine.classify_intent().
+
+    Returns one of: interaction, dosing, side_effects, contraindications,
+    pregnancy_lactation, food_alcohol, general.
+
+    Replaces the legacy 5-type classifier. All callers receive a string value
+    compatible with both the old TF-IDF reranking maps and the new retrieval guard.
     """
-    q_lower = question.lower()
     drugs = _extract_drug_names(question)
-
-    dosage_terms = ("how much", "dose", "dosage", "mg", "milligram", "maximum dose", "max dose")
-    side_effect_terms = ("side effect", "side effects", "adverse effect", "adverse effects", "reaction", "reactions")
-    safety_general_terms = ("water", "food", "with food", "empty stomach", "pregnant", "pregnancy", "breastfeed", "nursing")
-    interaction_terms = ("interact", "interaction", "combine", "mix", "together", "with", "can i take")
-
-    if any(term in q_lower for term in dosage_terms):
-        return "dosage"
-    if any(term in q_lower for term in side_effect_terms):
-        return "side_effects"
-    if len(drugs) >= 2 and any(term in q_lower for term in interaction_terms):
-        return "interaction"
-    if any(term in q_lower for term in safety_general_terms):
-        return "safety_general"
-    return "general"
+    intent = classify_intent(question, drug_count=len(drugs))
+    return intent.value
 
 
 def _build_intent_query(question: str, intent: str, drugs: list[str]) -> str:
@@ -163,64 +170,102 @@ def _rerank_by_intent(matches: list, drugs: list[str], intent: str) -> list:
 
 def _fetch_fda_label(drug_name: str) -> dict | None:
     """
-    Fetch FDA label data from OpenFDA API.
-    Returns relevant sections or None if not found.
+    Fetch FDA label data (parsed sections only).
+    Delegates to _fetch_fda_label_with_raw() so the label_updater cache is populated.
+    Use _fetch_fda_label_with_raw() directly when you also need metadata (SetID, NDA, etc.).
+    """
+    fda_data, _ = _fetch_fda_label_with_raw(drug_name)
+    return fda_data
+
+
+
+
+def _fetch_fda_label_with_raw(drug_name: str) -> "tuple[dict | None, dict | None]":
+    """
+    Fetch FDA label data AND the raw OpenFDA result for metadata extraction.
+
+    Returns
+    -------
+    (parsed_fda_data, raw_openfda_result)
+      - parsed_fda_data : dict | None  — same structure as _fetch_fda_label()
+      - raw_openfda_result : dict | None — full OpenFDA result[0] for SetID/NDA extraction
+
+    Uses label_updater cache (24-h TTL).  On cache hit, returns cached data immediately.
+    On miss or stale, fetches fresh data and populates the cache.
     """
     if not drug_name:
-        return None
-    
+        return None, None
+
+    key = drug_name.strip().lower()
+
+    # Check cache first
+    cached = label_updater.get_cached_label(key)
+    if cached is not None:
+        logger.debug("[FDA] Cache HIT for '%s'", key)
+        return cached.data, cached.raw_label
+
+    # Cache miss — fetch from OpenFDA
     try:
         url = f"{OPENFDA_LABEL_URL}?search=openfda.generic_name:{drug_name}&limit=1"
-        logger.info("[FDA] Fetching label for '%s' from OpenFDA...", drug_name)
-        
+        logger.info("[FDA] Cache MISS — fetching label for '%s'", drug_name)
+
         resp = http_requests.get(
             url,
             headers={"User-Agent": "RxBuddy/1.0"},
             timeout=10,
         )
-        
+
         if resp.status_code == 404:
             logger.info("[FDA] No label found for '%s'", drug_name)
-            return None
-        
+            return None, None
+
         resp.raise_for_status()
         data = resp.json()
-        
         results = data.get("results", [])
         if not results:
-            return None
-        
-        label = results[0]
-        
-        # Extract relevant sections (each is a list of strings)
-        def get_section(key: str) -> str:
-            val = label.get(key, [])
+            return None, None
+
+        raw_label = results[0]
+
+        def get_section(key_: str) -> str:
+            val = raw_label.get(key_, [])
             if isinstance(val, list) and val:
-                return val[0][:1000]  # Limit to 1000 chars
+                return val[0][:1000]
             return ""
-        
+
         fda_data = {
-            "drug_name": drug_name,
-            "warnings": get_section("warnings"),
+            "drug_name":                drug_name,
+            "warnings":                 get_section("warnings"),
             "dosage_and_administration": get_section("dosage_and_administration"),
-            "contraindications": get_section("contraindications"),
-            "drug_interactions": get_section("drug_interactions"),
-            "adverse_reactions": get_section("adverse_reactions"),
-            "pregnancy": get_section("pregnancy"),
-            "indications_and_usage": get_section("indications_and_usage"),
+            "contraindications":         get_section("contraindications"),
+            "drug_interactions":         get_section("drug_interactions"),
+            "adverse_reactions":         get_section("adverse_reactions"),
+            "pregnancy":                 get_section("pregnancy"),
+            "indications_and_usage":     get_section("indications_and_usage"),
+            "boxed_warning":             get_section("boxed_warning"),
+            "lactation":                 get_section("lactation"),
+            "use_in_specific_populations": get_section("use_in_specific_populations"),
         }
-        
-        # Check if we got any useful data
+
         has_data = any(v for k, v in fda_data.items() if k != "drug_name" and v)
         if not has_data:
-            return None
-        
-        logger.info("[FDA] Successfully fetched label for '%s'", drug_name)
-        return fda_data
-        
+            return None, None
+
+        # Extract revision date for cache metadata
+        meta = extract_fda_metadata(raw_label)
+        label_updater.put_label(
+            drug_name=key,
+            data=fda_data,
+            raw_label=raw_label,
+            label_revision_date=meta.get("label_revision_date"),
+        )
+
+        logger.info("[FDA] Fetched and cached label for '%s'", drug_name)
+        return fda_data, raw_label
+
     except Exception as e:
-        logger.warning("[FDA] Error fetching label for '%s': %s", drug_name, e)
-        return None
+        logger.warning("[FDA] Error in _fetch_fda_label_with_raw for '%s': %s", drug_name, e)
+        return None, None
 
 
 def _build_fda_context(fda_data: dict | None, question: str, medlineplus_data: dict | None = None) -> str:
@@ -850,18 +895,25 @@ Return ONLY the final answer, no commentary."""
         return answer
 
 
-def _generate_ai_answer(question: str) -> str:
+def _generate_ai_answer(question: str) -> "tuple[str, list[dict], str, str]":
     """
-    Generate a structured, specific answer using Anthropic Claude.
-    
-    Implements 5 hallucination guardrails:
-    1. Allow "I don't know" - Claude can admit uncertainty
-    2. Ground in FDA data - Fetch real FDA label data first
-    3. Require citations - SOURCES field required
-    4. Chain of thought - Think through drug, concern, FDA data
-    5. Confidence scoring - HIGH/MEDIUM/LOW rating
-    
-    Returns answer in a parseable format with confidence and sources.
+    Generate a grounded answer using Claude Sonnet.
+
+    Returns
+    -------
+    (answer_text, citations, intent_str, retrieval_status_str)
+      answer_text       – structured text (VERDICT/DIRECT/WHY/DO/AVOID/DOCTOR/CONFIDENCE/SOURCES)
+      citations         – list of serialised Citation dicts from answer_engine.build_citations()
+      intent_str        – QuestionIntent value (e.g. "interaction", "dosing")
+      retrieval_status_str – RetrievalStatus value (e.g. "LABEL_FOUND", "REFUSED_NO_SOURCE")
+
+    Guardrails
+    ----------
+    1. Retrieval guard  – refuses dosing/contraindications/pregnancy without an FDA label
+    2. FDA grounding    – label data fetched via _fetch_fda_label_with_raw() (cached 24 h)
+    3. Citation objects – built from raw OpenFDA response (SetID, NDA, revision date)
+    4. Confidence score – HIGH/MEDIUM/LOW returned with every answer
+    5. Validator pass   – Claude Haiku checks verdict consistency post-generation
     """
     api_key = _anthropic_api_key()
     if not api_key:
@@ -873,8 +925,33 @@ def _generate_ai_answer(question: str) -> str:
     # Ground answers in FDA + MedlinePlus data — extract all drugs, fetch label for primary
     drug_names = _extract_drug_names(question)
     drug_name = drug_names[0] if drug_names else _extract_drug_name(question)
-    query_intent = _classify_query_intent(question)
-    fda_data = _fetch_fda_label(drug_name) if drug_name else None
+    intent_str = _classify_query_intent(question)
+    intent_enum = QuestionIntent(intent_str) if intent_str in QuestionIntent._value2member_map_ else QuestionIntent.GENERAL
+
+    # Fetch label WITH raw result (populates label_updater cache)
+    fda_data, raw_label = _fetch_fda_label_with_raw(drug_name) if drug_name else (None, None)
+
+    # ── Retrieval Guard: refuse high-stakes questions without label source ──
+    proceed, retrieval_status_enum = check_retrieval_guard(intent_enum, fda_data, drug_names)
+    retrieval_status_str = retrieval_status_enum.value
+
+    # Build citations from whatever label data we have (empty list when no label)
+    fetched_at = datetime.now(timezone.utc).isoformat(timespec="seconds") + "Z"
+    cit_objects = build_citations(fda_data, raw_label, drug_name or "", intent_enum, fetched_at)
+    citations_dicts = [c.model_dump() for c in cit_objects]
+
+    if not proceed:
+        refused = build_refused_answer(intent_enum, fetched_at)
+        refused_text = (
+            f"VERDICT: INSUFFICIENT_DATA\n"
+            f"DIRECT: {refused.short_answer}\n"
+            f"DO: {' | '.join(refused.what_to_do)}\n"
+            f"DOCTOR: {' | '.join(refused.emergency_escalation)}\n"
+            f"CONFIDENCE: LOW\n"
+            f"SOURCES: DailyMed (dailymed.nlm.nih.gov)"
+        )
+        return refused_text, [c.model_dump() for c in refused.citations], intent_str, retrieval_status_str
+
     medlineplus_data = _fetch_medlineplus(drug_name) if drug_name else None
     fda_context = _build_fda_context(fda_data, question, medlineplus_data)
 
@@ -886,7 +963,7 @@ def _generate_ai_answer(question: str) -> str:
         # Build context preamble for multi-drug queries
         drug_context = ""
         if len(drug_names) >= 2:
-            drug_context = f"DRUGS IN THIS QUERY: {', '.join(drug_names)}\nINTENT: {query_intent}\n\n"
+            drug_context = f"DRUGS IN THIS QUERY: {', '.join(drug_names)}\nINTENT: {intent_str}\n\n"
 
         system_prompt = drug_context + """You are a clinical-grade AI pharmacist powering RxBuddy.
 
@@ -990,7 +1067,7 @@ If ANY fail → fix before outputting."""
         answer = _validate_ai_answer(question, answer)
         logger.info("[Claude] SUCCESS! Generated answer (%d words): %.200s", len(answer.split()), answer)
         print(f"[Claude] ANSWER: {answer}")  # Also print to stdout for Railway logs
-        return answer
+        return answer, citations_dicts, intent_str, retrieval_status_str
 
     except anthropic.APIError as e:
         logger.error("[Claude] API Error: %s (status=%s)", e.message, getattr(e, 'status_code', 'N/A'))
@@ -1114,7 +1191,7 @@ class SearchRequest(BaseModel):
 
 class StructuredAnswer(BaseModel):
     """Parsed structured answer with specific bullets for each section."""
-    verdict: str = "CONSULT_PHARMACIST"  # SAFE, AVOID, CAUTION, CONSULT_PHARMACIST
+    verdict: str = "CONSULT_PHARMACIST"  # SAFE, AVOID, CAUTION, CONSULT_PHARMACIST, INSUFFICIENT_DATA
     direct: str = ""  # Direct YES/NO answer
     do: list[str] = []  # What to do bullets
     avoid: list[str] = []  # What to avoid bullets
@@ -1125,6 +1202,10 @@ class StructuredAnswer(BaseModel):
     interaction_summary: dict[str, list[str]] = Field(
         default_factory=lambda: {"avoid_pairs": [], "caution_pairs": []}
     )
+    # Answer Engine v2 fields — populated when FDA label data is retrieved
+    citations: list[dict] = Field(default_factory=list)   # Citation objects (see answer_engine.Citation)
+    intent: str = "general"                                # QuestionIntent value
+    retrieval_status: str = "LABEL_NOT_FOUND"              # RetrievalStatus value
 
 
 DOSAGE_TERMS = (
@@ -2097,7 +2178,7 @@ def answer(req: AnswerRequest) -> AnswerResponse:
         raise HTTPException(status_code=400, detail="question cannot be empty")
 
     try:
-        a = _generate_ai_answer(q)
+        a, _, _, _ = _generate_ai_answer(q)
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -2276,8 +2357,15 @@ def search(req: SearchRequest) -> SearchResponse:
 
         if _anthropic_api_key():
             try:
-                live_answer = _generate_ai_answer(original_query)
+                live_answer, live_cits, live_intent, live_rs = _generate_ai_answer(original_query)
                 source = "ai_generated"
+
+                def _enrich(sa: "StructuredAnswer") -> "StructuredAnswer":
+                    """Attach engine-v2 metadata to a parsed StructuredAnswer."""
+                    sa.citations = live_cits
+                    sa.intent = live_intent
+                    sa.retrieval_status = live_rs
+                    return sa
 
                 # Self-learning: check if this is a valid pharmacy question
                 if _is_valid_pharmacy_question(original_query):
@@ -2294,7 +2382,7 @@ def search(req: SearchRequest) -> SearchResponse:
                                 tags=[category.lower()],
                                 score=1.0,
                                 answer=live_answer,
-                                structured=_parse_structured_answer(live_answer, original_query),
+                                structured=_enrich(_parse_structured_answer(live_answer, original_query)),
                             )
                         ]
                         _log_search(user_query, new_id)
@@ -2315,7 +2403,7 @@ def search(req: SearchRequest) -> SearchResponse:
                         tags=[],
                         score=best_score,
                         answer=live_answer,
-                        structured=_parse_structured_answer(live_answer, original_query),
+                        structured=_enrich(_parse_structured_answer(live_answer, original_query)),
                     )
                 ]
                 _log_search(user_query, None)
@@ -2378,7 +2466,7 @@ def search(req: SearchRequest) -> SearchResponse:
         # Generate answer for database questions that don't have one yet
         if not answer_text and _anthropic_api_key():
             try:
-                answer_text = _generate_ai_answer(str(r["question"]))
+                answer_text, _, _, _ = _generate_ai_answer(str(r["question"]))
                 generated_answers[int(r["id"])] = answer_text
             except Exception as exc:
                 logger.error("[Claude] Failed to generate answer for Q#%s: %s", r["id"], exc, exc_info=True)
@@ -2686,3 +2774,43 @@ def log_search(req: LogRequest) -> LogResponse:
         raise HTTPException(status_code=500, detail=f"Database error while logging. ({e})")
 
     return LogResponse(ok=True, log_id=log_id)
+
+
+# ---------- Admin: label cache stats & manual refresh ----------
+
+@app.get("/admin/cache-stats")
+def admin_cache_stats() -> dict:
+    """
+    Returns label_updater cache statistics.
+    Useful for monitoring label freshness in production.
+    """
+    return label_updater.cache_stats()
+
+
+@app.post("/admin/refresh-label")
+def admin_refresh_label(drug: str) -> dict:
+    """
+    Force-refresh a single drug label from OpenFDA, bypassing the TTL cache.
+    Query param: ?drug=metformin
+    """
+    if not drug.strip():
+        raise HTTPException(status_code=400, detail="drug parameter is required")
+
+    drug_name = drug.strip().lower()
+    # Evict from cache so next fetch is fresh
+    import label_updater as _lu
+    if drug_name in _lu._cache:
+        del _lu._cache[drug_name]
+
+    fda_data, raw_label = _fetch_fda_label_with_raw(drug_name)
+    if not fda_data:
+        return {"refreshed": False, "drug": drug_name, "reason": "label not found in OpenFDA"}
+
+    meta = label_updater.get_label_metadata(drug_name) or {}
+    return {
+        "refreshed": True,
+        "drug": drug_name,
+        "label_revision_date": meta.get("label_revision_date"),
+        "date_fetched": meta.get("date_fetched"),
+        "cache_expires_at": meta.get("cache_expires_at"),
+    }
