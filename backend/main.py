@@ -568,6 +568,18 @@ def spell_check_query(query: str) -> str | None:
 # ---------- Confidence threshold and self-learning ----------
 CONFIDENCE_THRESHOLD = 0.35  # If best match score is below this, use Claude for live answer
 
+# Key concept words that MUST appear in the matched DB question when they appear in the user
+# query. If the best TF-IDF match is missing any of these → force Claude to generate a fresh
+# answer instead of returning a potentially-off-topic DB row.
+_REQUIRED_CONCEPT_WORDS: frozenset[str] = frozenset({
+    "alcohol", "alcoholic", "drinking", "drink", "beer", "wine", "liquor",
+    "pregnant", "pregnancy", "breastfeeding", "nursing", "lactation",
+    "liver", "kidney", "renal", "hepatic",
+    "overdose", "overdosed",
+    "child", "children", "pediatric", "infant", "baby",
+    "elderly",
+})
+
 # Intent classification signals — keyword → intent category
 _INTENT_SIGNALS: dict[str, list[str]] = {
     "interaction": ["interact", "combine", "together", "mix", "take with", "and ", "both"],
@@ -2320,14 +2332,20 @@ def search(req: SearchRequest) -> SearchResponse:
         score_by_id = {m.id: float(m.score) for m in matches}
         answer_by_id = {m.id: m.answer for m in matches}
 
-        # Hard rule: multi-drug interaction query must find a question containing ALL drugs.
-        # If the best match is missing any drug → force Claude (wipe match_ids).
-        if query_intent == "interaction" and len(drug_names) >= 2 and matches:
+        # Relevance guard: the best DB match must contain every drug name from the user query
+        # AND every key concept word (alcohol, pregnant, liver, etc.) present in the query.
+        # Without this, "tylenol and alcohol" returns the cached "Tylenol on an empty stomach"
+        # answer because TF-IDF scores it at 0.46 — above the 0.35 confidence threshold.
+        if matches:
             best_q_lower = (matches[0].question or "").lower()
-            if not all(d in best_q_lower for d in drug_names):
+            user_q_lower = search_query.lower()
+            missing_drugs    = [d for d in drug_names if d not in best_q_lower]
+            query_concepts   = [c for c in _REQUIRED_CONCEPT_WORDS if c in user_q_lower]
+            missing_concepts = [c for c in query_concepts if c not in best_q_lower]
+            if missing_drugs or missing_concepts:
                 logger.info(
-                    "[IntentFilter] Interaction query %s — best match missing drugs, forcing Claude",
-                    drug_names,
+                    "[RelevanceFilter] Best match missing — drugs=%s concepts=%s → forcing Claude",
+                    missing_drugs, missing_concepts,
                 )
                 match_ids = []
                 score_by_id = {}
