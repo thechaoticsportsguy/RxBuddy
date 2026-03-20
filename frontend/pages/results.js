@@ -26,7 +26,7 @@ function DrugImage({ drugName, className = "" }) {
           setImageData(data);
         }
       } catch (e) {
-        console.error("[DrugImage] Error:", e);
+        // image fetch failure is non-fatal
       } finally {
         setLoading(false);
       }
@@ -154,9 +154,6 @@ function filterGenericAdvice(items) {
  * Also supports legacy VERDICT / DIRECT formats as fallback.
  */
 function parseVerdictAnswer(answer, structured = null) {
-  console.log("[parseVerdictAnswer] Raw answer:", answer);
-  console.log("[parseVerdictAnswer] Structured data:", structured);
-
   const text = String(answer || "").replace(/\r\n/g, "\n").trim();
   if (!text) return null;
 
@@ -279,7 +276,6 @@ function parseVerdictAnswer(answer, structured = null) {
     hasContent: Boolean(verdict || why || importantNotes.length || medicalHelp.length),
   };
 
-  console.log("[parseVerdictAnswer] Parsed result:", result);
   return result;
 }
 
@@ -431,7 +427,6 @@ async function fetchPubMedArticles(query) {
   if (!rawQuery) return [];
 
   const { searchTerm, drugNames } = buildPubMedQuery(rawQuery);
-  console.log("[PubMed] Search term:", searchTerm, "| Drug names:", drugNames);
   if (!searchTerm) return [];
 
   try {
@@ -480,7 +475,6 @@ async function fetchPubMedArticles(query) {
 
     // BUG 3 FIX: Filter to only relevant articles (title contains drug name)
     const relevantArticles = allArticles.filter(a => isArticleRelevant(a.title, drugNames));
-    console.log("[PubMed] Found", allArticles.length, "articles,", relevantArticles.length, "relevant");
 
     // BUG 3 FIX: If fewer than 2 relevant articles, add fallback safety articles
     if (relevantArticles.length < 2) {
@@ -489,8 +483,7 @@ async function fetchPubMedArticles(query) {
     }
 
     return relevantArticles.slice(0, 3);
-  } catch (error) {
-    console.error("[PubMed] Error:", error);
+  } catch {
     return FALLBACK_SAFETY_ARTICLES;
   }
 }
@@ -557,7 +550,6 @@ export default function ResultsPage() {
         }
 
         const data = await res.json();
-        console.log("[RxBuddy] API Response:", data);
 
         if (!cancelled) {
           setResults(Array.isArray(data.results) ? data.results : []);
@@ -585,8 +577,8 @@ export default function ResultsPage() {
       try {
         const items = await fetchPubMedArticles(q);
         if (!cancelled) setArticles(items);
-      } catch (e) {
-        console.error("[PubMed] Error:", e);
+      } catch {
+        // PubMed fetch failure is non-fatal
       } finally {
         if (!cancelled) setPubmedLoading(false);
       }
@@ -637,7 +629,6 @@ export default function ResultsPage() {
   const currentVerdictKey = useMemo(() => {
     if (!results?.length) return null;
     const rawBackendVerdict = results[0]?.structured?.verdict;
-    console.log("[Verdict] Raw backend verdict:", rawBackendVerdict);
     if (!rawBackendVerdict || !verdictStyles[rawBackendVerdict]) {
       throw new Error(`Invalid or missing backend verdict: ${rawBackendVerdict ?? "undefined"}`);
     }
@@ -646,10 +637,6 @@ export default function ResultsPage() {
 
   const currentVerdict = currentVerdictKey ? verdictStyles[currentVerdictKey] : null;
 
-  useEffect(() => {
-    if (!currentVerdictKey) return;
-    console.log("[Verdict] Rendered UI verdict:", currentVerdictKey);
-  }, [currentVerdictKey]);
 
   return (
     <>
