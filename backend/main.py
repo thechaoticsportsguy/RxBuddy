@@ -3,6 +3,12 @@ from __future__ import annotations
 import logging
 import os
 import re
+import sys
+
+# Ensure the directory containing this file (backend/) is on sys.path so that
+# sibling modules (answer_engine, label_updater) can be imported regardless of
+# how uvicorn is invoked (Railway, local, Procfile, etc.)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from datetime import datetime, timezone
 from typing import Optional
 
