@@ -2,6 +2,7 @@ import Head from "next/head";
 import { useRouter } from "next/router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BackgroundGradientAnimation } from "../components/ui/background-gradient-animation";
+import Disclaimer from "../components/Disclaimer";
 
 const CATEGORIES = [
   "Drug Interactions",
@@ -16,14 +17,14 @@ const CATEGORIES = [
 
 const STATS = [
   { value: "10,000+", label: "Questions" },
-  { value: "FDA", label: "Verified" },
+  { value: "FDA Label", label: "Data Source" },
   { value: "Free", label: "Forever" },
 ];
 
 const STEPS = [
   { num: "1", title: "Ask a Question", desc: "Type or speak any medication question in plain English." },
-  { num: "2", title: "Get an Answer", desc: "Our AI pharmacist analyzes FDA data and clinical guidelines." },
-  { num: "3", title: "Stay Safe", desc: "See warnings, alternatives, and when to call a doctor." },
+  { num: "2", title: "Get an Answer", desc: "RxBuddy retrieves drug label data from DailyMed and Drugs@FDA to help explain your question." },
+  { num: "3", title: "Review & Verify", desc: "See warnings, alternatives, and when to call a doctor or pharmacist." },
 ];
 
 const EXAMPLE_QUESTIONS = [
@@ -294,8 +295,8 @@ export default function HomePage() {
   return (
     <>
       <Head>
-        <title>RxBuddy — Your pocket pharmacist</title>
-        <meta name="description" content="Ask everyday medication questions and get fast, plain-English help." />
+        <title>RxBuddy — Medication Information Helper</title>
+        <meta name="description" content="RxBuddy helps you understand medication questions using drug label data from DailyMed and Drugs@FDA. Not a substitute for professional medical advice." />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -396,7 +397,7 @@ export default function HomePage() {
               className="mt-2 font-medium uppercase"
               style={{ color: "#B7E4C7", fontSize: 15, letterSpacing: "4px" }}
             >
-              Your Pocket Pharmacist
+              Medication Information Helper
             </p>
           </div>
 
@@ -556,9 +557,7 @@ export default function HomePage() {
 
           {/* ---- Footer Disclaimer ---- */}
           <div className="mt-16 mb-10 anim-fade-up" style={{ animationDelay: "0.75s" }}>
-            <p className="text-center text-xs leading-relaxed max-w-md mx-auto" style={{ color: "rgba(183, 228, 199, 0.6)" }}>
-              RxBuddy provides general information only and is not a substitute for professional medical advice. For emergencies, call your local emergency number.
-            </p>
+            <Disclaimer variant="short" />
           </div>
         </div>
       </BackgroundGradientAnimation>

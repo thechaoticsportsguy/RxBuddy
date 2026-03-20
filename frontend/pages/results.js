@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useRouter } from "next/router";
 import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import Disclaimer from "../components/Disclaimer";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
@@ -653,7 +654,8 @@ export default function ResultsPage() {
   return (
     <>
       <Head>
-        <title>{title}</title>
+        <title>{title} — RxBuddy</title>
+        <meta name="description" content="Medication information from DailyMed and Drugs@FDA. Not medical advice — always consult a licensed healthcare provider." />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -795,9 +797,9 @@ export default function ResultsPage() {
                   <div className="flex items-start gap-3">
                     <span className="text-3xl leading-none">💊</span>
                     <div className="flex-1 min-w-0">
-                      <span className="text-xl font-bold text-blue-800">CONSULT PHARMACIST</span>
+                      <span className="text-xl font-bold text-blue-800">CONSULT A HEALTHCARE PROVIDER</span>
                       <p className="mt-2 text-base text-slate-700 leading-relaxed">
-                        Please consult with a pharmacist or healthcare provider for personalized advice about this medication question.
+                        This question requires personalised guidance. Please consult a licensed pharmacist or healthcare provider before making any medication decision.
                       </p>
                     </div>
                   </div>
@@ -992,10 +994,8 @@ export default function ResultsPage() {
           )}
 
           {/* Footer Disclaimer */}
-          <div className="mt-6 rounded-lg bg-slate-100 p-4 text-center">
-            <p className="text-xs text-slate-500">
-              RxBuddy provides general information only. Always consult a healthcare professional for medical advice.
-            </p>
+          <div className="mt-6 rounded-xl bg-slate-50 border border-slate-200 p-5">
+            <Disclaimer variant="full" />
           </div>
         </div>
       </div>
