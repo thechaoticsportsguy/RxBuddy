@@ -12,8 +12,9 @@ from spellchecker import SpellChecker
 
 logger = logging.getLogger("rxbuddy")
 logging.basicConfig(level=logging.INFO)
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import Boolean, DateTime, Integer, MetaData, Table, Text, create_engine, select
 from sqlalchemy.dialects.postgresql import ARRAY, VARCHAR
@@ -1066,7 +1067,6 @@ If ANY fail → fix before outputting."""
         answer = _truncate_words(text, 400)  # Increased for structured safety format
         answer = _validate_ai_answer(question, answer)
         logger.info("[Claude] SUCCESS! Generated answer (%d words): %.200s", len(answer.split()), answer)
-        print(f"[Claude] ANSWER: {answer}")  # Also print to stdout for Railway logs
         return answer, citations_dicts, intent_str, retrieval_status_str
 
     except anthropic.APIError as e:
@@ -1166,6 +1166,46 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """
+    Catch-all: return structured JSON instead of a 500 HTML page.
+    The frontend can always parse this response.
+    """
+    logger.error("[App] Unhandled exception on %s: %s", request.url.path, exc, exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "query": "",
+            "results": [{
+                "id": 0,
+                "question": "",
+                "category": "General",
+                "tags": [],
+                "score": 0.0,
+                "answer": "An unexpected error occurred. Please try again.",
+                "structured": {
+                    "verdict": "CONSULT_PHARMACIST",
+                    "direct": "We encountered an error processing your request. Please try again or consult a pharmacist.",
+                    "do": [],
+                    "avoid": [],
+                    "doctor": [],
+                    "raw": "",
+                    "confidence": "LOW",
+                    "sources": "",
+                    "interaction_summary": {"avoid_pairs": [], "caution_pairs": []},
+                    "citations": [],
+                    "intent": "general",
+                    "retrieval_status": "LABEL_NOT_FOUND",
+                },
+            }],
+            "did_you_mean": None,
+            "source": "error",
+            "saved_to_db": False,
+        },
+    )
 
 
 @app.on_event("startup")

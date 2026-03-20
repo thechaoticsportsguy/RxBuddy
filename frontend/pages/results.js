@@ -537,19 +537,29 @@ export default function ResultsPage() {
       setSavedToDb(false);
       setShowFullAnswer(false);
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+
       try {
         const res = await fetch(`${API_BASE}/search`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query: q, engine, top_k: 5 }),
+          signal: controller.signal,
         });
+        clearTimeout(timeoutId);
 
         if (!res.ok) {
-          const text = await res.text();
+          const text = await res.text().catch(() => "");
           throw new Error(text || `Request failed (${res.status})`);
         }
 
-        const data = await res.json();
+        let data;
+        try {
+          data = await res.json();
+        } catch {
+          throw new Error("Server returned an unreadable response. Please try again.");
+        }
 
         if (!cancelled) {
           setResults(Array.isArray(data.results) ? data.results : []);
@@ -558,7 +568,12 @@ export default function ResultsPage() {
           setSavedToDb(data.saved_to_db || false);
         }
       } catch (e) {
-        if (!cancelled) setError(e?.message || "Could not load results.");
+        clearTimeout(timeoutId);
+        if (!cancelled) {
+          setError(e?.name === "AbortError"
+            ? "Taking too long — please try again."
+            : (e?.message || "Could not load results."));
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
