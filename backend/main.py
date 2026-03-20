@@ -577,24 +577,23 @@ _INTENT_SIGNALS: dict[str, list[str]] = {
 # Extra keywords appended to search query per intent — improves TF-IDF retrieval accuracy
 _INTENT_QUERY_BOOST: dict[str, str] = {
     "interaction": "interaction drug combination effect",
-    "dosage": "dosage dose mg adults",
+    "dosing": "dosage dose mg adults",
     "side_effects": "side effects adverse reactions symptoms",
-    "pregnancy": "pregnancy safe pregnant breastfeeding",
-    "storage": "storage expiration shelf life",
-    "alcohol": "alcohol drink interaction",
-    "overdose": "overdose maximum dose toxic",
-    "safety": "safety warnings precautions",
+    "contraindications": "contraindications warnings precautions",
+    "pregnancy_lactation": "pregnancy safe pregnant breastfeeding",
+    "food_alcohol": "alcohol food drink interaction",
+    "general": "drug information overview",
 }
 
 # Intent → DB category name (must match PHARMACY_CATEGORIES values exactly)
 _INTENT_TO_CATEGORY: dict[str, str] = {
     "interaction": "Drug Interactions",
-    "dosage": "Dosage",
+    "dosing": "Dosage",
     "side_effects": "Side Effects",
-    "pregnancy": "Pregnancy",
-    "storage": "Storage",
-    "alcohol": "Alcohol",
-    "overdose": "Overdose",
+    "contraindications": "Warnings",
+    "pregnancy_lactation": "Pregnancy",
+    "food_alcohol": "Alcohol",
+    "general": "General",
     "safety": "Warnings",
 }
 
@@ -2056,7 +2055,7 @@ def _extract_verdict(text: str, question: str = "") -> str:
                     return "CONSULT_PHARMACIST"
         return None
 
-    if query_intent == "dosage" or _contains_any(q_lower, DOSAGE_TERMS):
+    if query_intent == "dosing" or _contains_any(q_lower, DOSAGE_TERMS):
         return "CONSULT_PHARMACIST"
     if query_intent == "side_effects" or _contains_any(q_lower, SIDE_EFFECT_TERMS):
         return "CAUTION"
@@ -2143,7 +2142,7 @@ def validate_and_correct_verdict(
     summary = interaction_summary or build_interaction_summary(question)
     query_intent = _classify_query_intent(question)
 
-    if query_intent == "dosage" or _contains_any(combined_text, DOSAGE_TERMS):
+    if query_intent == "dosing" or _contains_any(combined_text, DOSAGE_TERMS):
         return "CONSULT_PHARMACIST"
     if query_intent == "interaction" and summary.get("avoid_pairs"):
         return "AVOID"
