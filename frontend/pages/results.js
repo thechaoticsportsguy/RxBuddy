@@ -716,7 +716,6 @@ export default function ResultsPage() {
                 <AnswerCard
                   result={results?.[0]}
                   query={q}
-                  parsed={parsedAnswer}
                 />
               </div>
 

@@ -798,13 +798,14 @@ _VAGUE_BANNED: frozenset[str] = frozenset({
 
 def _check_vague(answer_text: str) -> bool:
     """
-    Return True if the DIRECT line contains banned vague phrases.
-    Only checks the DIRECT: line — DO/DOCTOR sections may use softer language.
+    Return True if the ANSWER (or legacy DIRECT) line contains banned vague phrases.
+    Only checks the primary answer line — other sections may use softer language.
     """
     for line in answer_text.splitlines():
-        if line.strip().upper().startswith("DIRECT:"):
-            direct_lower = line.lower()
-            return any(phrase in direct_lower for phrase in _VAGUE_BANNED)
+        upper = line.strip().upper()
+        if upper.startswith("ANSWER:") or upper.startswith("DIRECT:"):
+            line_lower = line.lower()
+            return any(phrase in line_lower for phrase in _VAGUE_BANNED)
     return False
 
 
@@ -1148,13 +1149,13 @@ Verify:
 
 If any issue found → rewrite the answer correctly following the same output structure.
 If answer is correct → return it unchanged.
-If any issue is found, use EXACTLY this structure:
+If any issue is found, rewrite using EXACTLY this structure:
 VERDICT: ...
-DIRECT: ...
-WHY: ...
-DO: item 1 | item 2
-AVOID: item 1 | item 2
-DOCTOR: item 1 | item 2
+ANSWER: [one decisive sentence]
+WARNING: [safety warning — omit line if SAFE with no caveats]
+DETAILS: fact 1 | fact 2 | fact 3
+ACTION: action 1 | action 2 | action 3
+ARTICLE: [1-3 sentence mechanism/context explanation]
 CONFIDENCE: ...
 SOURCES: ...
 Return ONLY the final answer, no commentary."""
@@ -1203,9 +1204,11 @@ def _generate_ai_answer(question: str) -> "tuple[str, list[dict], str, str]":
         emergency = build_emergency_answer(fetched_at)
         emergency_text = (
             f"VERDICT: EMERGENCY\n"
-            f"DIRECT: {emergency.short_answer}\n"
-            f"DO: {' | '.join(emergency.emergency_escalation)}\n"
-            f"DOCTOR: Call 911 immediately\n"
+            f"ANSWER: {emergency.short_answer}\n"
+            f"WARNING: This is a medical emergency — do not wait.\n"
+            f"DETAILS: Immediate action is required | Do not induce vomiting unless directed by poison control | Stay on the line with emergency services\n"
+            f"ACTION: {' | '.join(emergency.emergency_escalation)}\n"
+            f"ARTICLE: If you or someone else is experiencing a medical emergency related to medication, call 911 or Poison Control (1-800-222-1222) immediately. Do not wait for symptoms to worsen.\n"
             f"CONFIDENCE: HIGH\n"
             f"SOURCES: Emergency Services"
         )
@@ -1231,9 +1234,11 @@ def _generate_ai_answer(question: str) -> "tuple[str, list[dict], str, str]":
             unknown = build_unknown_drug_answer(drug_name, fetched_at)
             unknown_text = (
                 f"VERDICT: CONSULT_PHARMACIST\n"
-                f"DIRECT: {unknown.short_answer}\n"
-                f"DO: {' | '.join(unknown.what_to_do)}\n"
-                f"DOCTOR: {' | '.join(unknown.emergency_escalation)}\n"
+                f"ANSWER: {unknown.short_answer}\n"
+                f"WARNING: This drug was not found in our database — verify its name and consult a pharmacist.\n"
+                f"DETAILS: Drug name not found in FDA database | Safety information unavailable without verified label | A pharmacist can look up the full drug record\n"
+                f"ACTION: {' | '.join(unknown.what_to_do)}\n"
+                f"ARTICLE: RxBuddy could not find FDA label information for this drug name. This may mean the name is misspelled, it is a very new medication, or it is not available in the US. A licensed pharmacist can provide accurate information.\n"
                 f"CONFIDENCE: LOW\n"
                 f"SOURCES: RxNorm (rxnav.nlm.nih.gov)"
             )
@@ -1273,9 +1278,11 @@ def _generate_ai_answer(question: str) -> "tuple[str, list[dict], str, str]":
         refused = build_refused_answer(intent_enum, fetched_at)
         refused_text = (
             f"VERDICT: INSUFFICIENT_DATA\n"
-            f"DIRECT: {refused.short_answer}\n"
-            f"DO: {' | '.join(refused.what_to_do)}\n"
-            f"DOCTOR: {' | '.join(refused.emergency_escalation)}\n"
+            f"ANSWER: {refused.short_answer}\n"
+            f"WARNING: This type of question requires an official FDA drug label — which was not available.\n"
+            f"DETAILS: Dosing, contraindication, and pregnancy questions require verified label data | RxBuddy does not answer these from general knowledge | Your pharmacist or prescriber has access to complete label information\n"
+            f"ACTION: {' | '.join(refused.what_to_do)}\n"
+            f"ARTICLE: For questions about dosing, contraindications, and pregnancy safety, RxBuddy requires the official FDA-approved drug label as its source. Without that label, any answer would be a guess — which is unacceptable for these high-stakes topics.\n"
             f"CONFIDENCE: LOW\n"
             f"SOURCES: DailyMed (dailymed.nlm.nih.gov)"
         )
@@ -1288,11 +1295,11 @@ def _generate_ai_answer(question: str) -> "tuple[str, list[dict], str, str]":
         logger.info("[Deterministic] Pre-resolved answer for %s: %s", drug_names, det_verdict)
         det_text = (
             f"VERDICT: {det_verdict}\n"
-            f"DIRECT: {det_direct}\n"
-            f"WHY: This combination is pre-classified based on FDA label data and established clinical pharmacology.\n"
-            f"DO: Follow your prescriber's instructions | Read the official drug label\n"
-            f"AVOID: Combining these without medical supervision\n"
-            f"DOCTOR: Any new or unusual bleeding | Signs of adverse reaction\n"
+            f"ANSWER: {det_direct}\n"
+            f"WARNING: This combination is pre-classified as {det_verdict} based on FDA label data.\n"
+            f"DETAILS: This drug pair is identified in established clinical pharmacology references | FDA label data confirms the interaction risk | Individual risk may vary based on doses and patient factors\n"
+            f"ACTION: Follow your prescriber's instructions | Do not change doses without consulting your provider | Read the official drug label\n"
+            f"ARTICLE: This combination has been pre-classified based on FDA-approved drug label data and established clinical pharmacology. The classification reflects known interaction mechanisms and reported adverse effects in the literature.\n"
             f"CONFIDENCE: HIGH\n"
             f"SOURCES: FDA label (DailyMed) | Clinical pharmacology guidelines"
         )
@@ -1357,26 +1364,37 @@ CORRECT DIRECT examples:
 
 ━━━ REQUIRED OUTPUT FORMAT ━━━
 VERDICT: [AVOID / CAUTION / CONSULT_PHARMACIST / SAFE]
-DIRECT: [one decisive sentence]
-WHY: [1-2 sentences: mechanism, clinical risk, or reason for consult]
-DO: [specific action 1] | [specific action 2]
-AVOID: [specific thing to avoid 1] | [specific thing to avoid 2]
-DOCTOR: [specific red flag symptom 1] | [specific red flag symptom 2]
+ANSWER: [one decisive sentence — the primary answer]
+WARNING: [one sentence safety warning — omit this line entirely if SAFE with no caveats]
+DETAILS: [clinical fact 1] | [clinical fact 2] | [clinical fact 3]
+ACTION: [specific action 1] | [specific action 2] | [specific action 3]
+ARTICLE: [1–3 sentence explanation of mechanism, clinical risk, and context]
 CONFIDENCE: [HIGH / MEDIUM / LOW]
 SOURCES: [FDA label | MedlinePlus | DailyMed | clinical guideline]
 
 FORMAT RULES:
 - All labels UPPERCASE exactly as shown
-- No markdown, no bullet prefixes outside DO/AVOID/DOCTOR
-- 2–4 items per DO/AVOID/DOCTOR, pipe-separated
-- If truly no avoidance needed, omit AVOID line rather than stating generic advice
+- No markdown, no bullet prefixes
+- 2–4 items per DETAILS and ACTION, pipe-separated
+- WARNING omitted (not left blank) when verdict is SAFE
+- ARTICLE must explain the "why" — mechanism, drug interaction pathway, or clinical context
 - CONFIDENCE = HIGH when FDA label explicitly addresses this; MEDIUM when inferred; LOW when extrapolated
 
+EXAMPLE (interaction query):
+VERDICT: CAUTION
+ANSWER: Use caution when combining Tylenol and alcohol — regular drinking raises liver damage risk.
+WARNING: Alcohol increases acetaminophen toxicity and may cause serious liver injury.
+DETAILS: Acetaminophen is metabolized in the liver | Alcohol depletes the enzyme that safely processes it | Risk increases with regular or heavy drinking
+ACTION: Limit alcohol to 1–2 drinks or less | Do not exceed 2g acetaminophen/day if drinking | Ask your pharmacist about safe dosing for your drinking pattern
+ARTICLE: Both acetaminophen and alcohol are processed by the liver's cytochrome P450 enzymes. When alcohol is consumed regularly, these enzymes are induced and produce more of a toxic acetaminophen metabolite (NAPQI), which can overwhelm the liver's glutathione stores and cause hepatotoxicity.
+CONFIDENCE: HIGH
+SOURCES: FDA label | DailyMed
+
 ━━━ SELF-CHECK BEFORE OUTPUT ━━━
-1. Is DIRECT a single decisive sentence with no banned phrases?
-2. Does VERDICT match what DIRECT and WHY say? (CAUTION explanations cannot have SAFE verdict)
-3. Are all drug names from the question and only those drugs in the answer?
-4. Is WHY grounded in a specific mechanism or FDA finding, not a vague statement?
+1. Is ANSWER a single decisive sentence with no banned phrases?
+2. Does VERDICT match ANSWER and ARTICLE? (CAUTION explanations cannot have SAFE verdict)
+3. Are all drug names from the question present in the answer?
+4. Is ARTICLE grounded in a specific mechanism or FDA finding?
 If any check fails → rewrite that section before outputting."""
 
         if fda_context:
@@ -1577,20 +1595,27 @@ class SearchRequest(BaseModel):
 class StructuredAnswer(BaseModel):
     """Parsed structured answer with specific bullets for each section."""
     verdict: str = "CONSULT_PHARMACIST"  # SAFE, AVOID, CAUTION, CONSULT_PHARMACIST, INSUFFICIENT_DATA
-    direct: str = ""  # Direct YES/NO answer
-    do: list[str] = []  # What to do bullets
-    avoid: list[str] = []  # What to avoid bullets
-    doctor: list[str] = []  # See a doctor if bullets
-    raw: str = ""  # Original raw answer text
-    confidence: str = "MEDIUM"  # HIGH, MEDIUM, or LOW
-    sources: str = ""  # FDA label, DailyMed, etc.
+    # ── 5-section response schema ──────────────────────────────────────────────
+    answer: str = ""    # 1. Primary answer — one decisive sentence
+    warning: str = ""   # 2. Safety warning (empty when SAFE)
+    details: list[str] = []  # 3. Clinical fact bullets
+    action: list[str] = []   # 4. What to do bullets
+    article: str = ""   # 5. Mini article — mechanism / context paragraph
+    # ── Legacy fields (kept for backward compat with old DB rows) ───────────
+    direct: str = ""    # alias for answer (populated from DIRECT: or ANSWER:)
+    do: list[str] = []
+    avoid: list[str] = []
+    doctor: list[str] = []
+    raw: str = ""
+    confidence: str = "MEDIUM"
+    sources: str = ""
     interaction_summary: dict[str, list[str]] = Field(
         default_factory=lambda: {"avoid_pairs": [], "caution_pairs": []}
     )
     # Answer Engine v2 fields — populated when FDA label data is retrieved
-    citations: list[dict] = Field(default_factory=list)   # Citation objects (see answer_engine.Citation)
-    intent: str = "general"                                # QuestionIntent value
-    retrieval_status: str = "LABEL_NOT_FOUND"              # RetrievalStatus value
+    citations: list[dict] = Field(default_factory=list)
+    intent: str = "general"
+    retrieval_status: str = "LABEL_NOT_FOUND"
 
 
 DOSAGE_TERMS = (
@@ -2157,31 +2182,43 @@ def _parse_structured_answer(answer_text: str, question: str = "") -> Structured
                     deduped.append(item)
             return deduped
 
-        label_boundary = r"(?=^\s*(?:VERDICT|ANSWER|DIRECT|WHY|DO|AVOID|DOCTOR|WARNING|GET\s+MEDICAL\s+HELP(?:\s+NOW)?\s+IF|SEEK\s+MEDICAL\s+HELP(?:\s+NOW)?(?:\s+IF)?|CONFIDENCE|SOURCES)\s*[:\-]|\Z)"
+        label_boundary = r"(?=^\s*(?:VERDICT|ANSWER|DIRECT|WHY|DO|AVOID|DOCTOR|WARNING|DETAILS|ACTION|ARTICLE|GET\s+MEDICAL\s+HELP(?:\s+NOW)?\s+IF|SEEK\s+MEDICAL\s+HELP(?:\s+NOW)?(?:\s+IF)?|CONFIDENCE|SOURCES)\s*[:\-]|\Z)"
 
         verdict_raw = _extract_field([
-            rf"^\s*(?:VERDICT|ANSWER)\s*[:\-]\s*(.+?)\s*{label_boundary}",
+            rf"^\s*VERDICT\s*[:\-]\s*(.+?)\s*{label_boundary}",
         ])
         result.verdict = _normalize_verdict(verdict_raw) or _extract_verdict(text, question)
 
-        direct_raw = _extract_field([
-            rf"^\s*DIRECT\s*[:\-]\s*(.+?)\s*{label_boundary}",
+        # New 5-section fields (preferred)
+        answer_raw = _extract_field([
+            rf"^\s*ANSWER\s*[:\-]\s*(.+?)\s*{label_boundary}",
+            rf"^\s*DIRECT\s*[:\-]\s*(.+?)\s*{label_boundary}",  # legacy fallback
         ])
-        why_raw = _extract_field([
-            rf"^\s*WHY\s*[:\-]\s*(.+?)\s*{label_boundary}",
+        warning_raw = _extract_field([
+            rf"^\s*WARNING\s*[:\-]\s*(.+?)\s*{label_boundary}",
+            rf"^\s*DOCTOR\s*[:\-]\s*(.+?)\s*{label_boundary}",  # legacy fallback
+        ])
+        details_raw = _extract_field([
+            rf"^\s*DETAILS\s*[:\-]\s*(.+?)\s*{label_boundary}",
+        ])
+        action_raw = _extract_field([
+            rf"^\s*ACTION\s*[:\-]\s*(.+?)\s*{label_boundary}",
+            rf"^\s*DO\s*[:\-]\s*(.+?)\s*{label_boundary}",  # legacy fallback
+        ])
+        article_raw = _extract_field([
+            rf"^\s*ARTICLE\s*[:\-]\s*(.+?)\s*{label_boundary}",
+            rf"^\s*WHY\s*[:\-]\s*(.+?)\s*{label_boundary}",  # legacy fallback
             rf"^\s*REASON\s*[:\-]\s*(.+?)\s*{label_boundary}",
         ])
+        # Legacy fields (for old DB rows still using old format)
         do_raw = _extract_field([
             rf"^\s*DO\s*[:\-]\s*(.+?)\s*{label_boundary}",
-            rf"^\s*WHAT\s+YOU\s+SHOULD\s+DO\s*[:\-]\s*(.+?)\s*{label_boundary}",
         ])
         avoid_raw = _extract_field([
             rf"^\s*AVOID\s*[:\-]\s*(.+?)\s*{label_boundary}",
-            rf"^\s*WHAT\s+TO\s+AVOID\s*[:\-]\s*(.+?)\s*{label_boundary}",
         ])
         doctor_raw = _extract_field([
             rf"^\s*DOCTOR\s*[:\-]\s*(.+?)\s*{label_boundary}",
-            rf"^\s*WARNING\s*[:\-]\s*(.+?)\s*{label_boundary}",
             rf"^\s*GET\s+MEDICAL\s+HELP(?:\s+NOW)?\s+IF\s*[:\-]\s*(.+?)\s*{label_boundary}",
             rf"^\s*SEEK\s+MEDICAL\s+HELP(?:\s+NOW)?(?:\s+IF)?\s*[:\-]\s*(.+?)\s*{label_boundary}",
         ])
@@ -2192,8 +2229,15 @@ def _parse_structured_answer(answer_text: str, question: str = "") -> Structured
             rf"^\s*SOURCES?\s*[:\-]\s*(.+?)\s*{label_boundary}",
         ])
 
-        result.direct = direct_raw or why_raw or ""
-        result.do = _split_items(do_raw)
+        # Populate new fields
+        result.answer = answer_raw or ""
+        result.direct = answer_raw or ""  # keep in sync for legacy consumers
+        result.warning = warning_raw or ""
+        result.details = _split_items(details_raw)
+        result.action = _split_items(action_raw)
+        result.article = article_raw or ""
+        # Legacy fields
+        result.do = _split_items(do_raw or action_raw)
         result.avoid = _split_items(avoid_raw)
         result.doctor = _split_items(doctor_raw)
         result.sources = sources_raw or ""
@@ -2208,13 +2252,15 @@ def _parse_structured_answer(answer_text: str, question: str = "") -> Structured
         else:
             result.confidence = "MEDIUM"
 
-        if not result.direct:
+        if not result.answer:
             sentences = re.split(r"(?<=[.!?])\s+", text.replace("\n", " ").strip())
             if sentences and sentences[0]:
-                result.direct = sentences[0].strip()
+                result.answer = sentences[0].strip()
+                result.direct = result.answer
 
-        if result.direct and not re.search(r"[.!?]$", result.direct):
-            result.direct += "."
+        if result.answer and not re.search(r"[.!?]$", result.answer):
+            result.answer += "."
+            result.direct = result.answer
 
         result.interaction_summary = build_interaction_summary(question)
         result.verdict = validate_and_correct_verdict(
