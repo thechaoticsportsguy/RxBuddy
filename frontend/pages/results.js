@@ -259,14 +259,7 @@ function parseVerdictAnswer(answer, structured = null) {
   importantNotes = filterGenericAdvice(importantNotes);
   medicalHelp = filterGenericAdvice(medicalHelp);
 
-  // Fallback verdict detection from body text
-  if (!verdict && text) {
-    const lower = text.toLowerCase();
-    if (lower.includes("yes,") || lower.includes("yes you can") || lower.includes("it is safe")) verdict = "YES";
-    else if (lower.includes("usually yes")) verdict = "USUALLY_YES";
-    else if (lower.includes("no,") || lower.includes("do not") || lower.includes("not recommended")) verdict = "NO";
-    else if (lower.includes("needs review") || lower.includes("depends") || lower.includes("conditional")) verdict = "NEEDS_REVIEW";
-  }
+  // No body-text verdict guessing — the backend structured.verdict is the authority
 
   const result = {
     verdict,

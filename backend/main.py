@@ -881,8 +881,10 @@ _INTENT_SIGNALS: dict[str, list[str]] = {
 # Extra keywords appended to search query per intent — improves TF-IDF retrieval accuracy
 _INTENT_QUERY_BOOST: dict[str, str] = {
     "interaction": "interaction drug combination effect",
-    "dosing": "dosage dose mg adults",
+    "what_is": "what is drug used for treats indication mechanism",
     "side_effects": "side effects adverse reactions symptoms",
+    "dosing": "dosage dose mg adults",
+    "safety": "safe safety risk warning precaution",
     "contraindications": "contraindications warnings precautions",
     "pregnancy_lactation": "pregnancy safe pregnant breastfeeding",
     "food_alcohol": "alcohol food drink interaction",
@@ -892,13 +894,14 @@ _INTENT_QUERY_BOOST: dict[str, str] = {
 # Intent → DB category name (must match PHARMACY_CATEGORIES values exactly)
 _INTENT_TO_CATEGORY: dict[str, str] = {
     "interaction": "Drug Interactions",
-    "dosing": "Dosage",
+    "what_is": "General",
     "side_effects": "Side Effects",
+    "dosing": "Dosage",
+    "safety": "Warnings",
     "contraindications": "Warnings",
     "pregnancy_lactation": "Pregnancy",
     "food_alcohol": "Alcohol",
     "general": "General",
-    "safety": "Warnings",
 }
 
 # 16 pharmacy categories for self-learning classification
@@ -1421,14 +1424,68 @@ SOURCES: FDA label | DailyMed
 4. Is ARTICLE grounded in a specific mechanism or FDA finding?
 If any check fails → rewrite that section before outputting."""
 
+        # ── Intent-specific grounding sentence injected into the user message ─────
+        drug_list_str = ", ".join(drug_names) if drug_names else (drug_name or "the medication")
+        _INTENT_TASK: dict[str, str] = {
+            "what_is": (
+                f"The patient asked: '{question}'\n"
+                f"The drug involved is: {drug_list_str}\n"
+                f"Explain WHAT {drug_list_str} IS: what medical condition(s) it treats, "
+                f"how it works (mechanism), and its drug class. "
+                f"Do NOT discuss side effects unless specifically asked. "
+                f"Answer ONLY about {drug_list_str}. Do not answer about a different drug."
+            ),
+            "side_effects": (
+                f"The patient asked: '{question}'\n"
+                f"The drug involved is: {drug_list_str}\n"
+                f"List the most important side effects of {drug_list_str}: most common first, "
+                f"then most serious. Include any black box warnings. "
+                f"Answer ONLY about {drug_list_str}. Do not answer about a different drug."
+            ),
+            "interaction": (
+                f"The patient asked: '{question}'\n"
+                f"The drugs involved are: {drug_list_str}\n"
+                f"Explain specifically whether {drug_list_str} interact. "
+                f"State: the interaction mechanism, severity, clinical significance, and what to do. "
+                f"Answer ONLY about these specific drugs. Do not answer about different drugs."
+            ),
+            "dosing": (
+                f"The patient asked: '{question}'\n"
+                f"The drug involved is: {drug_list_str}\n"
+                f"Provide standard dosing for {drug_list_str}: typical adult dose, frequency, "
+                f"max daily dose, and any renal/hepatic adjustments from the label. "
+                f"Answer ONLY about {drug_list_str}. Do not answer about a different drug."
+            ),
+            "safety": (
+                f"The patient asked: '{question}'\n"
+                f"The drug involved is: {drug_list_str}\n"
+                f"Answer directly whether {drug_list_str} is safe given the specific context "
+                f"in the question. State the risk level clearly — do not be vague. "
+                f"Answer ONLY about {drug_list_str}. Do not answer about a different drug."
+            ),
+            "contraindications": (
+                f"The patient asked: '{question}'\n"
+                f"The drug involved is: {drug_list_str}\n"
+                f"Explain the contraindications for {drug_list_str}: who should not take it and why. "
+                f"Answer ONLY about {drug_list_str}. Do not answer about a different drug."
+            ),
+        }
+        intent_task = _INTENT_TASK.get(intent_str, "")
+        grounding_prefix = (
+            f"{intent_task}\n\n" if intent_task else
+            f"The patient asked: '{question}'\nThe drug(s) involved: {drug_list_str}\n"
+            f"Answer ONLY about {drug_list_str}. Do not answer about a different drug.\n\n"
+        )
+
         if fda_context:
             user_content = (
+                f"{grounding_prefix}"
                 f"FDA LABEL DATA (authoritative — use as primary source):\n"
                 f"{fda_context}\n\n"
                 f"QUESTION: {question}"
             )
         else:
-            user_content = f"QUESTION: {question}"
+            user_content = f"{grounding_prefix}QUESTION: {question}"
 
         logger.info("[Claude] Generating answer for: %.80s...", question)
 
@@ -1452,6 +1509,20 @@ If any check fails → rewrite that section before outputting."""
         if _check_vague(answer):
             logger.warning("[QualityCheck] Vague DIRECT detected — sending to validator: %.80s", question)
         answer = _validate_ai_answer(question, answer)
+
+        # ── Wrong-drug check on Claude's own output ──────────────────────────
+        if drug_names and _is_wrong_drug_answer(question, answer):
+            logger.warning("[QualityCheck] Claude returned wrong-drug answer for '%s' — using CONSULT fallback", question)
+            answer = (
+                f"VERDICT: CONSULT_PHARMACIST\n"
+                f"ANSWER: We could not generate a reliable answer for this medication. Please consult a pharmacist.\n"
+                f"WARNING: Our system could not verify the drug information matched your query.\n"
+                f"DETAILS: Drug name could not be confirmed in the response | A pharmacist can provide accurate information\n"
+                f"ACTION: Consult a licensed pharmacist | Check DailyMed at dailymed.nlm.nih.gov\n"
+                f"ARTICLE: For accurate medication information, a licensed pharmacist is the best resource.\n"
+                f"CONFIDENCE: LOW\n"
+                f"SOURCES: Pharmacist consultation recommended"
+            )
 
         logger.info("[Claude] Answer ready (%d words): %.200s", len(answer.split()), answer)
         return answer, citations_dicts, intent_str, retrieval_status_str
@@ -1869,33 +1940,100 @@ def _legacy_extract_verdict_pre_regex(text: str, question: str = "") -> str:
 
 
 _CORRUPTED_PREFIXES = (
-    "** classification**",
+    "** classification",
     "** answer**",
     "**:**",
     "**primary intent",
     "** ** **",
+    "---",
 )
-_CORRUPTED_EXACT = {"needs review.", "**.", "** **", "n/a", "none"}
+_CORRUPTED_EXACT: frozenset[str] = frozenset({
+    "needs review.", "**.", "** **", "n/a", "none",
+    "needs review", "n/a.", "none.", "undefined", "null", ".",
+})
+_CORRUPTED_SUBSTRINGS = (
+    "category 6", "category 5", "category 4", "category 3",
+    "primary intent category",
+    "needs review",
+    "answer: why:",
+    "intent classification",
+    " --- ",
+    "\n---",
+    "---\n",
+    "undefined",
+)
 
 
 def _is_corrupted_db_answer(text: str) -> bool:
     """
-    Return True when a stored DB answer contains leaked internal prompt text
-    or is too short/malformed to be useful.  These rows are skipped and
-    Claude regenerates a fresh answer in their place.
+    Return True when a stored DB answer contains leaked internal prompt text,
+    raw category labels, or is too short/malformed to be useful.
+    These rows are skipped and Claude regenerates a fresh answer in their place.
     """
-    t = text.strip().lower()
-    if not t or len(t) < 15:
+    if text is None:
         return True
-    if t in _CORRUPTED_EXACT:
+    t = text.strip()
+    if not t:
+        return True
+    t_lower = t.lower()
+    # Minimum viable answer length
+    if len(t) < 40:
+        return True
+    if t_lower in _CORRUPTED_EXACT:
+        return True
+    # Starts with a character that indicates a fragment/label leak
+    if t[0] in (":", ".") or t.startswith("- ") or t.startswith("---"):
         return True
     for prefix in _CORRUPTED_PREFIXES:
-        if t.startswith(prefix):
+        if t_lower.startswith(prefix):
             return True
-    # Leaked classification header anywhere near the start
-    if "primary intent category:" in t[:120] or "intent classification" in t[:120]:
-        return True
+    # Leaked internal content anywhere in the answer
+    for sub in _CORRUPTED_SUBSTRINGS:
+        if sub in t_lower:
+            return True
     return False
+
+
+def _is_wrong_drug_answer(query: str, answer_text: str) -> bool:
+    """
+    Return True when the answer text contains none of the drug names from the query.
+
+    This catches the bug where TF-IDF retrieves an answer about a completely
+    different drug (e.g. rosuvastatin answer for a risperidone query).
+
+    Returns False (allow through) when:
+    - The query contains no recognisable drug names (can't judge relevance).
+    - At least one drug name or synonym from the query appears in the answer.
+    """
+    if not answer_text or not query:
+        return False
+
+    drug_names = _extract_drug_names(query)
+    if not drug_names:
+        return False  # No drugs in query — cannot judge drug relevance
+
+    answer_lower = answer_text.lower()
+
+    # Build the full name set: generic + brand names / synonyms from catalog
+    all_names: set[str] = set()
+    for drug in drug_names:
+        all_names.add(drug.lower())
+        try:
+            rec = find_drug(drug)
+            if rec:
+                for bn in rec.brand_names:
+                    all_names.add(bn.lower())
+                for gn in rec.generic_names:
+                    all_names.add(gn.lower())
+        except Exception:
+            pass
+
+    # Allow through if ANY drug name (≥4 chars) appears in the answer
+    for name in all_names:
+        if len(name) >= 4 and name in answer_lower:
+            return False
+
+    return True  # No query drug found in answer → wrong drug, reject
 
 
 def _post_process_cached_answer(answer_text: str) -> str:
@@ -2737,6 +2875,8 @@ def search(req: SearchRequest) -> SearchResponse:
     if exact_match and exact_match.answer:
         if _is_corrupted_db_answer(exact_match.answer):
             logger.warning("[DB] Corrupted answer in exact match Q#%d — bypassing to Claude", exact_match.id)
+        elif _is_wrong_drug_answer(user_query, exact_match.answer):
+            logger.warning("[DB] Wrong-drug answer in exact match Q#%d — bypassing to Claude", exact_match.id)
         else:
             logger.info("[Search] Exact match found: Q#%d — returning from database", exact_match.id)
             _log_search(user_query, exact_match.id)
@@ -2855,6 +2995,8 @@ def search(req: SearchRequest) -> SearchResponse:
                     answer_text = str(row["answer"])
                     if _is_corrupted_db_answer(answer_text):
                         logger.warning("[DB] Corrupted answer in near-exact match Q#%s — bypassing to Claude", row["id"])
+                    elif _is_wrong_drug_answer(user_query, answer_text):
+                        logger.warning("[DB] Wrong-drug answer in near-exact match Q#%s — bypassing to Claude", row["id"])
                     else:
                         _log_search(user_query, best_id)
                         return SearchResponse(
@@ -2995,6 +3137,9 @@ def search(req: SearchRequest) -> SearchResponse:
         # stabilised. Treat them as missing so Claude regenerates a clean answer.
         if answer_text and _is_corrupted_db_answer(answer_text):
             logger.warning("[DB] Corrupted answer detected for Q#%s — forcing regeneration", r["id"])
+            answer_text = None
+        elif answer_text and _is_wrong_drug_answer(user_query, answer_text):
+            logger.warning("[DB] Wrong-drug answer detected for Q#%s — forcing regeneration", r["id"])
             answer_text = None
 
         # Generate answer for database questions that don't have one yet

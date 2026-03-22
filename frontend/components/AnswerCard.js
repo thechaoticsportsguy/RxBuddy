@@ -72,6 +72,12 @@ const VERDICT_CONFIG = {
   },
 };
 
+// Aliases — backend may return these; map them to a known config key
+VERDICT_CONFIG.CONSULT          = VERDICT_CONFIG.CONSULT_PHARMACIST;
+VERDICT_CONFIG.CONSULT_CLINICIAN = VERDICT_CONFIG.CONSULT_PHARMACIST;
+VERDICT_CONFIG.INSUFFICIENT_DATA_REFUSED = VERDICT_CONFIG.INSUFFICIENT_DATA;
+VERDICT_CONFIG.UNKNOWN          = VERDICT_CONFIG.INSUFFICIENT_DATA;
+
 const DEFAULT_VERDICT = VERDICT_CONFIG.CONSULT_PHARMACIST;
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -81,28 +87,47 @@ function splitPipe(str) {
   return str.split("|").map((s) => s.trim()).filter(Boolean);
 }
 
+// Patterns that indicate a corrupted / raw-internal DB answer — never render these
+const _CORRUPTED_PATTERNS = [
+  /category\s+[3-6]/i,
+  /primary intent category/i,
+  /needs review\./i,
+  /intent classification/i,
+  /answer:\s*why:/i,
+];
+
+function _isCorrupted(text) {
+  if (!text || typeof text !== "string") return true;
+  const t = text.trim();
+  if (!t || t.length < 40) return true;
+  if (t[0] === ":" || t[0] === "." || t.startsWith("- ") || t.startsWith("---")) return true;
+  return _CORRUPTED_PATTERNS.some((re) => re.test(t));
+}
+
 /**
  * Pull the 5 sections from structured fields, falling back to legacy fields,
  * then to raw-text parsing for old DB rows.
  */
 function parseSections(result) {
   const s = result.structured || {};
-  const raw = result.answer || "";
+  const raw = _isCorrupted(result.answer) ? "" : (result.answer || "");
 
   // ── New-format fields ────────────────────────────────────────────────────────
-  if (s.answer || s.details?.length || s.action?.length || s.article) {
+  // Also accept short_answer (RxBuddyAnswer v2 field name)
+  const primaryAnswer = s.answer || s.short_answer || s.direct || "";
+  if (primaryAnswer || s.details?.length || s.action?.length || s.article) {
     return {
-      answer:  s.answer  || s.direct || "",
+      answer:  primaryAnswer,
       warning: s.warning || "",
-      details: s.details?.length ? s.details : [],
-      action:  s.action?.length  ? s.action  : (s.do?.length ? s.do : []),
+      details: Array.isArray(s.details) && s.details.length ? s.details : [],
+      action:  Array.isArray(s.action)  && s.action.length  ? s.action  :
+               (Array.isArray(s.do)     && s.do.length      ? s.do      : []),
       article: s.article || s.why || "",
     };
   }
 
   // ── Legacy structured fields (old DB rows) ───────────────────────────────────
   if (s.direct || s.do?.length) {
-    // Build details from avoid + doctor bullets (closest match to "clinical facts")
     const details = [...(s.avoid || []), ...(s.doctor || [])];
     return {
       answer:  s.direct || "",
@@ -114,6 +139,12 @@ function parseSections(result) {
   }
 
   // ── Raw text fallback for plain-text DB answers ──────────────────────────────
+  if (!raw) {
+    return {
+      answer: "Answer unavailable. Please consult a pharmacist.",
+      warning: "", details: [], action: [], article: "",
+    };
+  }
   const lines = raw.split("\n");
   const out = { answer: "", warning: "", details: [], action: [], article: "" };
   for (const line of lines) {
@@ -133,6 +164,9 @@ function parseSections(result) {
   if (!out.answer && raw) {
     const first = raw.split(/[.!?]/)[0];
     out.answer = first ? first.trim() + "." : raw.slice(0, 200);
+  }
+  if (!out.answer) {
+    out.answer = "Answer unavailable. Please consult a pharmacist.";
   }
   return out;
 }

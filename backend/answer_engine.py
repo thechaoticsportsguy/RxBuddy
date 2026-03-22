@@ -133,32 +133,53 @@ from pydantic import BaseModel, Field
 
 class QuestionIntent(str, Enum):
     """
-    7-type question intent taxonomy.
+    9-type question intent taxonomy.
     Used for retrieval routing, citation section selection, and guard logic.
     """
     INTERACTION         = "interaction"
-    DOSING              = "dosing"
+    WHAT_IS             = "what_is"
     SIDE_EFFECTS        = "side_effects"
+    DOSING              = "dosing"
+    SAFETY              = "safety"
     CONTRAINDICATIONS   = "contraindications"
     PREGNANCY_LACTATION = "pregnancy_lactation"
     FOOD_ALCOHOL        = "food_alcohol"
     GENERAL             = "general"
 
 
-# Keyword fingerprints per intent (evaluated in priority order)
-# Priority: DOSING > SIDE_EFFECTS > CONTRAINDICATIONS > PREGNANCY_LACTATION >
-#           FOOD_ALCOHOL > INTERACTION (needs 2+ drugs) > GENERAL
+# Strong interaction keywords — trigger INTERACTION even with a single drug
+_INTERACTION_STRONG_KW: frozenset[str] = frozenset({
+    "interact", "interaction", "combine", "mix", "together",
+})
+
+# Weak interaction keywords — only trigger INTERACTION when 2+ drugs are present
+_INTERACTION_WEAK_KW: tuple[str, ...] = (
+    "take with", "along with", "at the same time", "both", " and ", " with ",
+)
+
+# Priority-ordered keyword fingerprints for all NON-INTERACTION intents
 _INTENT_KEYWORDS: list[tuple[QuestionIntent, tuple[str, ...]]] = [
+    (QuestionIntent.WHAT_IS, (
+        "what is", "what does", "is for what", "used for", "treat ",
+        "prescribed for", "what condition", "tell me about",
+        "what drug", "what medication", "what type of", "what kind of",
+        "how does it work", "mechanism",
+    )),
+    (QuestionIntent.SIDE_EFFECTS, (
+        "side effect", "side effects", "adverse effect", "adverse effects",
+        "adverse reaction", "adverse reactions", "what does it cause",
+        "what can it cause", "reaction to", "symptoms from",
+    )),
     (QuestionIntent.DOSING, (
         "how much", "how many", "what dose", "dosage", "dosing", "dose",
         "how often", "how to take", "when to take", "mg ", "milligram",
         "maximum dose", "max dose", "daily dose", "strength", "twice a day",
         "once daily", "tablet", "capsule", "how long to take",
     )),
-    (QuestionIntent.SIDE_EFFECTS, (
-        "side effect", "side effects", "adverse effect", "adverse effects",
-        "adverse reaction", "adverse reactions", "what does it cause",
-        "what can it cause", "reaction to", "symptoms from",
+    (QuestionIntent.SAFETY, (
+        "safe", "okay to", "can i take", "is it safe", "safely",
+        "while pregnant", "breastfeeding", "nursing", "during pregnancy",
+        "dangerous", "okay if", "alright to", "risk of taking",
     )),
     (QuestionIntent.CONTRAINDICATIONS, (
         "contraindication", "can't take", "cannot take", "should not take",
@@ -167,52 +188,48 @@ _INTENT_KEYWORDS: list[tuple[QuestionIntent, tuple[str, ...]]] = [
         "do i have to stop", "need to stop",
     )),
     (QuestionIntent.PREGNANCY_LACTATION, (
-        "pregnant", "pregnancy", "breastfeed", "breastfeeding", "nursing",
-        "trimester", "lactation", "during pregnancy", "while pregnant",
-        "while nursing", "fetus", "newborn", "expecting",
+        "pregnant", "pregnancy", "breastfeed", "trimester",
+        "lactation", "while nursing", "fetus", "newborn", "expecting",
     )),
     (QuestionIntent.FOOD_ALCOHOL, (
         "alcohol", " drink ", "beer", "wine", "liquor", "grapefruit",
         "dairy", "with food", "empty stomach", "with meal", "without food",
         "with milk", "with water", "after eating", "before eating",
     )),
-    (QuestionIntent.INTERACTION, (
-        "interact", "interaction", "combine", "mix", "together",
-        "can i take", "take with", "along with", "at the same time",
-        "both", "and ", " with ",
-    )),
 ]
-
-# Minimum drug count required for intent to match
-_INTENT_MIN_DRUGS: dict[QuestionIntent, int] = {
-    QuestionIntent.INTERACTION: 2,
-}
 
 
 def classify_intent(question: str, drug_count: int = 0) -> QuestionIntent:
     """
-    Classify a user question into one of 7 intents.
+    Classify a user question into one of 9 intents.
 
     Priority order (first match wins):
-      DOSING > SIDE_EFFECTS > CONTRAINDICATIONS > PREGNANCY_LACTATION >
-      FOOD_ALCOHOL > INTERACTION (requires ≥2 drugs) > GENERAL
+      INTERACTION (2+ drugs OR strong kw) > WHAT_IS > SIDE_EFFECTS > DOSING >
+      SAFETY > CONTRAINDICATIONS > PREGNANCY_LACTATION > FOOD_ALCOHOL > GENERAL
 
     Examples
     --------
-    "how much ibuprofen can I take?"              → DOSING
-    "what are the side effects of metformin?"     → SIDE_EFFECTS
-    "can I take ibuprofen if I'm allergic?"       → CONTRAINDICATIONS
-    "is sertraline safe during pregnancy?"        → PREGNANCY_LACTATION
-    "can I drink alcohol with amoxicillin?"       → FOOD_ALCOHOL
     "can I take ibuprofen with warfarin?"         → INTERACTION
-    "what is metformin used for?"                 → GENERAL
+    "what is metformin used for?"                 → WHAT_IS
+    "lisinopril is for what"                      → WHAT_IS
+    "what are the side effects of metformin?"     → SIDE_EFFECTS
+    "how much ibuprofen can I take?"              → DOSING
+    "is sertraline safe during pregnancy?"        → SAFETY
+    "can I take ibuprofen if I'm allergic?"       → CONTRAINDICATIONS
+    "can I drink alcohol with amoxicillin?"       → FOOD_ALCOHOL
+    "risperidone and heart problems"              → INTERACTION (2 drugs-ish)
     """
     q = question.lower()
 
+    # ── INTERACTION: strong keywords (no drug count required) OR weak keywords
+    #    with 2+ drugs detected
+    if any(kw in q for kw in _INTERACTION_STRONG_KW):
+        return QuestionIntent.INTERACTION
+    if drug_count >= 2 and any(kw in q for kw in _INTERACTION_WEAK_KW):
+        return QuestionIntent.INTERACTION
+
+    # ── Remaining intents in priority order ───────────────────────────────────
     for intent, keywords in _INTENT_KEYWORDS:
-        min_drugs = _INTENT_MIN_DRUGS.get(intent, 0)
-        if drug_count < min_drugs:
-            continue
         if any(kw in q for kw in keywords):
             return intent
 
@@ -224,8 +241,10 @@ def classify_intent(question: str, drug_count: int = 0) -> QuestionIntent:
 # Intent → ordered list of FDA label sections to retrieve
 RETRIEVAL_SECTIONS: dict[QuestionIntent, list[str]] = {
     QuestionIntent.INTERACTION:         ["drug_interactions", "warnings", "boxed_warning"],
-    QuestionIntent.DOSING:              ["dosage_and_administration"],
+    QuestionIntent.WHAT_IS:             ["indications_and_usage", "clinical_pharmacology", "description"],
     QuestionIntent.SIDE_EFFECTS:        ["adverse_reactions", "warnings", "boxed_warning"],
+    QuestionIntent.DOSING:              ["dosage_and_administration"],
+    QuestionIntent.SAFETY:              ["warnings", "contraindications", "boxed_warning"],
     QuestionIntent.CONTRAINDICATIONS:   ["contraindications", "warnings", "boxed_warning"],
     QuestionIntent.PREGNANCY_LACTATION: ["pregnancy", "lactation", "use_in_specific_populations"],
     QuestionIntent.FOOD_ALCOHOL:        ["drug_interactions", "warnings"],
@@ -580,6 +599,14 @@ def build_citations(
 # ── 5. REFUSED ANSWER BUILDER ─────────────────────────────────────────────────
 
 _REFUSED_MESSAGES: dict[QuestionIntent, str] = {
+    QuestionIntent.WHAT_IS: (
+        "Drug information requires the official drug label, which could not be retrieved. "
+        "Please check DailyMed (dailymed.nlm.nih.gov) or consult a pharmacist."
+    ),
+    QuestionIntent.SAFETY: (
+        "Safety information requires the official drug label, which could not be retrieved. "
+        "Please check DailyMed or consult a healthcare provider before taking this medication."
+    ),
     QuestionIntent.DOSING: (
         "Dosing information requires the official drug label, which could not be retrieved "
         "for this medication. Please consult a licensed pharmacist or check the official "
