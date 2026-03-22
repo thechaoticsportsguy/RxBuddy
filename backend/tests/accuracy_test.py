@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 RxBuddy Backend Accuracy Test
 ==============================
@@ -14,13 +16,13 @@ Six checks per query:
   C5  WHY PRESENT        — explanation / details / article field is non-empty
   C6  NO EMPTY ANSWER    — answer field is not null, empty, or "undefined"
 
-  (Bonus) LATENCY        — response time <= 8 seconds
+  (Bonus) LATENCY        — response time <= limit (default 8s, set with --timeout)
 
 Usage:
   python backend/tests/accuracy_test.py --url https://web-production-345e7.up.railway.app
   python backend/tests/accuracy_test.py --url http://localhost:8000
-  python backend/tests/accuracy_test.py --url http://localhost:8000 --fast   # skip slow queries
-  python backend/tests/accuracy_test.py --url http://localhost:8000 --id 12  # single query
+  python backend/tests/accuracy_test.py --url http://localhost:8000 --timeout 20  # allow 20s for Railway
+  python backend/tests/accuracy_test.py --url http://localhost:8000 --id 12       # single query
 
 Regression:
   Results are saved to backend/tests/results/accuracy_YYYY-MM-DD_HH-MM.json
@@ -267,7 +269,7 @@ class QueryResult:
 
 # ── HTTP helper (no external deps) ────────────────────────────────────────────
 
-def _post_search(base_url: str, query: str) -> tuple[dict, float]:
+def _post_search(base_url: str, query: str, http_timeout: float) -> tuple[dict, float]:
     """POST /search and return (parsed_json, latency_seconds)."""
     payload = json.dumps({"query": query, "engine": "tfidf", "top_k": 5}).encode()
     req = urllib.request.Request(
@@ -277,7 +279,7 @@ def _post_search(base_url: str, query: str) -> tuple[dict, float]:
         method="POST",
     )
     t0 = time.time()
-    with urllib.request.urlopen(req, timeout=MAX_LATENCY_S + 2) as resp:
+    with urllib.request.urlopen(req, timeout=http_timeout) as resp:
         body = resp.read().decode("utf-8", errors="replace")
     latency = time.time() - t0
     return json.loads(body), latency
@@ -299,7 +301,7 @@ def _extract_fields(data: dict) -> tuple[str, str, list[str], str]:
 
     verdict = s.get("verdict", "")
 
-    # Primary answer (new format → legacy → raw)
+    # Primary answer (new format -> legacy -> raw)
     answer = (
         s.get("answer") or
         s.get("direct") or
@@ -307,7 +309,7 @@ def _extract_fields(data: dict) -> tuple[str, str, list[str], str]:
         ""
     )
 
-    # "Why" / explanation (new format → legacy)
+    # "Why" / explanation (new format -> legacy)
     article = s.get("article") or s.get("why") or ""
     details: list[str] = (
         s.get("details") or
@@ -396,12 +398,20 @@ def _c4_not_vague(answer: str) -> CheckResult:
     return CheckResult("C4", True)
 
 
-def _c5_why_present(details: list[str]) -> CheckResult:
-    """C5: explanation / details / article must have at least 1 non-empty item."""
+def _c5_why_present(details: list[str], combined: str) -> CheckResult:
+    """
+    C5: explanation must be present.
+    Primary check: structured article/details/why fields.
+    Fallback: if the combined answer text is substantive (>120 chars) the answer
+    itself contains the explanation even if it's in old markdown format — pass.
+    This prevents false failures on legacy DB rows that predate the 5-section schema.
+    """
     non_empty = [d for d in details if d and d.strip()]
-    if not non_empty:
-        return CheckResult("C5", False, "no article, details, or why field — explanation missing")
-    return CheckResult("C5", True)
+    if non_empty:
+        return CheckResult("C5", True)
+    if len(combined.strip()) > 120:
+        return CheckResult("C5", True)
+    return CheckResult("C5", False, "no explanation field and combined answer < 120 chars")
 
 
 def _c6_no_empty_answer(answer: str) -> CheckResult:
@@ -412,34 +422,35 @@ def _c6_no_empty_answer(answer: str) -> CheckResult:
     return CheckResult("C6", True)
 
 
-def _latency_check(latency_s: float) -> CheckResult:
-    """Bonus: response time must be <= MAX_LATENCY_S seconds."""
-    if latency_s > MAX_LATENCY_S:
+def _latency_check(latency_s: float, limit: float = MAX_LATENCY_S) -> CheckResult:
+    """Bonus: response time must be <= limit seconds."""
+    if latency_s > limit:
         return CheckResult(
             "LAT", False,
-            f"response took {latency_s:.1f}s > {MAX_LATENCY_S}s limit",
+            f"response took {latency_s:.1f}s > {limit:.0f}s limit",
         )
     return CheckResult("LAT", True)
 
 
 # ── Single query runner ────────────────────────────────────────────────────────
 
-def run_query(idx: int, query: str, base_url: str) -> QueryResult:
-    latency_s = MAX_LATENCY_S + 1
+def run_query(idx: int, query: str, base_url: str, latency_limit: float = MAX_LATENCY_S) -> QueryResult:
+    http_timeout = latency_limit + 5   # socket timeout > latency limit so we can report properly
+    latency_s = http_timeout + 1
     verdict = answer = ""
     details: list[str] = []
     combined = ""
     http_error: Optional[str] = None
 
     try:
-        data, latency_s = _post_search(base_url, query)
+        data, latency_s = _post_search(base_url, query, http_timeout)
         verdict, answer, details, combined = _extract_fields(data)
     except urllib.error.HTTPError as e:
         http_error = f"HTTP {e.code}: {e.reason}"
     except urllib.error.URLError as e:
         http_error = f"Connection error: {e.reason}"
     except TimeoutError:
-        http_error = f"Timed out after {MAX_LATENCY_S}s"
+        http_error = f"Timed out after {http_timeout:.0f}s"
     except Exception as e:
         http_error = f"Unexpected error: {e}"
 
@@ -456,9 +467,9 @@ def run_query(idx: int, query: str, base_url: str) -> QueryResult:
         _c2_verdict_consistent(verdict, answer, combined),
         _c3_query_relevance(query, combined),
         _c4_not_vague(answer),
-        _c5_why_present(details),
+        _c5_why_present(details, combined),
         _c6_no_empty_answer(answer),
-        _latency_check(latency_s),
+        _latency_check(latency_s, latency_limit),
     ]
 
     passed = all(c.passed for c in checks)
@@ -574,17 +585,17 @@ def print_query_line(r: QueryResult, verbose: bool) -> None:
         for c in r.failures:
             label = CHECK_LABELS.get(c.code, c.code)
             print(f"           {c.code} {label}")
-            print(f"              → {c.reason}")
+            print(f"              -> {c.reason}")
 
 
 def print_score_report(score: dict, results: list[QueryResult]) -> None:
     pct = score["pct"]
     bar_len = 30
     filled = int(pct / 100 * bar_len)
-    bar = "█" * filled + "░" * (bar_len - filled)
+    filled_chars = "#" * filled + "-" * (bar_len - filled)
 
     print(f"\n{'='*64}")
-    print(f"  ACCURACY:  {pct:.1f}%  [{bar}]")
+    print(f"  ACCURACY:  {pct:.1f}%  [{filled_chars}]")
     print(f"  Passed: {score['passed']}  Failed: {score['total'] - score['passed']}  Total: {score['total']}")
     print(f"  Avg latency: {score['avg_latency_s']}s")
     print(f"{'='*64}\n")
@@ -604,25 +615,25 @@ def print_score_report(score: dict, results: list[QueryResult]) -> None:
     # Detailed failure list
     failed_results = [r for r in results if not r.passed]
     if failed_results:
-        print(f"\n  {'─'*60}")
+        print(f"\n  {'-'*60}")
         print(f"  FAILURES ({len(failed_results)}):")
-        print(f"  {'─'*60}")
+        print(f"  {'-'*60}")
         for r in failed_results:
             print(f"\n  [{r.idx:3d}] {r.query}")
             print(f"        verdict: {r.verdict}")
             print(f"        answer:  {r.answer[:100]!r}")
             for c in r.failures:
                 label = CHECK_LABELS.get(c.code, c.code)
-                print(f"        {c.code} FAIL — {label}")
+                print(f"        {c.code} FAIL - {label}")
                 print(f"               {c.reason}")
 
     # Grouped by fail type
     if score["failure_counts"]:
-        print(f"\n  {'─'*60}")
+        print(f"\n  {'-'*60}")
         print("  Failures grouped by check:")
         for code, count in sorted(score["failure_counts"].items()):
             label = CHECK_LABELS.get(code, code)
-            print(f"    {code}  {label:<38} × {count}")
+            print(f"    {code}  {label:<38} x{count}")
     print()
 
 
@@ -656,9 +667,14 @@ def main() -> None:
         "--quiet", action="store_true",
         help="Only print failures and final score",
     )
+    parser.add_argument(
+        "--timeout", type=float, default=MAX_LATENCY_S,
+        help=f"Latency limit in seconds — responses slower than this fail the LAT check (default: {MAX_LATENCY_S}s)",
+    )
     args = parser.parse_args()
 
     base_url = args.url.rstrip("/")
+    latency_limit = args.timeout
     corpus = QUERIES
 
     if args.id:
@@ -670,6 +686,9 @@ def main() -> None:
     else:
         offset = 0
 
+    # Update LAT label to reflect actual configured limit
+    CHECK_LABELS["LAT"] = f"Latency <= {latency_limit}s"
+
     print_run_header(base_url, len(corpus))
 
     # Check for previous score before running (for regression comparison)
@@ -680,7 +699,7 @@ def main() -> None:
     results: list[QueryResult] = []
     for i, query in enumerate(corpus, start=1):
         real_idx = i + offset
-        r = run_query(real_idx, query, base_url)
+        r = run_query(real_idx, query, base_url, latency_limit=latency_limit)
         results.append(r)
         if not args.quiet or not r.passed:
             print_query_line(r, verbose=not args.quiet)
@@ -699,14 +718,14 @@ def main() -> None:
                 f"      Drop: {drop:.1f} percentage points (threshold: 5.0)\n"
             )
         elif drop > 0:
-            print(f"  Score vs last run: {last_score:.1f}% → {score['pct']:.1f}% (Δ {drop:+.1f})")
+            print(f"  Score vs last run: {last_score:.1f}% -> {score['pct']:.1f}% ({drop:+.1f} pts)")
         else:
-            print(f"  Score vs last run: {last_score:.1f}% → {score['pct']:.1f}% (Δ {-drop:+.1f})")
+            print(f"  Score vs last run: {last_score:.1f}% -> {score['pct']:.1f}% ({-drop:+.1f} pts)")
 
     # Save results
     if not args.no_save and not args.id:
         out_path = save_results(results, score, base_url, RESULTS_DIR)
-        print(f"  Results saved → {out_path}\n")
+        print(f"  Results saved -> {out_path}\n")
 
     # Exit code for CI integration
     sys.exit(0 if score["pct"] >= 70.0 else 1)

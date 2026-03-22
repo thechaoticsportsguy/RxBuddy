@@ -1844,6 +1844,36 @@ def _legacy_extract_verdict_pre_regex(text: str, question: str = "") -> str:
     return "CONSULT_PHARMACIST"
 
 
+_CORRUPTED_PREFIXES = (
+    "** classification**",
+    "** answer**",
+    "**:**",
+    "**primary intent",
+    "** ** **",
+)
+_CORRUPTED_EXACT = {"needs review.", "**.", "** **", "n/a", "none"}
+
+
+def _is_corrupted_db_answer(text: str) -> bool:
+    """
+    Return True when a stored DB answer contains leaked internal prompt text
+    or is too short/malformed to be useful.  These rows are skipped and
+    Claude regenerates a fresh answer in their place.
+    """
+    t = text.strip().lower()
+    if not t or len(t) < 15:
+        return True
+    if t in _CORRUPTED_EXACT:
+        return True
+    for prefix in _CORRUPTED_PREFIXES:
+        if t.startswith(prefix):
+            return True
+    # Leaked classification header anywhere near the start
+    if "primary intent category:" in t[:120] or "intent classification" in t[:120]:
+        return True
+    return False
+
+
 def _post_process_cached_answer(answer_text: str) -> str:
     """
     Post-process cached answers to clean up raw markdown bullets
@@ -2899,6 +2929,13 @@ def search(req: SearchRequest) -> SearchResponse:
 
         existing_answer = r.get("answer")
         answer_text: str | None = str(existing_answer).strip() if existing_answer else None
+
+        # Discard corrupted DB answers that contain leaked internal prompt text.
+        # These were stored during earlier system versions before the format was
+        # stabilised. Treat them as missing so Claude regenerates a clean answer.
+        if answer_text and _is_corrupted_db_answer(answer_text):
+            logger.warning("[DB] Corrupted answer detected for Q#%s — forcing regeneration", r["id"])
+            answer_text = None
 
         # Generate answer for database questions that don't have one yet
         if not answer_text and _anthropic_api_key():
