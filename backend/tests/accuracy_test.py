@@ -80,6 +80,90 @@ _STOP = frozenset({
     "stop", "drink", "taking", "starting", "typical", "typical", "vs",
 })
 
+# Brand name -> generic synonyms for C3 relevance check.
+# If the query contains a brand name and the answer mentions the generic (or vice versa),
+# the query is still considered relevant.
+_BRAND_GENERIC: dict[str, list[str]] = {
+    "ozempic":    ["semaglutide", "glp-1", "glp1"],
+    "wegovy":     ["semaglutide", "glp-1", "glp1"],
+    "rybelsus":   ["semaglutide", "glp-1", "glp1"],
+    "trulicity":  ["dulaglutide", "glp-1", "glp1"],
+    "victoza":    ["liraglutide", "glp-1", "glp1"],
+    "jardiance":  ["empagliflozin", "sglt2"],
+    "farxiga":    ["dapagliflozin", "sglt2"],
+    "invokana":   ["canagliflozin", "sglt2"],
+    "eliquis":    ["apixaban", "anticoagulant", "blood thinner"],
+    "xarelto":    ["rivaroxaban", "anticoagulant", "blood thinner"],
+    "brilinta":   ["ticagrelor", "antiplatelet"],
+    "entresto":   ["sacubitril", "valsartan"],
+    "humira":     ["adalimumab", "tnf", "biologic"],
+    "keytruda":   ["pembrolizumab", "immunotherapy"],
+    "dupixent":   ["dupilumab", "biologic"],
+    "skyrizi":    ["risankizumab", "biologic"],
+    "rinvoq":     ["upadacitinib", "jak"],
+    "cosentyx":   ["secukinumab", "biologic"],
+    "taltz":      ["ixekizumab", "biologic"],
+    "stelara":    ["ustekinumab", "biologic"],
+    "enbrel":     ["etanercept", "tnf", "biologic"],
+    "remicade":   ["infliximab", "tnf", "biologic"],
+    "norco":      ["hydrocodone", "opioid"],
+    "vicodin":    ["hydrocodone", "opioid"],
+    "percocet":   ["oxycodone", "opioid"],
+    "oxycontin":  ["oxycodone", "opioid"],
+    "zoloft":     ["sertraline", "ssri"],
+    "prozac":     ["fluoxetine", "ssri"],
+    "lexapro":    ["escitalopram", "ssri"],
+    "paxil":      ["paroxetine", "ssri"],
+    "effexor":    ["venlafaxine", "snri"],
+    "wellbutrin": ["bupropion"],
+    "abilify":    ["aripiprazole"],
+    "seroquel":   ["quetiapine"],
+    "risperdal":  ["risperidone"],
+    "zyprexa":    ["olanzapine"],
+    "xanax":      ["alprazolam", "benzodiazepine"],
+    "ativan":     ["lorazepam", "benzodiazepine"],
+    "klonopin":   ["clonazepam", "benzodiazepine"],
+    "valium":     ["diazepam", "benzodiazepine"],
+    "ambien":     ["zolpidem"],
+    "lunesta":    ["eszopiclone"],
+    "adderall":   ["amphetamine", "stimulant"],
+    "ritalin":    ["methylphenidate", "stimulant"],
+    "vyvanse":    ["lisdexamfetamine", "stimulant"],
+    "concerta":   ["methylphenidate", "stimulant"],
+    "synthroid":  ["levothyroxine", "thyroid"],
+    "lipitor":    ["atorvastatin", "statin"],
+    "crestor":    ["rosuvastatin", "statin"],
+    "zocor":      ["simvastatin", "statin"],
+    "pravachol":  ["pravastatin", "statin"],
+    "norvasc":    ["amlodipine", "calcium channel"],
+    "prinivil":   ["lisinopril", "ace inhibitor"],
+    "zestril":    ["lisinopril", "ace inhibitor"],
+    "lopressor":  ["metoprolol", "beta blocker"],
+    "toprol":     ["metoprolol", "beta blocker"],
+    "tenormin":   ["atenolol", "beta blocker"],
+    "lasix":      ["furosemide", "diuretic"],
+    "aldactone":  ["spironolactone", "diuretic"],
+    "coumadin":   ["warfarin", "anticoagulant"],
+    "plavix":     ["clopidogrel", "antiplatelet"],
+    "nexium":     ["esomeprazole", "ppi"],
+    "prilosec":   ["omeprazole", "ppi"],
+    "prevacid":   ["lansoprazole", "ppi"],
+    "pepcid":     ["famotidine", "h2 blocker"],
+    "zantac":     ["ranitidine", "h2 blocker"],
+    "benadryl":   ["diphenhydramine", "antihistamine"],
+    "claritin":   ["loratadine", "antihistamine"],
+    "zyrtec":     ["cetirizine", "antihistamine"],
+    "allegra":    ["fexofenadine", "antihistamine"],
+    "tylenol":    ["acetaminophen", "paracetamol"],
+    "advil":      ["ibuprofen", "nsaid"],
+    "motrin":     ["ibuprofen", "nsaid"],
+    "aleve":      ["naproxen", "nsaid"],
+    "celebrex":   ["celecoxib", "nsaid"],
+    "viagra":     ["sildenafil", "pde5"],
+    "cialis":     ["tadalafil", "pde5"],
+    "levitra":    ["vardenafil", "pde5"],
+}
+
 MAX_LATENCY_S = 8.0
 MIN_ANSWER_LEN = 40
 
@@ -368,7 +452,7 @@ def _c2_verdict_consistent(verdict: str, answer: str, combined: str) -> CheckRes
 
 
 def _c3_query_relevance(query: str, combined: str) -> CheckResult:
-    """C3: at least one meaningful word from the query appears in the combined answer."""
+    """C3: at least one meaningful word from the query (or its generic equivalent) appears in the answer."""
     words = [
         w.lower().strip("'\".,!?")
         for w in re.split(r"\s+", query)
@@ -380,6 +464,10 @@ def _c3_query_relevance(query: str, combined: str) -> CheckResult:
     for word in words:
         if word in combined:
             return CheckResult("C3", True)
+        # Also accept generic drug name synonyms (brand name -> generic)
+        for synonym in _BRAND_GENERIC.get(word, []):
+            if synonym in combined:
+                return CheckResult("C3", True)
 
     return CheckResult(
         "C3", False,
