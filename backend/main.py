@@ -194,92 +194,245 @@ def _fetch_fda_label(drug_name: str) -> dict | None:
 
 
 
+def _openfda_search(field: str, value: str) -> "tuple[dict | None, dict | None]":
+    """
+    Single OpenFDA label search by field + value.
+    Returns (parsed_fda_data, raw_label) or (None, None).
+    Does NOT touch the cache — callers handle caching.
+    """
+    try:
+        url = f"{OPENFDA_LABEL_URL}?search=openfda.{field}:\"{value}\"&limit=1"
+        resp = http_requests.get(url, headers={"User-Agent": "RxBuddy/1.0"}, timeout=10)
+        if resp.status_code == 404:
+            return None, None
+        resp.raise_for_status()
+        results = resp.json().get("results", [])
+        if not results:
+            return None, None
+
+        raw_label = results[0]
+
+        def get_section(k: str) -> str:
+            val = raw_label.get(k, [])
+            return val[0][:1200] if isinstance(val, list) and val else ""
+
+        fda_data = {
+            "drug_name":                  value,
+            "warnings":                   get_section("warnings"),
+            "boxed_warning":              get_section("boxed_warning"),
+            "dosage_and_administration":  get_section("dosage_and_administration"),
+            "contraindications":          get_section("contraindications"),
+            "drug_interactions":          get_section("drug_interactions"),
+            "adverse_reactions":          get_section("adverse_reactions"),
+            "pregnancy":                  get_section("pregnancy"),
+            "lactation":                  get_section("lactation"),
+            "indications_and_usage":      get_section("indications_and_usage"),
+            "use_in_specific_populations": get_section("use_in_specific_populations"),
+        }
+        has_data = any(v for k, v in fda_data.items() if k != "drug_name" and v)
+        return (fda_data, raw_label) if has_data else (None, None)
+
+    except Exception as exc:
+        logger.debug("[FDA] _openfda_search %s=%s failed: %s", field, value, exc)
+        return None, None
+
+
 def _fetch_fda_label_with_raw(drug_name: str) -> "tuple[dict | None, dict | None]":
     """
-    Fetch FDA label data AND the raw OpenFDA result for metadata extraction.
+    Fetch FDA label data for a drug name with multiple fallback strategies.
 
-    Returns
-    -------
-    (parsed_fda_data, raw_openfda_result)
-      - parsed_fda_data : dict | None  — same structure as _fetch_fda_label()
-      - raw_openfda_result : dict | None — full OpenFDA result[0] for SetID/NDA extraction
+    Search order (stops at first hit):
+      1. Cache (label_updater, 24-h TTL)
+      2. openfda.generic_name:"name"   — standard generic name
+      3. openfda.brand_name:"name"     — brand name (e.g. "Eliquis", "Lipitor")
+      4. openfda.substance_name:"name" — INN substance name
+      5. Catalog canonical name + brand names via drug_catalog
 
-    Uses label_updater cache (24-h TTL).  On cache hit, returns cached data immediately.
-    On miss or stale, fetches fresh data and populates the cache.
+    Returns (parsed_fda_data, raw_openfda_result) or (None, None).
     """
     if not drug_name:
         return None, None
 
     key = drug_name.strip().lower()
 
-    # Check cache first
+    # 1. Cache hit
     cached = label_updater.get_cached_label(key)
     if cached is not None:
         logger.debug("[FDA] Cache HIT for '%s'", key)
         return cached.data, cached.raw_label
 
-    # Cache miss — fetch from OpenFDA
+    logger.info("[FDA] Cache MISS — fetching label for '%s'", key)
+
+    # Build the ordered list of (field, value) pairs to try
+    search_attempts: list[tuple[str, str]] = [
+        ("generic_name",   drug_name),
+        ("brand_name",     drug_name),
+        ("substance_name", drug_name),
+    ]
+
+    # Add catalog-derived names (brand ↔ generic resolution)
     try:
-        url = f"{OPENFDA_LABEL_URL}?search=openfda.generic_name:{drug_name}&limit=1"
-        logger.info("[FDA] Cache MISS — fetching label for '%s'", drug_name)
+        rec = find_drug(drug_name)
+        if rec:
+            canonical = rec.canonical_name
+            if canonical.lower() != key:
+                search_attempts.append(("generic_name", canonical))
+            for brand in rec.brand_names[:3]:   # cap at 3 brands to limit latency
+                if brand.lower() != key:
+                    search_attempts.append(("brand_name", brand))
+    except Exception:
+        pass
 
-        resp = http_requests.get(
-            url,
-            headers={"User-Agent": "RxBuddy/1.0"},
-            timeout=10,
-        )
+    fda_data, raw_label = None, None
+    for field, value in search_attempts:
+        fda_data, raw_label = _openfda_search(field, value)
+        if fda_data:
+            logger.info("[FDA] Resolved '%s' via openfda.%s=%s", drug_name, field, value)
+            break
 
-        if resp.status_code == 404:
-            logger.info("[FDA] No label found for '%s'", drug_name)
-            return None, None
-
-        resp.raise_for_status()
-        data = resp.json()
-        results = data.get("results", [])
-        if not results:
-            return None, None
-
-        raw_label = results[0]
-
-        def get_section(key_: str) -> str:
-            val = raw_label.get(key_, [])
-            if isinstance(val, list) and val:
-                return val[0][:1000]
-            return ""
-
-        fda_data = {
-            "drug_name":                drug_name,
-            "warnings":                 get_section("warnings"),
-            "dosage_and_administration": get_section("dosage_and_administration"),
-            "contraindications":         get_section("contraindications"),
-            "drug_interactions":         get_section("drug_interactions"),
-            "adverse_reactions":         get_section("adverse_reactions"),
-            "pregnancy":                 get_section("pregnancy"),
-            "indications_and_usage":     get_section("indications_and_usage"),
-            "boxed_warning":             get_section("boxed_warning"),
-            "lactation":                 get_section("lactation"),
-            "use_in_specific_populations": get_section("use_in_specific_populations"),
-        }
-
-        has_data = any(v for k, v in fda_data.items() if k != "drug_name" and v)
-        if not has_data:
-            return None, None
-
-        # Extract revision date for cache metadata
-        meta = extract_fda_metadata(raw_label)
-        label_updater.put_label(
-            drug_name=key,
-            data=fda_data,
-            raw_label=raw_label,
-            label_revision_date=meta.get("label_revision_date"),
-        )
-
-        logger.info("[FDA] Fetched and cached label for '%s'", drug_name)
-        return fda_data, raw_label
-
-    except Exception as e:
-        logger.warning("[FDA] Error in _fetch_fda_label_with_raw for '%s': %s", drug_name, e)
+    if not fda_data:
+        logger.info("[FDA] No label found for '%s' after all strategies", drug_name)
         return None, None
+
+    # Store in cache under the original query key
+    meta = extract_fda_metadata(raw_label)
+    label_updater.put_label(
+        drug_name=key,
+        data=fda_data,
+        raw_label=raw_label,
+        label_revision_date=meta.get("label_revision_date"),
+    )
+    return fda_data, raw_label
+
+
+def _fetch_all_labels(drug_names: list[str]) -> "dict[str, tuple[dict, dict]]":
+    """
+    Fetch FDA labels for every drug in drug_names.
+
+    Returns a dict mapping each drug name to its (fda_data, raw_label).
+    Drugs that could not be resolved are absent from the result.
+
+    Used for multi-drug interaction queries so ALL labels are available
+    for cross-referencing (e.g. checking whether drug A's interaction
+    section mentions drug B by name).
+    """
+    result: dict[str, tuple[dict, dict]] = {}
+    for name in drug_names:
+        data, raw = _fetch_fda_label_with_raw(name)
+        if data and raw:
+            result[name] = (data, raw)
+    return result
+
+
+def _cross_reference_interactions(
+    labels: "dict[str, tuple[dict, dict]]",
+) -> "list[str]":
+    """
+    Scan every drug's drug_interactions section for mentions of other drugs.
+
+    Returns a list of plain-English signals like:
+      "apixaban label mentions 'ibuprofen': ... relevant text snippet ..."
+    These are injected into the FDA context so Claude has explicit evidence.
+    """
+    signals: list[str] = []
+    drug_names = list(labels.keys())
+    for source_drug, (fda_data, _) in labels.items():
+        interactions_text = fda_data.get("drug_interactions", "").lower()
+        if not interactions_text:
+            continue
+        for target_drug in drug_names:
+            if target_drug == source_drug:
+                continue
+            # Search for target drug and its known aliases in source drug's interaction section
+            search_terms = [target_drug]
+            try:
+                rec = find_drug(target_drug)
+                if rec:
+                    search_terms.append(rec.canonical_name)
+                    search_terms.extend(rec.brand_names[:2])
+            except Exception:
+                pass
+
+            for term in search_terms:
+                idx = interactions_text.find(term.lower())
+                if idx != -1:
+                    # Extract a snippet around the mention
+                    start = max(0, idx - 60)
+                    end   = min(len(interactions_text), idx + 200)
+                    snippet = fda_data["drug_interactions"][start:end].strip()
+                    signals.append(
+                        f"[FDA INTERACTION SIGNAL] {source_drug.upper()} label "
+                        f"mentions '{term}': \"...{snippet}...\""
+                    )
+                    break  # one signal per pair is enough
+
+    return signals
+
+
+def _build_multi_drug_context(
+    labels: "dict[str, tuple[dict, dict]]",
+    question: str,
+    medlineplus_data: "dict | None" = None,
+) -> str:
+    """
+    Build a grounded FDA context string for multi-drug queries.
+
+    Includes:
+      - Boxed warnings for each drug
+      - Drug interactions section for each drug
+      - Cross-reference signals (does drug A's label mention drug B?)
+      - Warnings / contraindications / pregnancy sections as relevant
+    """
+    if not labels and not medlineplus_data:
+        return ""
+
+    q_lower = question.lower()
+    parts: list[str] = []
+
+    for drug_name, (fda_data, _) in labels.items():
+        drug_parts: list[str] = [f"━━━ FDA LABEL: {drug_name.upper()} ━━━"]
+
+        # Boxed warning always included (highest severity)
+        if fda_data.get("boxed_warning"):
+            drug_parts.append(f"BOXED WARNING: {fda_data['boxed_warning'][:600]}")
+
+        # Drug interactions always included for multi-drug queries
+        if fda_data.get("drug_interactions"):
+            drug_parts.append(f"DRUG INTERACTIONS: {fda_data['drug_interactions'][:700]}")
+
+        # Warnings
+        if fda_data.get("warnings"):
+            drug_parts.append(f"WARNINGS: {fda_data['warnings'][:500]}")
+
+        # Contraindications
+        if fda_data.get("contraindications"):
+            drug_parts.append(f"CONTRAINDICATIONS: {fda_data['contraindications'][:400]}")
+
+        # Pregnancy only if relevant
+        if any(w in q_lower for w in ("pregnant", "pregnancy", "breastfeed", "nursing", "lactation")):
+            for section in ("pregnancy", "lactation", "use_in_specific_populations"):
+                if fda_data.get(section):
+                    drug_parts.append(f"{section.upper()}: {fda_data[section][:400]}")
+
+        if len(drug_parts) > 1:   # more than just the header
+            parts.append("\n".join(drug_parts))
+
+    # Cross-reference: does drug A's interaction list mention drug B?
+    signals = _cross_reference_interactions(labels)
+    if signals:
+        parts.append("━━━ CROSS-REFERENCE SIGNALS (extracted from FDA labels) ━━━")
+        parts.extend(signals)
+
+    # MedlinePlus for patient-friendly context only
+    if medlineplus_data:
+        ml_parts = ["━━━ MEDLINEPLUS (plain-English supplement only) ━━━"]
+        if medlineplus_data.get("summary"):
+            ml_parts.append(f"SUMMARY: {medlineplus_data['summary'][:400]}")
+        if medlineplus_data.get("side_effects"):
+            ml_parts.append(f"SIDE EFFECTS: {medlineplus_data['side_effects'][:300]}")
+        parts.append("\n".join(ml_parts))
+
+    return "\n\n".join(parts)
 
 
 def _build_fda_context(fda_data: dict | None, question: str, medlineplus_data: dict | None = None) -> str:
@@ -1100,8 +1253,13 @@ def _generate_ai_answer(question: str) -> "tuple[str, list[dict], str, str]":
             if catalog_is_high_risk(dn):
                 logger.info("[Guardrail] Catalog flags '%s' as high-risk", dn)
 
-    # Fetch label WITH raw result (populates label_updater cache)
-    fda_data, raw_label = _fetch_fda_label_with_raw(drug_name) if drug_name else (None, None)
+    # Fetch label(s) — multi-drug queries get all labels fetched in parallel
+    if len(drug_names) >= 2:
+        all_labels = _fetch_all_labels(drug_names)
+        fda_data, raw_label = all_labels.get(drug_name, (None, None)) if drug_name else (None, None)
+    else:
+        all_labels = {}
+        fda_data, raw_label = _fetch_fda_label_with_raw(drug_name) if drug_name else (None, None)
 
     # ── Retrieval Guard: refuse high-stakes questions without label source ──
     proceed, retrieval_status_enum = check_retrieval_guard(intent_enum, fda_data, drug_names, question)
@@ -1141,7 +1299,12 @@ def _generate_ai_answer(question: str) -> "tuple[str, list[dict], str, str]":
         return det_text, citations_dicts, intent_str, retrieval_status_str
 
     medlineplus_data = _fetch_medlineplus(drug_name) if drug_name else None
-    fda_context = _build_fda_context(fda_data, question, medlineplus_data)
+
+    # Build grounded context — multi-drug gets cross-referenced label context
+    if len(drug_names) >= 2 and all_labels:
+        fda_context = _build_multi_drug_context(all_labels, question, medlineplus_data)
+    else:
+        fda_context = _build_fda_context(fda_data, question, medlineplus_data)
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
