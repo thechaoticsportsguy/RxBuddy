@@ -4,6 +4,7 @@ import { useRouter } from "next/router";
 import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import Disclaimer from "../components/Disclaimer";
+import AnswerCard from "../components/AnswerCard";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
@@ -610,47 +611,7 @@ export default function ResultsPage() {
     router.push(`/results?q=${encodeURIComponent(nextQ)}&engine=${encodeURIComponent(engine)}`);
   }
 
-  const verdictStyles = {
-    SAFE: {
-      bg: "bg-green-50 border-green-200",
-      border: "border-green-200",
-      text: "text-green-700",
-      icon: "✅",
-      label: "SAFE"
-    },
-    CAUTION: {
-      bg: "bg-yellow-50 border-yellow-200",
-      border: "border-yellow-200",
-      text: "text-yellow-700",
-      icon: "⚠️",
-      label: "CAUTION"
-    },
-    AVOID: {
-      bg: "bg-red-50 border-red-200",
-      border: "border-red-200",
-      text: "text-red-700",
-      icon: "❌",
-      label: "AVOID"
-    },
-    CONSULT_PHARMACIST: {
-      bg: "bg-blue-50 border-blue-200",
-      border: "border-blue-200",
-      text: "text-blue-700",
-      icon: "💊",
-      label: "CONSULT PHARMACIST"
-    }
-  };
-
-  const currentVerdictKey = useMemo(() => {
-    if (!results?.length) return null;
-    const rawBackendVerdict = results[0]?.structured?.verdict;
-    if (!rawBackendVerdict || !verdictStyles[rawBackendVerdict]) {
-      throw new Error(`Invalid or missing backend verdict: ${rawBackendVerdict ?? "undefined"}`);
-    }
-    return rawBackendVerdict;
-  }, [results]);
-
-  const currentVerdict = currentVerdictKey ? verdictStyles[currentVerdictKey] : null;
+  // Verdict rendering is handled by AnswerCard component
 
 
   return (
@@ -750,118 +711,14 @@ export default function ResultsPage() {
             </div>
           ) : (
             <>
-              {/* BUG 1 FIX: VERDICT BANNER - Always renders at TOP, never hidden, never blank */}
-              {/* This banner MUST be the first thing users see after the question card */}
-              {currentVerdict ? (
-                <div className={`mb-4 rounded-xl border-2 ${currentVerdict.border} ${currentVerdict.bg} p-5 shadow-md`}>
-                  <div className="flex items-start gap-3">
-                    <span className="text-3xl leading-none">{currentVerdict.icon}</span>
-                    <div className="flex-1 min-w-0">
-                      <span className={`text-xl font-bold ${currentVerdict.text}`}>{currentVerdict.label}</span>
-                      {/* Show the explanation from structured.direct, parsedAnswer.why, or first sentence of answer */}
-                      {/* ISSUE 1 FIX: Strip markdown before displaying */}
-                      {(() => {
-                        let explanation = results?.[0]?.structured?.direct 
-                          || parsedAnswer?.why 
-                          || (results?.[0]?.answer ? results[0].answer.split('.')[0] + '.' : null);
-                        
-                        if (explanation) {
-                          // ISSUE 1 FIX: Strip markdown formatting
-                          explanation = explanation
-                            .replace(/#{1,6}\s*/g, '')  // Remove # headers
-                            .replace(/\*\*/g, '')       // Remove bold **
-                            .replace(/__/g, '')         // Remove bold __
-                            .replace(/\*/g, '')         // Remove italic *
-                            .replace(/_/g, ' ')         // Replace _ with space
-                            .replace(/`/g, '')          // Remove code backticks
-                            .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')  // Remove links, keep text
-                            .replace(/^[-*•]\s*/gm, '') // Remove bullet points
-                            .trim();
-                          
-                          // Only show first 1-2 sentences (up to ~200 chars)
-                          const sentences = explanation.match(/[^.!?]+[.!?]+/g) || [explanation];
-                          explanation = sentences.slice(0, 2).join(' ').trim();
-                          if (explanation.length > 200) {
-                            explanation = explanation.substring(0, 197) + '...';
-                          }
-                        }
-                        
-                        return explanation ? (
-                          <p className="mt-2 text-base text-slate-700 leading-relaxed">{explanation}</p>
-                        ) : null;
-                      })()}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                /* Fallback banner if somehow currentVerdict is still null - should never happen */
-                <div className="mb-4 rounded-xl border-2 border-blue-300 bg-blue-50 p-5 shadow-md">
-                  <div className="flex items-start gap-3">
-                    <span className="text-3xl leading-none">💊</span>
-                    <div className="flex-1 min-w-0">
-                      <span className="text-xl font-bold text-blue-800">CONSULT A HEALTHCARE PROVIDER</span>
-                      <p className="mt-2 text-base text-slate-700 leading-relaxed">
-                        This question requires personalised guidance. Please consult a licensed pharmacist or healthcare provider before making any medication decision.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Important Notes — green box - BUG 2 FIX: Use structured.do/avoid from backend */}
-              {(() => {
-                const structured = results?.[0]?.structured;
-                const doItems = structured?.do || [];
-                const avoidItems = structured?.avoid || [];
-                const parsedNotes = parsedAnswer?.importantNotes || [];
-                const allNotes = [...doItems, ...avoidItems, ...parsedNotes].filter((v, i, a) => a.indexOf(v) === i);
-                
-                if (allNotes.length === 0) return null;
-                
-                return (
-                  <div className="mb-4 rounded-lg border border-emerald-200 bg-white p-4 shadow-sm">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-lg">📋</span>
-                      <h3 className="font-semibold text-emerald-800">Important Notes</h3>
-                    </div>
-                    <ul className="space-y-1.5">
-                      {allNotes.map((item, i) => (
-                        <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                          <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-emerald-400 shrink-0" />
-                          <span>{item}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                );
-              })()}
-
-              {/* Get Medical Help Now If — red/amber box - BUG 2 FIX: Use structured.doctor from backend */}
-              {(() => {
-                const structured = results?.[0]?.structured;
-                const doctorItems = structured?.doctor || [];
-                const parsedHelp = parsedAnswer?.medicalHelp || [];
-                const allHelp = [...doctorItems, ...parsedHelp].filter((v, i, a) => a.indexOf(v) === i);
-                
-                if (allHelp.length === 0) return null;
-                
-                return (
-                  <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 p-4 shadow-sm">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-lg">🚨</span>
-                      <h3 className="font-semibold text-rose-800">Get Medical Help Now If</h3>
-                    </div>
-                    <ul className="space-y-1.5">
-                      {allHelp.map((item, i) => (
-                        <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                          <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-rose-400 shrink-0" />
-                          <span>{item}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                );
-              })()}
+              {/* Single-answer card — Phase 4 */}
+              <div className="mb-4">
+                <AnswerCard
+                  result={results?.[0]}
+                  query={q}
+                  parsed={parsedAnswer}
+                />
+              </div>
 
               {/* Collapsible Full Answer - BUG 2 FIX: Better markdown rendering with prose styling */}
               {(parsedAnswer?.full || results?.[0]?.answer) && (

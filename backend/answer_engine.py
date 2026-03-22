@@ -242,11 +242,104 @@ _NO_SOURCE_REFUSE_INTENTS: frozenset[QuestionIntent] = frozenset({
 # High-risk drugs that also require a label for interaction queries
 # (narrow therapeutic index or high-toxicity agents)
 HIGH_RISK_DRUGS: frozenset[str] = frozenset({
-    "warfarin", "heparin", "clopidogrel", "apixaban", "rivaroxaban",  # anticoagulants
-    "lithium", "digoxin", "phenytoin", "carbamazepine", "valproate",  # narrow TI
-    "methotrexate", "cyclosporine", "tacrolimus",                     # immunosuppressants
-    "theophylline", "phenobarbital",                                   # enzyme inducers
+    # Anticoagulants / antiplatelets
+    "warfarin", "heparin", "enoxaparin", "clopidogrel",
+    "apixaban", "rivaroxaban", "dabigatran", "edoxaban",
+    "prasugrel", "ticagrelor",
+    # Antiarrhythmics
+    "digoxin", "amiodarone", "sotalol", "flecainide", "dronedarone",
+    # Narrow therapeutic index AEDs / mood stabilisers
+    "lithium", "phenytoin", "carbamazepine", "valproate", "valproic acid",
+    "phenobarbital",
+    # Immunosuppressants
+    "methotrexate", "cyclosporine", "tacrolimus", "mycophenolate",
+    # Other narrow TI
+    "theophylline", "digoxin", "vancomycin", "linezolid",
+    # High-risk opioids
+    "fentanyl", "methadone", "buprenorphine",
+    # Oncology
+    "tamoxifen", "isotretinoin", "methotrexate",
+    # Antidepressants with narrow TI / serotonin risk
+    "amitriptyline", "clomipramine", "imipramine", "nortriptyline",
+    # Antipsychotics — clozapine requires strict monitoring
+    "clozapine", "haloperidol",
 })
+
+# Known high-risk drug PAIRS — any combination → always CAUTION/AVOID regardless of label
+# Format: frozenset of two lowercase drug names
+HIGH_RISK_PAIRS: frozenset[frozenset[str]] = frozenset({
+    frozenset({"warfarin", "aspirin"}),           # major bleeding
+    frozenset({"warfarin", "ibuprofen"}),         # major bleeding
+    frozenset({"warfarin", "naproxen"}),          # major bleeding
+    frozenset({"warfarin", "diclofenac"}),        # major bleeding
+    frozenset({"warfarin", "celecoxib"}),         # moderate bleeding
+    frozenset({"apixaban", "aspirin"}),           # increased bleeding
+    frozenset({"apixaban", "ibuprofen"}),         # increased bleeding
+    frozenset({"rivaroxaban", "aspirin"}),        # increased bleeding
+    frozenset({"rivaroxaban", "ibuprofen"}),      # increased bleeding
+    frozenset({"clopidogrel", "aspirin"}),        # dual antiplatelet — monitor
+    frozenset({"clopidogrel", "omeprazole"}),     # CYP2C19 — reduced efficacy
+    frozenset({"methotrexate", "ibuprofen"}),     # methotrexate toxicity
+    frozenset({"methotrexate", "naproxen"}),      # methotrexate toxicity
+    frozenset({"lithium", "ibuprofen"}),          # lithium toxicity
+    frozenset({"lithium", "naproxen"}),           # lithium toxicity
+    frozenset({"lithium", "diclofenac"}),         # lithium toxicity
+    frozenset({"digoxin", "amiodarone"}),         # digoxin toxicity
+    frozenset({"digoxin", "verapamil"}),          # digoxin toxicity
+    frozenset({"digoxin", "diltiazem"}),          # digoxin toxicity
+    frozenset({"sotalol", "amiodarone"}),         # QT prolongation / fatal arrhythmia
+    frozenset({"haloperidol", "amiodarone"}),     # QT prolongation
+    frozenset({"sildenafil", "nitroglycerin"}),   # severe hypotension / fatal
+    frozenset({"tadalafil", "nitroglycerin"}),    # severe hypotension / fatal
+    frozenset({"sildenafil", "isosorbide mononitrate"}),  # severe hypotension
+    frozenset({"sertraline", "tramadol"}),        # serotonin syndrome
+    frozenset({"fluoxetine", "tramadol"}),        # serotonin syndrome
+    frozenset({"linezolid", "sertraline"}),       # serotonin syndrome / MAOI effect
+    frozenset({"linezolid", "fluoxetine"}),       # serotonin syndrome
+    frozenset({"metformin", "ibuprofen"}),        # kidney strain / lactic acidosis risk
+    frozenset({"metformin", "naproxen"}),         # kidney strain
+    frozenset({"lisinopril", "ibuprofen"}),       # reduced antihypertensive effect + AKI
+    frozenset({"lisinopril", "naproxen"}),        # AKI triple whammy risk
+    frozenset({"lisinopril", "potassium chloride"}), # hyperkalemia
+    frozenset({"lisinopril", "spironolactone"}),  # hyperkalemia
+    frozenset({"isotretinoin", "tetracycline"}),  # pseudotumor cerebri
+    frozenset({"isotretinoin", "doxycycline"}),   # pseudotumor cerebri
+    frozenset({"isotretinoin", "minocycline"}),   # pseudotumor cerebri
+})
+
+# Emergency / overdose keywords → always escalate to emergency services
+_EMERGENCY_KEYWORDS: frozenset[str] = frozenset({
+    "overdose", "overdosed", "took too many", "took too much",
+    "can't breathe", "can't breathing", "difficulty breathing", "not breathing",
+    "unconscious", "unresponsive", "passed out", "chest pain", "chest tightness",
+    "heart attack", "stroke", "seizure", "seizures", "convulsions",
+    "severe allergic", "anaphylaxis", "throat closing", "throat swelling",
+    "suicidal", "suicide", "self-harm", "want to die", "kill myself",
+    "severe bleeding", "coughing blood", "vomiting blood", "blood in stool",
+    "severe reaction",
+})
+
+
+def detect_emergency(query: str) -> bool:
+    """
+    Return True if the query contains emergency / overdose keywords.
+    When True, the answer must escalate to emergency services immediately.
+    """
+    q = query.lower()
+    return any(kw in q for kw in _EMERGENCY_KEYWORDS)
+
+
+def check_high_risk_pair(drug_names: list[str]) -> Optional[tuple[str, str]]:
+    """
+    Return (drug_a, drug_b) if the combination is in HIGH_RISK_PAIRS, else None.
+    Used to upgrade verdict to CAUTION/AVOID regardless of label content.
+    """
+    lower = [d.lower() for d in drug_names]
+    for i, a in enumerate(lower):
+        for b in lower[i + 1:]:
+            if frozenset({a, b}) in HIGH_RISK_PAIRS:
+                return (a, b)
+    return None
 
 
 class RetrievalStatus(str, Enum):
@@ -260,6 +353,7 @@ def check_retrieval_guard(
     intent: QuestionIntent,
     fda_data: "dict | None",
     drug_names: "list[str]",
+    query: str = "",
 ) -> "tuple[bool, RetrievalStatus]":
     """
     Enforce the 'no retrieval, no answer' rule.
@@ -268,17 +362,25 @@ def check_retrieval_guard(
     If proceed=False, caller must return a REFUSED/INSUFFICIENT_DATA answer
     without calling Claude.
 
-    Rules
-    -----
-    • DOSING / CONTRAINDICATIONS / PREGNANCY_LACTATION → REFUSE if no label
-    • INTERACTION involving a high-risk drug            → REFUSE if no label
-    • All other intents                                 → proceed (lower confidence)
+    Rules (in priority order)
+    -------------------------
+    1. Emergency keywords (overdose, can't breathe, etc.)  → REFUSE always
+    2. DOSING / CONTRAINDICATIONS / PREGNANCY_LACTATION    → REFUSE if no label
+    3. INTERACTION with a high-risk drug                   → REFUSE if no label
+    4. Known HIGH_RISK_PAIR combination                    → proceed but flag
+    5. All other intents                                   → proceed (lower confidence)
     """
     has_label = bool(fda_data)
 
+    # Rule 1 — emergency queries must not get an automated answer
+    if query and detect_emergency(query):
+        return False, RetrievalStatus.REFUSED_NO_SOURCE
+
+    # Rule 2 — high-stakes intents need a label
     if intent in _NO_SOURCE_REFUSE_INTENTS and not has_label:
         return False, RetrievalStatus.REFUSED_NO_SOURCE
 
+    # Rule 3 — interactions involving narrow-TI drugs need a label
     if intent == QuestionIntent.INTERACTION:
         involves_high_risk = any(d.lower() in HIGH_RISK_DRUGS for d in drug_names)
         if involves_high_risk and not has_label:
@@ -498,6 +600,62 @@ _REFUSED_MESSAGES: dict[QuestionIntent, str] = {
         "labels at DailyMed before combining these medications."
     ),
 }
+
+# Message used when emergency keywords are detected
+_EMERGENCY_REFUSED_MESSAGE = (
+    "This appears to describe a medical emergency. "
+    "RxBuddy cannot provide emergency guidance — please call 911 (US) or your local emergency "
+    "number immediately, or contact Poison Control at 1-800-222-1222 (US)."
+)
+
+# Message used when a drug is not recognised in any known source
+_UNKNOWN_DRUG_MESSAGE = (
+    "The medication name could not be matched to an official drug record. "
+    "This may be a very rare drug, a misspelling, or a regional brand name. "
+    "Please verify the name and consult a licensed pharmacist or healthcare provider."
+)
+
+
+def build_emergency_answer(fetched_at: str) -> "RxBuddyAnswer":
+    """Return a hard-coded emergency escalation response (no Claude call)."""
+    return RxBuddyAnswer(
+        verdict="EMERGENCY",
+        intent=QuestionIntent.GENERAL.value,
+        retrieval_status=RetrievalStatus.REFUSED_NO_SOURCE.value,
+        confidence="HIGH",
+        short_answer=_EMERGENCY_REFUSED_MESSAGE,
+        rationale=[],
+        what_to_do=[],
+        emergency_escalation=[
+            "Call 911 (US) or your local emergency number immediately.",
+            "Contact Poison Control: 1-800-222-1222 (US) or visit poisoncontrol.org.",
+            "Do not wait — go to the nearest emergency room if needed.",
+        ],
+        citations=[],
+        last_reviewed=fetched_at,
+    )
+
+
+def build_unknown_drug_answer(drug_name: str, fetched_at: str) -> "RxBuddyAnswer":
+    """Return a standardised UNKNOWN_DRUG response when no source can be found."""
+    return RxBuddyAnswer(
+        verdict="CONSULT_PHARMACIST",
+        intent=QuestionIntent.GENERAL.value,
+        retrieval_status=RetrievalStatus.LABEL_NOT_FOUND.value,
+        confidence="LOW",
+        short_answer=_UNKNOWN_DRUG_MESSAGE,
+        rationale=[],
+        what_to_do=[
+            "Verify the spelling of the medication name.",
+            "Consult a licensed pharmacist or physician.",
+            f"Search DailyMed directly: https://dailymed.nlm.nih.gov/dailymed/search.cfm?query={drug_name}",
+        ],
+        emergency_escalation=[
+            "If you are experiencing an adverse reaction, call 911 or Poison Control immediately.",
+        ],
+        citations=[],
+        last_reviewed=fetched_at,
+    )
 
 
 def build_refused_answer(intent: QuestionIntent, fetched_at: str) -> RxBuddyAnswer:

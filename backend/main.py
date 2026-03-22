@@ -38,8 +38,14 @@ from answer_engine import (
     Citation,
     RetrievalStatus,
     HIGH_RISK_DRUGS,
+    HIGH_RISK_PAIRS,
+    detect_emergency,
+    check_high_risk_pair,
+    build_emergency_answer,
+    build_unknown_drug_answer,
 )
 import label_updater
+from drug_catalog import find_drug, is_high_risk as catalog_is_high_risk, is_known_drug
 
 
 # ---------- 1) Load secrets from .env ----------
@@ -940,21 +946,71 @@ def _generate_ai_answer(question: str) -> "tuple[str, list[dict], str, str]":
 
     logger.info("[Claude] API key found (first 8 chars): %s...", api_key[:8] if len(api_key) > 8 else "***")
 
+    # ── Emergency detection — must happen before any other logic ──────────────
+    fetched_at = datetime.now(timezone.utc).isoformat(timespec="seconds") + "Z"
+    if detect_emergency(question):
+        logger.warning("[Guardrail] Emergency keywords detected in query: %.80s", question)
+        emergency = build_emergency_answer(fetched_at)
+        emergency_text = (
+            f"VERDICT: EMERGENCY\n"
+            f"DIRECT: {emergency.short_answer}\n"
+            f"DO: {' | '.join(emergency.emergency_escalation)}\n"
+            f"DOCTOR: Call 911 immediately\n"
+            f"CONFIDENCE: HIGH\n"
+            f"SOURCES: Emergency Services"
+        )
+        return emergency_text, [], QuestionIntent.GENERAL.value, RetrievalStatus.REFUSED_NO_SOURCE.value
+
     # Ground answers in FDA + MedlinePlus data — extract all drugs, fetch label for primary
     drug_names = _extract_drug_names(question)
+
+    # Normalise drug names via drug catalog (brand → generic, spell-correct)
+    normalised: list[str] = []
+    for raw_name in drug_names:
+        rec = find_drug(raw_name)
+        normalised.append(rec.canonical_name if rec else raw_name)
+    drug_names = normalised
+
     drug_name = drug_names[0] if drug_names else _extract_drug_name(question)
+
+    # Unknown drug fallback: if we found a name but neither catalog nor OpenFDA knows it
+    if drug_name and not is_known_drug(drug_name):
+        fda_check, _ = _fetch_fda_label_with_raw(drug_name)
+        if not fda_check:
+            logger.info("[Guardrail] Unknown drug '%s' — returning unknown-drug answer", drug_name)
+            unknown = build_unknown_drug_answer(drug_name, fetched_at)
+            unknown_text = (
+                f"VERDICT: CONSULT_PHARMACIST\n"
+                f"DIRECT: {unknown.short_answer}\n"
+                f"DO: {' | '.join(unknown.what_to_do)}\n"
+                f"DOCTOR: {' | '.join(unknown.emergency_escalation)}\n"
+                f"CONFIDENCE: LOW\n"
+                f"SOURCES: RxNorm (rxnav.nlm.nih.gov)"
+            )
+            return unknown_text, [], QuestionIntent.GENERAL.value, RetrievalStatus.LABEL_NOT_FOUND.value
+
     intent_str = _classify_query_intent(question)
     intent_enum = QuestionIntent(intent_str) if intent_str in QuestionIntent._value2member_map_ else QuestionIntent.GENERAL
+
+    # Flag known high-risk pairs — logged so the prompt can be informed
+    risky_pair = check_high_risk_pair(drug_names)
+    if risky_pair:
+        logger.info("[Guardrail] Known high-risk pair detected: %s + %s", risky_pair[0], risky_pair[1])
+
+    # Supplement HIGH_RISK_DRUGS check with drug_catalog.is_high_risk
+    if intent_enum == QuestionIntent.INTERACTION:
+        for dn in drug_names:
+            if catalog_is_high_risk(dn):
+                logger.info("[Guardrail] Catalog flags '%s' as high-risk", dn)
 
     # Fetch label WITH raw result (populates label_updater cache)
     fda_data, raw_label = _fetch_fda_label_with_raw(drug_name) if drug_name else (None, None)
 
     # ── Retrieval Guard: refuse high-stakes questions without label source ──
-    proceed, retrieval_status_enum = check_retrieval_guard(intent_enum, fda_data, drug_names)
+    proceed, retrieval_status_enum = check_retrieval_guard(intent_enum, fda_data, drug_names, question)
     retrieval_status_str = retrieval_status_enum.value
 
     # Build citations from whatever label data we have (empty list when no label)
-    fetched_at = datetime.now(timezone.utc).isoformat(timespec="seconds") + "Z"
     cit_objects = build_citations(fda_data, raw_label, drug_name or "", intent_enum, fetched_at)
     citations_dicts = [c.model_dump() for c in cit_objects]
 
