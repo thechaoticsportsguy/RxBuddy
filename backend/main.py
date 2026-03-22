@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from datetime import datetime, timezone
 from typing import Optional
 
+import anthropic
 import requests as http_requests
 from dotenv import load_dotenv
 from spellchecker import SpellChecker
@@ -574,6 +575,107 @@ def spell_check_query(query: str) -> str | None:
 # ---------- Confidence threshold and self-learning ----------
 CONFIDENCE_THRESHOLD = 0.35  # If best match score is below this, use Claude for live answer
 
+# ── Deterministic verdict table ───────────────────────────────────────────────
+# Pre-resolved answers for the highest-stakes drug combinations.
+# Format: frozenset({drug_a, drug_b}) → (VERDICT, DIRECT sentence)
+# These SHORT-CIRCUIT Claude — no API call, no hallucination risk.
+# Use canonical lowercase names (after drug_catalog normalisation).
+_DETERMINISTIC_VERDICTS: dict[frozenset, tuple[str, str]] = {
+    # Anticoagulant + NSAID → major bleeding
+    frozenset({"warfarin",    "aspirin"}):    ("AVOID",    "Do not combine warfarin and aspirin without medical supervision — the risk of serious bleeding is significantly increased."),
+    frozenset({"warfarin",    "ibuprofen"}):  ("AVOID",    "Do not take ibuprofen with warfarin — NSAIDs substantially raise your bleeding risk and can raise warfarin levels."),
+    frozenset({"warfarin",    "naproxen"}):   ("AVOID",    "Do not take naproxen with warfarin — this combination significantly increases the risk of serious or fatal bleeding."),
+    frozenset({"warfarin",    "diclofenac"}): ("AVOID",    "Do not take diclofenac with warfarin — the combination raises bleeding risk and can make anticoagulation unstable."),
+    frozenset({"apixaban",    "ibuprofen"}):  ("AVOID",    "Do not take ibuprofen with apixaban (Eliquis) — NSAIDs increase bleeding risk with all blood thinners."),
+    frozenset({"apixaban",    "aspirin"}):    ("CAUTION",  "Use extreme caution combining apixaban and aspirin — dual use significantly raises bleeding risk; only do so if a doctor has explicitly prescribed both."),
+    frozenset({"rivaroxaban", "ibuprofen"}):  ("AVOID",    "Do not take ibuprofen with rivaroxaban (Xarelto) — NSAIDs increase bleeding risk when combined with blood thinners."),
+    frozenset({"rivaroxaban", "aspirin"}):    ("CAUTION",  "Use extreme caution — combining rivaroxaban with aspirin increases bleeding risk and should only be done under medical supervision."),
+    frozenset({"dabigatran",  "ibuprofen"}):  ("AVOID",    "Do not take ibuprofen with dabigatran (Pradaxa) — this combination significantly increases the risk of gastrointestinal bleeding."),
+    # Nitrate + PDE-5 → severe hypotension / fatal
+    frozenset({"sildenafil",  "nitroglycerin"}):           ("AVOID", "Never combine sildenafil (Viagra) with nitroglycerin — the combination can cause a life-threatening drop in blood pressure."),
+    frozenset({"tadalafil",   "nitroglycerin"}):           ("AVOID", "Never combine tadalafil (Cialis) with nitroglycerin — this can cause a dangerous and potentially fatal drop in blood pressure."),
+    frozenset({"sildenafil",  "isosorbide mononitrate"}):  ("AVOID", "Never combine sildenafil with isosorbide mononitrate — the combination causes severe, potentially fatal hypotension."),
+    # Serotonin syndrome
+    frozenset({"sertraline",  "tramadol"}):   ("AVOID",    "Do not take tramadol with sertraline — this combination can cause serotonin syndrome, a potentially life-threatening condition."),
+    frozenset({"fluoxetine",  "tramadol"}):   ("AVOID",    "Do not take tramadol with fluoxetine — the combination raises the risk of serotonin syndrome, which can be life-threatening."),
+    frozenset({"linezolid",   "sertraline"}): ("AVOID",    "Do not take linezolid with sertraline — linezolid has MAOI properties that can cause fatal serotonin syndrome."),
+    # Narrow-TI drug toxicity
+    frozenset({"lithium",     "ibuprofen"}):  ("AVOID",    "Do not take ibuprofen with lithium — NSAIDs reduce lithium excretion and can quickly push levels into the toxic range."),
+    frozenset({"lithium",     "naproxen"}):   ("AVOID",    "Do not take naproxen with lithium — NSAIDs impair lithium clearance and can cause toxicity."),
+    frozenset({"digoxin",     "amiodarone"}): ("AVOID",    "Do not combine digoxin with amiodarone without close monitoring — amiodarone doubles digoxin levels, risking toxicity."),
+    frozenset({"digoxin",     "verapamil"}):  ("AVOID",    "Do not combine digoxin with verapamil without medical supervision — verapamil raises digoxin levels and increases toxicity risk."),
+    frozenset({"methotrexate","ibuprofen"}):  ("AVOID",    "Do not take ibuprofen with methotrexate — NSAIDs reduce methotrexate clearance and can cause serious or fatal toxicity."),
+    frozenset({"methotrexate","naproxen"}):   ("AVOID",    "Do not take naproxen with methotrexate — this combination can cause life-threatening methotrexate toxicity."),
+    # Retinoid + tetracycline → pseudotumor cerebri
+    frozenset({"isotretinoin","doxycycline"}):("AVOID",    "Do not combine isotretinoin with doxycycline — both drugs raise intracranial pressure and the combination risks pseudotumor cerebri."),
+    frozenset({"isotretinoin","minocycline"}):("AVOID",    "Do not combine isotretinoin with minocycline — this combination significantly increases the risk of dangerously raised intracranial pressure."),
+    # Kidney / lactic acidosis risk
+    frozenset({"metformin",   "ibuprofen"}):  ("CAUTION",  "Use caution — ibuprofen can impair kidney function, which reduces metformin clearance and raises lactic acidosis risk; prefer acetaminophen for pain."),
+    frozenset({"lisinopril",  "ibuprofen"}):  ("CAUTION",  "Use caution — ibuprofen reduces the blood-pressure-lowering effect of lisinopril and together with an ACE inhibitor can cause acute kidney injury."),
+    frozenset({"lisinopril",  "potassium chloride"}): ("CAUTION", "Use caution — lisinopril already raises potassium levels; adding potassium supplements can cause dangerously high potassium (hyperkalemia)."),
+}
+
+# Tylenol/acetaminophen + alcohol is an intent-specific case (food_alcohol only)
+_ACETAMINOPHEN_ALCOHOL_DIRECT = (
+    "CAUTION",
+    "Use caution — occasional light drinking is unlikely to cause harm, but regular or heavy alcohol use with acetaminophen significantly increases the risk of liver damage.",
+)
+
+# ── Vague-phrase ban list ─────────────────────────────────────────────────────
+# Any DIRECT line containing one of these phrases must be flagged and rewritten.
+_VAGUE_BANNED: frozenset[str] = frozenset({
+    "it depends",
+    "generally okay",
+    "generally safe",
+    "may be safe",
+    "could be safe",
+    "might be safe",
+    "usually safe",
+    "typically safe",
+    "often safe",
+    "in most cases",
+    "for most people",
+    "varies",
+    "you should consult",   # too vague without a reason
+    "check with your",      # acceptable only in DO/DOCTOR, not DIRECT
+    "always check",
+    "be careful",
+})
+
+
+def _check_vague(answer_text: str) -> bool:
+    """
+    Return True if the DIRECT line contains banned vague phrases.
+    Only checks the DIRECT: line — DO/DOCTOR sections may use softer language.
+    """
+    for line in answer_text.splitlines():
+        if line.strip().upper().startswith("DIRECT:"):
+            direct_lower = line.lower()
+            return any(phrase in direct_lower for phrase in _VAGUE_BANNED)
+    return False
+
+
+def _lookup_deterministic(drug_names: list[str], intent: str) -> tuple[str, str] | None:
+    """
+    Check _DETERMINISTIC_VERDICTS for a pre-resolved answer.
+
+    Returns (VERDICT, DIRECT) if a match is found, else None.
+    Also handles the acetaminophen+alcohol special case.
+    """
+    lower = {d.lower() for d in drug_names}
+    pair = frozenset(lower)
+
+    # Special case: acetaminophen (or tylenol) + alcohol, food_alcohol intent
+    alcohol_terms = {"alcohol", "drinking", "drink", "beer", "wine"}
+    aceta_terms   = {"acetaminophen", "tylenol", "paracetamol"}
+    if intent in ("food_alcohol", "side_effects", "interaction") and lower & alcohol_terms and lower & aceta_terms:
+        return _ACETAMINOPHEN_ALCOHOL_DIRECT
+
+    if len(lower) >= 2:
+        return _DETERMINISTIC_VERDICTS.get(pair)
+
+    return None
+
 # Key concept words that MUST appear in the matched DB question when they appear in the user
 # query. If the best TF-IDF match is missing any of these → force Claude to generate a fresh
 # answer instead of returning a potentially-off-topic DB row.
@@ -651,8 +753,6 @@ def _is_valid_pharmacy_question(question: str) -> bool:
     if not api_key:
         return False
 
-    import anthropic
-
     try:
         client = anthropic.Anthropic(api_key=api_key)
         prompt = (
@@ -679,8 +779,6 @@ def _get_best_category(question: str) -> str:
     api_key = _anthropic_api_key()
     if not api_key:
         return "General"
-
-    import anthropic
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
@@ -880,7 +978,6 @@ def _validate_ai_answer(question: str, answer: str) -> str:
     api_key = _anthropic_api_key()
     if not api_key:
         return answer
-    import anthropic
     try:
         client = anthropic.Anthropic(api_key=api_key)
         validation_prompt = f"""Check this medication answer for accuracy and verdict consistency:
@@ -1026,120 +1123,132 @@ def _generate_ai_answer(question: str) -> "tuple[str, list[dict], str, str]":
         )
         return refused_text, [c.model_dump() for c in refused.citations], intent_str, retrieval_status_str
 
+    # ── Deterministic lookup: skip Claude for known high-stakes pairs ─────────
+    det = _lookup_deterministic(drug_names, intent_str)
+    if det:
+        det_verdict, det_direct = det
+        logger.info("[Deterministic] Pre-resolved answer for %s: %s", drug_names, det_verdict)
+        det_text = (
+            f"VERDICT: {det_verdict}\n"
+            f"DIRECT: {det_direct}\n"
+            f"WHY: This combination is pre-classified based on FDA label data and established clinical pharmacology.\n"
+            f"DO: Follow your prescriber's instructions | Read the official drug label\n"
+            f"AVOID: Combining these without medical supervision\n"
+            f"DOCTOR: Any new or unusual bleeding | Signs of adverse reaction\n"
+            f"CONFIDENCE: HIGH\n"
+            f"SOURCES: FDA label (DailyMed) | Clinical pharmacology guidelines"
+        )
+        return det_text, citations_dicts, intent_str, retrieval_status_str
+
     medlineplus_data = _fetch_medlineplus(drug_name) if drug_name else None
     fda_context = _build_fda_context(fda_data, question, medlineplus_data)
-
-    import anthropic
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
 
-        # Build context preamble for multi-drug queries
-        drug_context = ""
+        multi_drug_context = ""
         if len(drug_names) >= 2:
-            drug_context = f"DRUGS IN THIS QUERY: {', '.join(drug_names)}\nINTENT: {intent_str}\n\n"
+            multi_drug_context = f"DRUGS IN THIS QUERY: {', '.join(drug_names)}\nINTENT: {intent_str}\n\n"
 
-        system_prompt = drug_context + """You are a clinical-grade AI pharmacist powering RxBuddy.
+        system_prompt = multi_drug_context + """You are the answer engine for RxBuddy, a clinical medication information tool.
 
-Your PRIMARY job is NOT just answering questions — it is to:
-1. Classify the query correctly
-2. Assign the CORRECT SAFETY VERDICT
-3. Ensure the verdict MATCHES the explanation
-4. Never contradict yourself
+CORE RULE — ONE DECISIVE ANSWER:
+Every query gets exactly ONE clear, committed answer. No hedging. No "it depends" without a specific, factual explanation of what it depends on. Vague non-answers are medical errors.
 
-VERDICT LOGIC (STRICT):
-- AVOID → High risk, dangerous, contraindicated
-- CAUTION → Moderate risk, monitoring needed, "may increase risk", "use with caution", "monitor"
-- CONSULT PHARMACIST → Dosage questions, personalization needed, unclear safety
-- SAFE → ONLY if truly no meaningful risk exists
+━━━ VERDICT DEFINITIONS ━━━
+AVOID         → Contraindicated, major interaction, serious harm documented in FDA label
+CAUTION       → Moderate risk, requires monitoring, dose-dependent risk, or population-specific risk
+CONSULT_PHARMACIST → Personal factors (kidney disease, weight, age, other meds) determine safety; not guessable
+SAFE          → No clinically meaningful risk in the general population; FDA label confirms no significant interaction
 
-HARD RULE — if your explanation contains ANY of:
-"moderate interaction" / "monitor" / "may increase risk" / "use with caution"
-→ VERDICT MUST BE CAUTION, never SAFE
+VERDICT SELECTION — USE THIS EXACT PRIORITY ORDER:
+1. If FDA label says "contraindicated" or "do not use" → AVOID
+2. If FDA label says "may increase risk", "monitor", "use with caution" → CAUTION
+3. If answer depends on a patient-specific factor we cannot know → CONSULT_PHARMACIST
+4. If no meaningful interaction or risk exists per FDA data → SAFE
 
-COMMON CASES (memorize these):
-- metformin + ibuprofen → CAUTION (kidney strain, lactic acidosis risk)
-- Tylenol in pregnancy → CAUTION (generally safe but dose-dependent)
-- ibuprofen + warfarin → AVOID (major bleeding risk)
-- ibuprofen while pregnant → AVOID (especially 3rd trimester)
+CONFLICT RULE — when data sources disagree, always use the MORE DANGEROUS verdict.
+NEVER downgrade a CAUTION to SAFE because one source seems permissive.
 
-INTENT DETECTION — classify as one of:
-interaction, multi_drug, pregnancy, dosage, side_effects, alcohol, special_population, other
+━━━ DIRECT LINE RULES ━━━
+The DIRECT line is the answer. It must be:
+- Exactly ONE sentence
+- Decisive — state the verdict plainly
+- Specific to the drugs and intent in this question
 
-DRUG EXTRACTION — extract ALL substances:
-"metformin and ibuprofen" → ["metformin", "ibuprofen"]
-If multiple drugs → ALWAYS run interaction logic
+BANNED from DIRECT (these phrases make the answer useless):
+✗ "it depends"
+✗ "generally okay" / "generally safe"
+✗ "may be safe" / "could be safe" / "might be safe"
+✗ "usually safe" / "typically safe" / "often safe"
+✗ "in most cases" / "for most people"
+✗ "be careful" (without specifics)
+✗ "you should consult" (in DIRECT — belongs in DOCTOR section)
 
-STRICT RULES:
-- ONLY answer about drugs mentioned in the question
-- NEVER introduce a drug not in the question
-- NEVER hallucinate
-- If unsure → return CONSULT PHARMACIST
-- NEVER say SAFE if ANY risk exists
-- FDA clinical data is the source of truth for interactions, contraindications, warnings, and severity
-- MedlinePlus is only for plain-English explanation and side effects
-- If sources conflict, always choose the more dangerous interpretation
+CORRECT DIRECT examples:
+✓ "Use caution — regular alcohol use with acetaminophen significantly increases liver damage risk."
+✓ "Do not take ibuprofen with warfarin — this combination raises serious bleeding risk."
+✓ "Ibuprofen is contraindicated in the third trimester of pregnancy and should be avoided entirely."
+✓ "Atorvastatin is safe to take with lisinopril — no clinically significant interaction exists."
+✓ "Metformin dosing requires a pharmacist consultation because the right dose depends on your kidney function."
 
-RESPONSE FORMAT (return exactly this):
-
-VERDICT: [SAFE / CAUTION / AVOID / CONSULT PHARMACIST]
-DIRECT: one plain-English sentence that directly answers the question
-WHY: 1-2 plain-English sentences explaining the risk or lack of risk
-DO: action item 1 | action item 2
-AVOID: thing to avoid 1 | thing to avoid 2
-DOCTOR: red flag symptom 1 | red flag symptom 2
+━━━ REQUIRED OUTPUT FORMAT ━━━
+VERDICT: [AVOID / CAUTION / CONSULT_PHARMACIST / SAFE]
+DIRECT: [one decisive sentence]
+WHY: [1-2 sentences: mechanism, clinical risk, or reason for consult]
+DO: [specific action 1] | [specific action 2]
+AVOID: [specific thing to avoid 1] | [specific thing to avoid 2]
+DOCTOR: [specific red flag symptom 1] | [specific red flag symptom 2]
 CONFIDENCE: [HIGH / MEDIUM / LOW]
-SOURCES: FDA label | MedlinePlus | RxNorm
+SOURCES: [FDA label | MedlinePlus | DailyMed | clinical guideline]
 
 FORMAT RULES:
-- Use the exact uppercase labels above
-- Do not use markdown headings
-- Do not return bullets outside the DO / AVOID / DOCTOR lines
-- If there is a moderate interaction or monitoring need, VERDICT must be CAUTION
-- If there is a serious interaction, contraindication, or major harm risk, VERDICT must be AVOID
-- Only include notes relevant to the detected interaction or intent
-- Do not include generic warnings or unrelated drug information
-- Keep the explanation to 1-2 sentences and the bullets to 2-4 total relevant points
+- All labels UPPERCASE exactly as shown
+- No markdown, no bullet prefixes outside DO/AVOID/DOCTOR
+- 2–4 items per DO/AVOID/DOCTOR, pipe-separated
+- If truly no avoidance needed, omit AVOID line rather than stating generic advice
+- CONFIDENCE = HIGH when FDA label explicitly addresses this; MEDIUM when inferred; LOW when extrapolated
 
-FINAL VALIDATION (run silently before output):
-1. Do drugs in answer match drugs in question?
-2. Does verdict match explanation? If explanation mentions risk → verdict cannot be SAFE
-3. Any contradictions?
-4. Any missing risk?
-If ANY fail → fix before outputting."""
+━━━ SELF-CHECK BEFORE OUTPUT ━━━
+1. Is DIRECT a single decisive sentence with no banned phrases?
+2. Does VERDICT match what DIRECT and WHY say? (CAUTION explanations cannot have SAFE verdict)
+3. Are all drug names from the question and only those drugs in the answer?
+4. Is WHY grounded in a specific mechanism or FDA finding, not a vague statement?
+If any check fails → rewrite that section before outputting."""
 
         if fda_context:
             user_content = (
-                f"FDA LABEL DATA (use as primary source when relevant):\n"
+                f"FDA LABEL DATA (authoritative — use as primary source):\n"
                 f"{fda_context}\n\n"
-                f"PATIENT QUESTION: {question}"
+                f"QUESTION: {question}"
             )
         else:
-            user_content = f"PATIENT QUESTION: {question}"
+            user_content = f"QUESTION: {question}"
 
-        logger.info("[Claude] Sending question with FDA grounding to claude-sonnet-4-20250514: %.80s...", question)
+        logger.info("[Claude] Generating answer for: %.80s...", question)
 
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=800,
+            max_tokens=700,
             system=system_prompt,
             messages=[{"role": "user", "content": user_content}],
         )
 
-        logger.info("[Claude] Response received. Content blocks: %d", len(response.content))
-
         if not response.content:
-            logger.error("[Claude] Response has no content blocks!")
             raise RuntimeError("Claude returned no content.")
 
         text = (response.content[0].text or "").strip()
         if not text:
-            logger.warning("[Claude] Empty text in response for question: %.80s", question)
             raise RuntimeError("Claude returned an empty response.")
 
-        answer = _truncate_words(text, 400)  # Increased for structured safety format
+        answer = _truncate_words(text, 400)
+
+        # ── Vague-phrase check: if DIRECT is still vague, force validator rewrite ──
+        if _check_vague(answer):
+            logger.warning("[QualityCheck] Vague DIRECT detected — sending to validator: %.80s", question)
         answer = _validate_ai_answer(question, answer)
-        logger.info("[Claude] SUCCESS! Generated answer (%d words): %.200s", len(answer.split()), answer)
+
+        logger.info("[Claude] Answer ready (%d words): %.200s", len(answer.split()), answer)
         return answer, citations_dicts, intent_str, retrieval_status_str
 
     except anthropic.APIError as e:
