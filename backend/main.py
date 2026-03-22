@@ -108,24 +108,48 @@ def _extract_drug_name(question: str) -> str | None:
 
 
 def _extract_drug_names(question: str) -> list[str]:
-    """Extract ALL drug names mentioned in a question (not just the first)."""
+    """
+    Extract ALL drug names mentioned in a question.
+
+    Resolution order:
+    1. BRAND_TO_GENERIC map (legacy fast path, kept for compat)
+    2. Full drug_catalog (DrugRecord) — brand + canonical name matching
+    3. services.drug_resolver — Levenshtein + RxNorm fallback for everything else
+    """
     q_lower = question.lower()
     found: list[str] = []
 
+    # Legacy brand map (fast, no import overhead)
     for brand, generic in BRAND_TO_GENERIC.items():
         if brand in q_lower and generic not in found:
             found.append(generic)
 
-    all_drugs = [
-        "acetaminophen", "ibuprofen", "aspirin", "naproxen", "amoxicillin",
-        "metformin", "lisinopril", "omeprazole", "gabapentin", "sertraline",
-        "fluoxetine", "escitalopram", "prednisone", "azithromycin", "metoprolol",
-        "losartan", "amlodipine", "atorvastatin", "levothyroxine", "alprazolam",
-        "hydrocodone", "oxycodone", "tramadol", "warfarin", "ciprofloxacin",
-    ]
-    for drug in all_drugs:
-        if drug in q_lower and drug not in found:
-            found.append(drug)
+    # Full catalog: check every canonical name and every brand alias
+    try:
+        from drug_catalog import _CATALOG, _ALIAS_MAP  # backend/drug_catalog.py
+        # Canonical names
+        for canonical_key in _CATALOG:
+            if canonical_key in q_lower and canonical_key not in found:
+                found.append(canonical_key)
+        # Brand aliases → resolve to canonical
+        for alias, canonical_key in _ALIAS_MAP.items():
+            if alias in q_lower and canonical_key not in found:
+                found.append(canonical_key)
+    except Exception:
+        pass  # catalog not available — fall through to resolver
+
+    # Resolver-based extraction (catches misspellings + RxNorm unknowns)
+    # Only runs if the catalog found nothing — avoids redundant work on
+    # queries with well-known drug names.
+    if not found:
+        try:
+            from services.drug_resolver import extract_generic_names
+            resolved = extract_generic_names(question)
+            for g in resolved:
+                if g not in found:
+                    found.append(g)
+        except Exception:
+            pass
 
     return found
 
@@ -2676,6 +2700,35 @@ def search(req: SearchRequest) -> SearchResponse:
     user_query = req.query.strip()
     if not user_query:
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
+
+    # ── Drug normalization (Phase 6 wire-in) ─────────────────────────────────
+    # Resolve drug names before any search so the rest of the pipeline works
+    # with canonical generic names regardless of how the user spelled them.
+    # If the query names an entirely unrecognisable substance (not a known
+    # drug, not resolvable via RxNorm) and no other drugs are found, return
+    # a CONSULT response immediately without hitting the DB or Claude.
+    try:
+        from services.drug_resolver import resolve_query_drugs
+        _resolved_drugs = resolve_query_drugs(user_query)
+        if _resolved_drugs:
+            # Rewrite query tokens: replace misspelled/brand names with generics
+            _rewritten = user_query
+            for _rd in _resolved_drugs:
+                _inp = _rd.get("input", "")
+                _gen = _rd.get("generic", "")
+                _cor = _rd.get("corrected", "")
+                # Replace corrected spelling if it differs from the original input
+                if _cor and _cor.lower() != _inp.lower() and _cor.lower() in _rewritten.lower():
+                    _rewritten = re.sub(
+                        re.escape(_cor), _gen, _rewritten, flags=re.IGNORECASE
+                    )
+            if _rewritten != user_query:
+                logger.info(
+                    "[DrugResolver] Rewrote query: '%s' → '%s'", user_query, _rewritten
+                )
+                user_query = _rewritten
+    except Exception as _dr_exc:
+        logger.debug("[DrugResolver] Skipped (error): %s", _dr_exc)
 
     logger.info("[Search] Checking exact match for: %.80s", user_query)
 

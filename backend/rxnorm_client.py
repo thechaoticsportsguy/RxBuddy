@@ -140,7 +140,7 @@ def approximate_match(drug_name: str, max_entries: int = 5) -> list[dict]:
         return [
             {
                 "rxcui": str(c.get("rxcui", "")),
-                "score": int(c.get("score", 0)),
+                "score": int(float(c.get("score", 0))),
                 "name":  str(c.get("name", "")),
             }
             for c in candidates
@@ -185,10 +185,10 @@ def get_brand_and_generic(rxcui: str) -> dict[str, list[str]]:
     if not rxcui:
         return result
     try:
-        data = _get(
-            f"{_RXNAV_BASE}/rxcui/{rxcui}/related.json",
-            {"tty": "BN+IN"},
-        )
+        # Pass tty directly in the URL — requests percent-encodes '+' as '%2B'
+        # which the RxNorm API rejects with 400.  Embedding it in the URL string
+        # keeps the literal '+' delimiter that RxNorm expects.
+        data = _get(f"{_RXNAV_BASE}/rxcui/{rxcui}/related.json?tty=BN+IN")
         groups = data.get("relatedGroup", {}).get("conceptGroup") or []
         for group in groups:
             tty = group.get("tty", "")
