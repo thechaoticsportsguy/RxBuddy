@@ -2735,25 +2735,28 @@ def search(req: SearchRequest) -> SearchResponse:
     # STEP 1: Check for exact match FIRST (before any processing)
     exact_match = find_exact_match(user_query)
     if exact_match and exact_match.answer:
-        logger.info("[Search] Exact match found: Q#%d — returning from database", exact_match.id)
-        _log_search(user_query, exact_match.id)
-        return SearchResponse(
-            query=user_query,
-            results=[
-                QuestionMatch(
-                    id=exact_match.id,
-                    question=exact_match.question,
-                    category=exact_match.category,
-                    tags=exact_match.tags,
-                    score=1.0,
-                    answer=exact_match.answer,
-                    structured=_parse_structured_answer(exact_match.answer, exact_match.question),
-                )
-            ],
-            did_you_mean=None,
-            source="database",
-            saved_to_db=False,
-        )
+        if _is_corrupted_db_answer(exact_match.answer):
+            logger.warning("[DB] Corrupted answer in exact match Q#%d — bypassing to Claude", exact_match.id)
+        else:
+            logger.info("[Search] Exact match found: Q#%d — returning from database", exact_match.id)
+            _log_search(user_query, exact_match.id)
+            return SearchResponse(
+                query=user_query,
+                results=[
+                    QuestionMatch(
+                        id=exact_match.id,
+                        question=exact_match.question,
+                        category=exact_match.category,
+                        tags=exact_match.tags,
+                        score=1.0,
+                        answer=exact_match.answer,
+                        structured=_parse_structured_answer(exact_match.answer, exact_match.question),
+                    )
+                ],
+                did_you_mean=None,
+                source="database",
+                saved_to_db=False,
+            )
 
     logger.info("[Search] No exact match — running TF-IDF search")
 
@@ -2849,24 +2852,28 @@ def search(req: SearchRequest) -> SearchResponse:
                     ).mappings().first()
                 
                 if row and row.get("answer"):
-                    _log_search(user_query, best_id)
-                    return SearchResponse(
-                        query=user_query,
-                        results=[
-                            QuestionMatch(
-                                id=int(row["id"]),
-                                question=str(row["question"]),
-                                category=row.get("category"),
-                                tags=[str(t) for t in (row.get("tags") or [])],
-                                score=best_score,
-                                answer=str(row["answer"]),
-                                structured=_parse_structured_answer(str(row["answer"]), str(row["question"])),
-                            )
-                        ],
-                        did_you_mean=did_you_mean,
-                        source="database",
-                        saved_to_db=False,
-                    )
+                    answer_text = str(row["answer"])
+                    if _is_corrupted_db_answer(answer_text):
+                        logger.warning("[DB] Corrupted answer in near-exact match Q#%s — bypassing to Claude", row["id"])
+                    else:
+                        _log_search(user_query, best_id)
+                        return SearchResponse(
+                            query=user_query,
+                            results=[
+                                QuestionMatch(
+                                    id=int(row["id"]),
+                                    question=str(row["question"]),
+                                    category=row.get("category"),
+                                    tags=[str(t) for t in (row.get("tags") or [])],
+                                    score=best_score,
+                                    answer=answer_text,
+                                    structured=_parse_structured_answer(answer_text, str(row["question"])),
+                                )
+                            ],
+                            did_you_mean=did_you_mean,
+                            source="database",
+                            saved_to_db=False,
+                        )
             except Exception as e:
                 logger.error("[Search] Error fetching near-exact match: %s", e)
 
