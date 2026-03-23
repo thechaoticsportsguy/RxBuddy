@@ -11,6 +11,16 @@ venv/
 .DS_Store
 Thumbs.db
 
+# IDE / tooling
+.claude/
+.cursor*/
+
+# Test artifacts
+backend/tests/results/
+
+# Frontend env overrides
+frontend/.env.local
+
 # Next.js / frontend
 frontend/node_modules/
 frontend/.next/
@@ -18,4 +28,4 @@ frontend/.turbo/
 frontend/out/
 frontend/.env
 frontend/.env.*
-!frontend/.env.local
+!frontend/.env.example
