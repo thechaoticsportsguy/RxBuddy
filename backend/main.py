@@ -1124,6 +1124,173 @@ def _cache_set(key: str, answer_text: str, citations: list, intent_str: str, rs:
     _ANSWER_CACHE[key] = (answer_text, citations, intent_str, rs, datetime.now(timezone.utc).timestamp())
 
 
+# ── Per-API external source cache ─────────────────────────────────────────────
+# Separate from the main answer cache — different TTLs per data source.
+# Key format: "{source}:{normalized_term}"
+# Value: (data, timestamp_float)
+_EXT_CACHE: dict[str, tuple] = {}
+_EXT_TTL: dict[str, int] = {
+    "adverse_events": 21600,   # 6 hours  — FAERS data changes infrequently
+    "recalls":        3600,    # 1 hour   — recalls can be added any time
+    "rxnav_interact": 86400,   # 24 hours — DrugBank data is stable
+    "medlineplus":    43200,   # 12 hours — MedlinePlus updated periodically
+}
+
+
+def _ext_cache_get(source: str, term: str):
+    """Return cached external data or None if missing / expired."""
+    key = f"{source}:{term.strip().lower()}"
+    entry = _EXT_CACHE.get(key)
+    if not entry:
+        return None
+    data, ts = entry
+    ttl = _EXT_TTL.get(source, 3600)
+    if (datetime.now(timezone.utc).timestamp() - ts) > ttl:
+        _EXT_CACHE.pop(key, None)
+        return None
+    return data
+
+
+def _ext_cache_set(source: str, term: str, data) -> None:
+    """Store external API data in the per-API cache."""
+    key = f"{source}:{term.strip().lower()}"
+    _EXT_CACHE[key] = (data, datetime.now(timezone.utc).timestamp())
+
+
+def _fetch_all_external_sources(
+    drug_name: str,
+    drug_names: list[str],
+    intent_str: str,
+) -> dict:
+    """
+    Parallel-fetch supplemental data from FAERS, FDA Enforcement, and RxNav.
+
+    Uses ThreadPoolExecutor so all HTTP calls run concurrently (each has a 5s
+    network timeout; the executor gives each task 6s before giving up).
+
+    Returns a dict with keys:
+        adverse_events  — list[str]  FAERS MedDRA reaction terms
+        recalls         — list[dict] active Class I/II FDA recalls
+        rxnav_interact  — list[dict] vetted interactions (interaction intent only)
+        sources_used    — list[str]  source labels that returned data
+    """
+    import concurrent.futures
+    from services.openfda_client import get_adverse_events, get_recalls
+    from services.rxnorm_client import get_drug_interactions
+
+    results: dict = {
+        "adverse_events": [],
+        "recalls": [],
+        "rxnav_interact": [],
+        "sources_used": [],
+    }
+
+    if not drug_name:
+        return results
+
+    norm_name = drug_name.strip().lower()
+
+    def _ae():
+        cached = _ext_cache_get("adverse_events", norm_name)
+        if cached is not None:
+            return cached
+        data = get_adverse_events(drug_name)
+        _ext_cache_set("adverse_events", norm_name, data)
+        return data
+
+    def _rec():
+        cached = _ext_cache_get("recalls", norm_name)
+        if cached is not None:
+            return cached
+        data = get_recalls(drug_name)
+        _ext_cache_set("recalls", norm_name, data)
+        return data
+
+    def _rxnav():
+        if intent_str != "interaction" or len(drug_names) < 2:
+            return []
+        r1 = _fetch_rxcui(drug_names[0])
+        r2 = _fetch_rxcui(drug_names[1])
+        if not r1 or not r2:
+            return []
+        cache_key = f"{min(r1, r2)}-{max(r1, r2)}"
+        cached = _ext_cache_get("rxnav_interact", cache_key)
+        if cached is not None:
+            return cached
+        data = get_drug_interactions(r1, r2)
+        _ext_cache_set("rxnav_interact", cache_key, data)
+        return data
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+        f_ae    = pool.submit(_ae)
+        f_rec   = pool.submit(_rec)
+        f_rxnav = pool.submit(_rxnav)
+
+        try:
+            results["adverse_events"] = f_ae.result(timeout=6) or []
+        except Exception:
+            results["adverse_events"] = []
+
+        try:
+            results["recalls"] = f_rec.result(timeout=6) or []
+        except Exception:
+            results["recalls"] = []
+
+        try:
+            results["rxnav_interact"] = f_rxnav.result(timeout=6) or []
+        except Exception:
+            results["rxnav_interact"] = []
+
+    sources_used: list[str] = []
+    if results["adverse_events"]:
+        sources_used.append("FDA FAERS")
+    if results["recalls"]:
+        sources_used.append("FDA Enforcement (recalls)")
+    if results["rxnav_interact"]:
+        sources_used.append("RxNav/DrugBank")
+    results["sources_used"] = sources_used
+
+    return results
+
+
+def _build_enriched_context(ext: dict, intent_str: str) -> str:
+    """
+    Build a supplemental context block from external source data.
+    Appended after the main fda_context before sending to Claude.
+    """
+    parts: list[str] = []
+
+    # RxNav vetted interactions — PRIMARY signal for interaction intent
+    rxnav = ext.get("rxnav_interact", [])
+    if rxnav:
+        parts.append("━━━ RXNAV VETTED INTERACTIONS (DrugBank / ONCHigh — authoritative) ━━━")
+        for ix in rxnav[:3]:
+            sev  = (ix.get("severity") or "UNKNOWN").upper()
+            desc = ix.get("description", "")
+            src  = ix.get("source", "")
+            d1   = ix.get("drug1", "")
+            d2   = ix.get("drug2", "")
+            parts.append(f"[{sev}] {d1} + {d2}: {desc} (source: {src})")
+
+    # FAERS adverse events — supplement side_effects and what_is answers
+    ae = ext.get("adverse_events", [])
+    if ae and intent_str in ("side_effects", "what_is", "general"):
+        parts.append("━━━ FDA FAERS ADVERSE EVENTS (patient-reported, frequency-ranked) ━━━")
+        parts.append("Most frequently reported reactions: " + ", ".join(ae[:12]))
+
+    # Recalls — always include when Class I/II found (high-safety signal)
+    recalls = ext.get("recalls", [])
+    if recalls:
+        parts.append("━━━ ACTIVE FDA RECALLS (Class I/II — include in WARNING section) ━━━")
+        for r in recalls[:2]:
+            cls  = r.get("classification", "")
+            rsn  = r.get("reason_for_recall", "")[:200]
+            prod = r.get("product_description", "")[:100]
+            parts.append(f"[{cls}] {prod}: {rsn}")
+
+    return "\n\n".join(parts)
+
+
 # ---------- Slang normalization (zero API calls, runs before every search) ----------
 SPELLING_FIXES = {
     "tynenol": "tylenol",
@@ -1396,6 +1563,41 @@ def _generate_ai_answer(question: str) -> "tuple[str, list[dict], str, str]":
         fda_context = _build_multi_drug_context(all_labels, question, medlineplus_data)
     else:
         fda_context = _build_fda_context(fda_data, question, medlineplus_data, intent_str)
+
+    # ── External sources (parallel fetch: FAERS, recalls, RxNav interactions) ──
+    ext_sources = _fetch_all_external_sources(drug_name or "", drug_names, intent_str)
+    enriched = _build_enriched_context(ext_sources, intent_str)
+    if enriched:
+        fda_context = (fda_context + "\n\n" + enriched).strip() if fda_context else enriched
+
+    # Append external source names to citations so the frontend can show them
+    ext_sources_used = ext_sources.get("sources_used", [])
+    if ext_sources_used:
+        for src_label in ext_sources_used:
+            citations_dicts.append({
+                "id": f"ext_{len(citations_dicts)}",
+                "source": src_label,
+                "source_url": "",
+                "section": "external",
+                "section_label": src_label,
+                "drug_name": drug_name or "",
+                "date_fetched": fetched_at,
+            })
+
+    # For INTERACTION intent with vetted RxNav data, log it as the primary signal
+    if intent_str == "interaction" and ext_sources.get("rxnav_interact"):
+        logger.info(
+            "[RxNav] %d vetted interactions found — included as primary grounding signal",
+            len(ext_sources["rxnav_interact"]),
+        )
+
+    # For active Class I/II recalls — flag so the answer includes a warning
+    if ext_sources.get("recalls"):
+        logger.info(
+            "[openFDA] %d active Class I/II recall(s) found for '%s'",
+            len(ext_sources["recalls"]),
+            drug_name,
+        )
 
     try:
         client = anthropic.Anthropic(api_key=api_key, timeout=45.0)
