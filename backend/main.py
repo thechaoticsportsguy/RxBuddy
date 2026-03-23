@@ -45,6 +45,9 @@ from answer_engine import (
     check_high_risk_pair,
     build_emergency_answer,
     build_unknown_drug_answer,
+    build_intent_prompt,
+    enforce_verdict_by_intent,
+    strip_off_topic_drugs,
 )
 import label_updater
 from drug_catalog import find_drug, is_high_risk as catalog_is_high_risk, is_known_drug
@@ -460,12 +463,21 @@ def _build_multi_drug_context(
     return "\n\n".join(parts)
 
 
-def _build_fda_context(fda_data: dict | None, question: str, medlineplus_data: dict | None = None) -> str:
+def _build_fda_context(
+    fda_data: dict | None,
+    question: str,
+    medlineplus_data: dict | None = None,
+    intent_str: str = "",
+) -> str:
     """
     Build a grounded context string for Claude.
     FDA clinical data is the source of truth for interactions, contraindications,
     warnings, and severity. MedlinePlus is included only for patient-friendly
     explanations and side-effect descriptions.
+
+    intent_str controls which sections are included — SIDE_EFFECTS and other
+    single-drug intents never receive drug_interactions data, preventing MAOI
+    warnings from bleeding into side-effect answers.
     """
     if not fda_data and not medlineplus_data:
         return ""
@@ -492,7 +504,9 @@ def _build_fda_context(fda_data: dict | None, question: str, medlineplus_data: d
                 fda_sections.append(f"WARNINGS: {fda_data['warnings'][:500]}")
 
         if any(w in q_lower for w in ["interact", "interaction", "with", "mix", "combine", "together"]):
-            if fda_data.get("drug_interactions"):
+            # Only add drug_interactions for intents where it is appropriate
+            _no_int = frozenset({"side_effects", "what_is", "dosing", "pregnancy_lactation"})
+            if intent_str not in _no_int and fda_data.get("drug_interactions"):
                 fda_sections.append(f"DRUG INTERACTIONS: {fda_data['drug_interactions'][:500]}")
 
         if any(w in q_lower for w in ["shouldn't", "should not", "can't", "cannot", "avoid", "contraindication"]):
@@ -507,12 +521,19 @@ def _build_fda_context(fda_data: dict | None, question: str, medlineplus_data: d
             if fda_data.get("adverse_reactions"):
                 fda_sections.append(f"ADVERSE REACTIONS: {fda_data['adverse_reactions'][:500]}")
 
+        # Intents that must NEVER receive drug_interactions data — prevents MAOI
+        # bleeding into side-effects / what-is / dosing answers.
+        _no_interactions_intents = frozenset({
+            "side_effects", "what_is", "dosing", "contraindications", "pregnancy_lactation",
+        })
+        _include_interactions = intent_str not in _no_interactions_intents
+
         if len(fda_sections) <= 2:
             if fda_data.get("warnings"):
                 fda_sections.append(f"WARNINGS: {fda_data['warnings'][:400]}")
             if fda_data.get("contraindications"):
                 fda_sections.append(f"CONTRAINDICATIONS: {fda_data['contraindications'][:400]}")
-            if fda_data.get("drug_interactions"):
+            if _include_interactions and fda_data.get("drug_interactions"):
                 fda_sections.append(f"DRUG INTERACTIONS: {fda_data['drug_interactions'][:400]}")
             if fda_data.get("dosage_and_administration"):
                 fda_sections.append(f"DOSAGE AND ADMINISTRATION: {fda_data['dosage_and_administration'][:300]}")
@@ -1369,160 +1390,26 @@ def _generate_ai_answer(question: str) -> "tuple[str, list[dict], str, str]":
 
     medlineplus_data = _fetch_medlineplus(drug_name) if drug_name else None
 
-    # Build grounded context — multi-drug gets cross-referenced label context
+    # Build grounded context — intent-aware so drug_interactions is excluded for
+    # single-drug intents (prevents MAOI bleeding into side-effects answers)
     if len(drug_names) >= 2 and all_labels:
         fda_context = _build_multi_drug_context(all_labels, question, medlineplus_data)
     else:
-        fda_context = _build_fda_context(fda_data, question, medlineplus_data)
+        fda_context = _build_fda_context(fda_data, question, medlineplus_data, intent_str)
 
     try:
         client = anthropic.Anthropic(api_key=api_key, timeout=45.0)
 
-        multi_drug_context = ""
-        if len(drug_names) >= 2:
-            multi_drug_context = f"DRUGS IN THIS QUERY: {', '.join(drug_names)}\nINTENT: {intent_str}\n\n"
-
-        system_prompt = multi_drug_context + """You are the answer engine for RxBuddy, a clinical medication information tool.
-
-CORE RULE — ONE DECISIVE ANSWER:
-Every query gets exactly ONE clear, committed answer. No hedging. No "it depends" without a specific, factual explanation of what it depends on. Vague non-answers are medical errors.
-
-━━━ VERDICT DEFINITIONS ━━━
-AVOID         → Contraindicated, major interaction, serious harm documented in FDA label
-CAUTION       → Moderate risk, requires monitoring, dose-dependent risk, or population-specific risk
-CONSULT_PHARMACIST → Personal factors (kidney disease, weight, age, other meds) determine safety; not guessable
-SAFE          → No clinically meaningful risk in the general population; FDA label confirms no significant interaction
-
-VERDICT SELECTION — USE THIS EXACT PRIORITY ORDER:
-1. If FDA label says "contraindicated" or "do not use" → AVOID
-2. If FDA label says "may increase risk", "monitor", "use with caution" → CAUTION
-3. If answer depends on a patient-specific factor we cannot know → CONSULT_PHARMACIST
-4. If no meaningful interaction or risk exists per FDA data → SAFE
-
-CONFLICT RULE — when data sources disagree, always use the MORE DANGEROUS verdict.
-NEVER downgrade a CAUTION to SAFE because one source seems permissive.
-
-━━━ DIRECT LINE RULES ━━━
-The DIRECT line is the answer. It must be:
-- Exactly ONE sentence
-- Decisive — state the verdict plainly
-- Specific to the drugs and intent in this question
-
-BANNED from DIRECT (these phrases make the answer useless):
-✗ "it depends"
-✗ "generally okay" / "generally safe"
-✗ "may be safe" / "could be safe" / "might be safe"
-✗ "usually safe" / "typically safe" / "often safe"
-✗ "in most cases" / "for most people"
-✗ "be careful" (without specifics)
-✗ "you should consult" (in DIRECT — belongs in DOCTOR section)
-
-CORRECT DIRECT examples:
-✓ "Use caution — regular alcohol use with acetaminophen significantly increases liver damage risk."
-✓ "Do not take ibuprofen with warfarin — this combination raises serious bleeding risk."
-✓ "Ibuprofen is contraindicated in the third trimester of pregnancy and should be avoided entirely."
-✓ "Atorvastatin is safe to take with lisinopril — no clinically significant interaction exists."
-✓ "Metformin dosing requires a pharmacist consultation because the right dose depends on your kidney function."
-
-━━━ REQUIRED OUTPUT FORMAT ━━━
-VERDICT: [AVOID / CAUTION / CONSULT_PHARMACIST / SAFE]
-ANSWER: [one decisive sentence — the primary answer]
-WARNING: [one sentence safety warning — omit this line entirely if SAFE with no caveats]
-DETAILS: [clinical fact 1] | [clinical fact 2] | [clinical fact 3]
-ACTION: [specific action 1] | [specific action 2] | [specific action 3]
-ARTICLE: [1–3 sentence explanation of mechanism, clinical risk, and context]
-CONFIDENCE: [HIGH / MEDIUM / LOW]
-SOURCES: [FDA label | MedlinePlus | DailyMed | clinical guideline]
-
-FORMAT RULES:
-- All labels UPPERCASE exactly as shown
-- No markdown, no bullet prefixes
-- 2–4 items per DETAILS and ACTION, pipe-separated
-- WARNING omitted (not left blank) when verdict is SAFE
-- ARTICLE must explain the "why" — mechanism, drug interaction pathway, or clinical context
-- CONFIDENCE = HIGH when FDA label explicitly addresses this; MEDIUM when inferred; LOW when extrapolated
-
-EXAMPLE (interaction query):
-VERDICT: CAUTION
-ANSWER: Use caution when combining Tylenol and alcohol — regular drinking raises liver damage risk.
-WARNING: Alcohol increases acetaminophen toxicity and may cause serious liver injury.
-DETAILS: Acetaminophen is metabolized in the liver | Alcohol depletes the enzyme that safely processes it | Risk increases with regular or heavy drinking
-ACTION: Limit alcohol to 1–2 drinks or less | Do not exceed 2g acetaminophen/day if drinking | Ask your pharmacist about safe dosing for your drinking pattern
-ARTICLE: Both acetaminophen and alcohol are processed by the liver's cytochrome P450 enzymes. When alcohol is consumed regularly, these enzymes are induced and produce more of a toxic acetaminophen metabolite (NAPQI), which can overwhelm the liver's glutathione stores and cause hepatotoxicity.
-CONFIDENCE: HIGH
-SOURCES: FDA label | DailyMed
-
-━━━ SELF-CHECK BEFORE OUTPUT ━━━
-1. Is ANSWER a single decisive sentence with no banned phrases?
-2. Does VERDICT match ANSWER and ARTICLE? (CAUTION explanations cannot have SAFE verdict)
-3. Are all drug names from the question present in the answer?
-4. Is ARTICLE grounded in a specific mechanism or FDA finding?
-If any check fails → rewrite that section before outputting."""
-
-        # ── Intent-specific grounding sentence injected into the user message ─────
-        drug_list_str = ", ".join(drug_names) if drug_names else (drug_name or "the medication")
-        _INTENT_TASK: dict[str, str] = {
-            "what_is": (
-                f"The patient asked: '{question}'\n"
-                f"The drug involved is: {drug_list_str}\n"
-                f"Explain WHAT {drug_list_str} IS: what medical condition(s) it treats, "
-                f"how it works (mechanism), and its drug class. "
-                f"Do NOT discuss side effects unless specifically asked. "
-                f"Answer ONLY about {drug_list_str}. Do not answer about a different drug."
-            ),
-            "side_effects": (
-                f"The patient asked: '{question}'\n"
-                f"The drug involved is: {drug_list_str}\n"
-                f"List the most important side effects of {drug_list_str}: most common first, "
-                f"then most serious. Include any black box warnings. "
-                f"Answer ONLY about {drug_list_str}. Do not answer about a different drug."
-            ),
-            "interaction": (
-                f"The patient asked: '{question}'\n"
-                f"The drugs involved are: {drug_list_str}\n"
-                f"Explain specifically whether {drug_list_str} interact. "
-                f"State: the interaction mechanism, severity, clinical significance, and what to do. "
-                f"Answer ONLY about these specific drugs. Do not answer about different drugs."
-            ),
-            "dosing": (
-                f"The patient asked: '{question}'\n"
-                f"The drug involved is: {drug_list_str}\n"
-                f"Provide standard dosing for {drug_list_str}: typical adult dose, frequency, "
-                f"max daily dose, and any renal/hepatic adjustments from the label. "
-                f"Answer ONLY about {drug_list_str}. Do not answer about a different drug."
-            ),
-            "safety": (
-                f"The patient asked: '{question}'\n"
-                f"The drug involved is: {drug_list_str}\n"
-                f"Answer directly whether {drug_list_str} is safe given the specific context "
-                f"in the question. State the risk level clearly — do not be vague. "
-                f"Answer ONLY about {drug_list_str}. Do not answer about a different drug."
-            ),
-            "contraindications": (
-                f"The patient asked: '{question}'\n"
-                f"The drug involved is: {drug_list_str}\n"
-                f"Explain the contraindications for {drug_list_str}: who should not take it and why. "
-                f"Answer ONLY about {drug_list_str}. Do not answer about a different drug."
-            ),
-        }
-        intent_task = _INTENT_TASK.get(intent_str, "")
-        grounding_prefix = (
-            f"{intent_task}\n\n" if intent_task else
-            f"The patient asked: '{question}'\nThe drug(s) involved: {drug_list_str}\n"
-            f"Answer ONLY about {drug_list_str}. Do not answer about a different drug.\n\n"
+        # ── Use completely isolated per-intent prompt — no shared fallback paths ──
+        system_prompt, user_content = build_intent_prompt(
+            intent_str=intent_str,
+            question=question,
+            drug_names=drug_names,
+            drug_name=drug_name or "",
+            fda_context=fda_context,
         )
 
-        if fda_context:
-            user_content = (
-                f"{grounding_prefix}"
-                f"FDA LABEL DATA (authoritative — use as primary source):\n"
-                f"{fda_context}\n\n"
-                f"QUESTION: {question}"
-            )
-        else:
-            user_content = f"{grounding_prefix}QUESTION: {question}"
-
-        logger.info("[Claude] Generating answer for: %.80s...", question)
+        logger.info("[Claude] Intent=%s — generating answer for: %.80s...", intent_str, question)
 
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
@@ -1540,14 +1427,23 @@ If any check fails → rewrite that section before outputting."""
 
         answer = _truncate_words(text, 400)
 
-        # ── Vague-phrase check: if DIRECT is still vague, force validator rewrite ──
+        # ── Vague-phrase check ────────────────────────────────────────────────
         if _check_vague(answer):
             logger.warning("[QualityCheck] Vague DIRECT detected — sending to validator: %.80s", question)
         answer = _validate_ai_answer(question, answer)
 
-        # ── Wrong-drug check on Claude's own output ──────────────────────────
+        # ── Phase 3: Enforce intent-specific verdict rules ────────────────────
+        answer = enforce_verdict_by_intent(intent_str, answer)
+
+        # ── Phase 4: Strip drug names / interaction classes not in query ──────
+        answer = strip_off_topic_drugs(drug_names, answer, intent_str)
+
+        # ── Wrong-drug check on Claude's own output ───────────────────────────
         if drug_names and _is_wrong_drug_answer(question, answer):
-            logger.warning("[QualityCheck] Claude returned wrong-drug answer for '%s' — using CONSULT fallback", question)
+            logger.warning(
+                "[QualityCheck] Claude returned wrong-drug answer for '%s' — using CONSULT fallback",
+                question,
+            )
             answer = (
                 f"VERDICT: CONSULT_PHARMACIST\n"
                 f"ANSWER: We could not generate a reliable answer for this medication. Please consult a pharmacist.\n"

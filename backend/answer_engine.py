@@ -121,12 +121,15 @@ ANSWER JSON SCHEMA  (RxBuddyAnswer)
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, Field
+
+_logger = logging.getLogger("rxbuddy.engine")
 
 
 # ── 1. INTENT CLASSIFIER ──────────────────────────────────────────────────────
@@ -199,27 +202,42 @@ _INTENT_KEYWORDS: list[tuple[QuestionIntent, tuple[str, ...]]] = [
 ]
 
 
+_SIDE_EFFECTS_STRONG_KW: tuple[str, ...] = (
+    "side effect", "side effects", "adverse effect", "adverse effects",
+    "adverse reaction", "adverse reactions",
+)
+
+
 def classify_intent(question: str, drug_count: int = 0) -> QuestionIntent:
     """
     Classify a user question into one of 9 intents.
 
     Priority order (first match wins):
-      INTERACTION (2+ drugs OR strong kw) > WHAT_IS > SIDE_EFFECTS > DOSING >
-      SAFETY > CONTRAINDICATIONS > PREGNANCY_LACTATION > FOOD_ALCOHOL > GENERAL
+      SIDE_EFFECTS (when drug_count ≤ 1 + SE keyword) >
+      INTERACTION (2+ drugs OR strong kw) >
+      WHAT_IS > SIDE_EFFECTS > DOSING > SAFETY > CONTRAINDICATIONS >
+      PREGNANCY_LACTATION > FOOD_ALCOHOL > GENERAL
+
+    Key rule: SIDE_EFFECTS always beats INTERACTION when only one drug is
+    present. "duloxetine side effects" has 1 drug → SIDE_EFFECTS, period.
 
     Examples
     --------
-    "can I take ibuprofen with warfarin?"         → INTERACTION
-    "what is metformin used for?"                 → WHAT_IS
-    "lisinopril is for what"                      → WHAT_IS
-    "what are the side effects of metformin?"     → SIDE_EFFECTS
-    "how much ibuprofen can I take?"              → DOSING
-    "is sertraline safe during pregnancy?"        → SAFETY
-    "can I take ibuprofen if I'm allergic?"       → CONTRAINDICATIONS
-    "can I drink alcohol with amoxicillin?"       → FOOD_ALCOHOL
-    "risperidone and heart problems"              → INTERACTION (2 drugs-ish)
+    "duloxetine side effects"             → SIDE_EFFECTS  (1 drug)
+    "side effects of ibuprofen"           → SIDE_EFFECTS  (1 drug)
+    "can I take ibuprofen with warfarin?" → INTERACTION   (2 drugs + 'with')
+    "what is metformin used for?"         → WHAT_IS
+    "lisinopril is for what"              → WHAT_IS
+    "how much ibuprofen can I take?"      → DOSING
+    "is sertraline safe during pregnancy?"→ SAFETY
+    "warfarin contraindications"          → CONTRAINDICATIONS
     """
     q = question.lower()
+
+    # ── SIDE_EFFECTS beats INTERACTION when only 1 drug is in the query ───────
+    # This prevents MAOI interaction warnings from bleeding into side-effect answers.
+    if drug_count <= 1 and any(kw in q for kw in _SIDE_EFFECTS_STRONG_KW):
+        return QuestionIntent.SIDE_EFFECTS
 
     # ── INTERACTION: strong keywords (no drug count required) OR weak keywords
     #    with 2+ drugs detected
@@ -885,3 +903,501 @@ SAMPLE_OUTPUTS: dict[str, dict] = {
         "last_reviewed": "2026-03-19T10:00:00Z",
     },
 }
+
+
+# ── 7. ISOLATED PER-INTENT PROMPT BUILDERS ────────────────────────────────────
+#
+# Each function returns (system_prompt, user_content).
+# ZERO shared fallback paths between intents — no cross-calling.
+
+_OUTPUT_FORMAT = """
+REQUIRED OUTPUT FORMAT — all labels UPPERCASE, no markdown:
+VERDICT: [AVOID / CAUTION / CONSULT_PHARMACIST / SAFE]
+ANSWER: [one decisive sentence]
+WARNING: [one sentence — omit this line entirely if not applicable]
+DETAILS: [fact 1] | [fact 2] | [fact 3]
+ACTION: [action 1] | [action 2] | [action 3]
+ARTICLE: [1-3 sentence explanation of mechanism or clinical context]
+CONFIDENCE: [HIGH / MEDIUM / LOW]
+SOURCES: [source 1 | source 2]
+
+FORMAT RULES:
+- All labels UPPERCASE exactly as shown
+- No markdown, no bullet prefixes, no JSON
+- 2-4 pipe-separated items in DETAILS and ACTION
+- WARNING line omitted (not blank) when not applicable"""
+
+
+def _prompt_side_effects(question: str, drug: str, fda_context: str) -> "tuple[str, str]":
+    system_prompt = f"""You are a clinical pharmacist answering a side effects question.
+
+SCOPE: Answer ONLY about the side effects of {drug}.
+
+━━━ HARD RULES — THESE CANNOT BE BROKEN ━━━
+1. Do NOT mention any other drug by name
+2. Do NOT discuss drug-drug interactions of any kind
+3. Do NOT mention MAOIs, serotonin syndrome, phenelzine, linezolid, or any interaction drug
+4. Do NOT use verdict AVOID — side effects questions are never AVOID
+5. VERDICT must be CAUTION — every drug has side effects that warrant monitoring
+6. The ANSWER line describes what side effects {drug} itself causes in the body
+7. Do NOT say "do not take with MAOIs" or any interaction warning in any section
+{_OUTPUT_FORMAT}"""
+
+    if fda_context:
+        user_content = (
+            f"PATIENT QUESTION: {question}\n"
+            f"DRUG: {drug}\n\n"
+            f"FDA LABEL DATA (use only the adverse reactions and warnings sections):\n"
+            f"{fda_context}\n\n"
+            f"List the side effects of {drug}. "
+            f"Do NOT mention other drugs or interactions."
+        )
+    else:
+        user_content = (
+            f"PATIENT QUESTION: {question}\n"
+            f"DRUG: {drug}\n\n"
+            f"List the common and serious side effects of {drug}. "
+            f"Do NOT mention other drugs or interactions."
+        )
+    return system_prompt, user_content
+
+
+def _prompt_what_is(question: str, drug: str, fda_context: str) -> "tuple[str, str]":
+    system_prompt = f"""You are a clinical pharmacist explaining what a medication is and does.
+
+SCOPE: Answer ONLY about {drug}.
+
+━━━ HARD RULES ━━━
+1. Explain: drug class, medical condition(s) treated, mechanism of action
+2. Do NOT discuss drug interactions unless the patient explicitly asked
+3. VERDICT must be SAFE or CONSULT_PHARMACIST — never AVOID for an informational question
+4. Do NOT mention other specific drugs by name unless explaining drug class comparisons
+{_OUTPUT_FORMAT}"""
+
+    if fda_context:
+        user_content = (
+            f"PATIENT QUESTION: {question}\n"
+            f"DRUG: {drug}\n\n"
+            f"FDA LABEL DATA:\n{fda_context}\n\n"
+            f"Explain what {drug} is, what conditions it treats, and how it works."
+        )
+    else:
+        user_content = (
+            f"PATIENT QUESTION: {question}\n"
+            f"DRUG: {drug}\n\n"
+            f"Explain what {drug} is, what conditions it treats, and how it works."
+        )
+    return system_prompt, user_content
+
+
+def _prompt_interaction(
+    question: str,
+    drug1: str,
+    drug2: str,
+    all_drugs: "list[str]",
+    fda_context: str,
+) -> "tuple[str, str]":
+    drugs_str = " and ".join(all_drugs) if all_drugs else f"{drug1} and {drug2}"
+    system_prompt = f"""You are a clinical pharmacist evaluating a drug interaction.
+
+SCOPE: Answer ONLY about the interaction between {drugs_str}.
+
+━━━ HARD RULES ━━━
+1. State specifically whether {drugs_str} interact and how
+2. Explain: mechanism, severity, and what the patient should do
+3. VERDICT: SAFE if no clinically significant interaction, CAUTION if moderate risk,
+   AVOID if contraindicated or major interaction
+4. Do NOT discuss drugs other than {drugs_str}
+5. Be decisive — state the risk level clearly without hedging
+{_OUTPUT_FORMAT}"""
+
+    if fda_context:
+        user_content = (
+            f"PATIENT QUESTION: {question}\n"
+            f"DRUGS: {drugs_str}\n\n"
+            f"FDA LABEL DATA:\n{fda_context}\n\n"
+            f"Evaluate the interaction between {drugs_str}."
+        )
+    else:
+        user_content = (
+            f"PATIENT QUESTION: {question}\n"
+            f"DRUGS: {drugs_str}\n\n"
+            f"Evaluate the interaction between {drugs_str}."
+        )
+    return system_prompt, user_content
+
+
+def _prompt_dosing(question: str, drug: str, fda_context: str) -> "tuple[str, str]":
+    system_prompt = f"""You are a clinical pharmacist answering a dosing question.
+
+SCOPE: Answer ONLY about dosing of {drug}.
+
+━━━ HARD RULES ━━━
+1. Provide: starting dose, typical dose, max daily dose, frequency
+2. Include renal or hepatic adjustments if the label mentions them
+3. VERDICT must be CONSULT_PHARMACIST — dosing requires individual confirmation
+4. Do NOT discuss drug interactions or side effects
+5. Do NOT discuss other drugs
+{_OUTPUT_FORMAT}"""
+
+    if fda_context:
+        user_content = (
+            f"PATIENT QUESTION: {question}\n"
+            f"DRUG: {drug}\n\n"
+            f"FDA LABEL DATA:\n{fda_context}\n\n"
+            f"Provide standard dosing information for {drug}."
+        )
+    else:
+        user_content = (
+            f"PATIENT QUESTION: {question}\n"
+            f"DRUG: {drug}\n\n"
+            f"Provide standard dosing information for {drug}."
+        )
+    return system_prompt, user_content
+
+
+def _prompt_safety(question: str, drug: str, fda_context: str) -> "tuple[str, str]":
+    system_prompt = f"""You are a clinical pharmacist evaluating medication safety in a specific context.
+
+SCOPE: Answer ONLY about {drug} in the context described in the question.
+
+━━━ HARD RULES ━━━
+1. Answer directly: is {drug} safe in this specific situation?
+2. VERDICT: SAFE if generally safe, CAUTION if conditional, AVOID if contraindicated
+3. Do not be vague — state the risk level with a specific reason
+4. Do NOT discuss interactions with other drugs unless that is what was asked
+{_OUTPUT_FORMAT}"""
+
+    if fda_context:
+        user_content = (
+            f"PATIENT QUESTION: {question}\n"
+            f"DRUG: {drug}\n\n"
+            f"FDA LABEL DATA:\n{fda_context}\n\n"
+            f"Is {drug} safe in the context described above?"
+        )
+    else:
+        user_content = (
+            f"PATIENT QUESTION: {question}\n"
+            f"DRUG: {drug}\n\n"
+            f"Is {drug} safe in the context described above?"
+        )
+    return system_prompt, user_content
+
+
+def _prompt_contraindications(question: str, drug: str, fda_context: str) -> "tuple[str, str]":
+    system_prompt = f"""You are a clinical pharmacist explaining contraindications.
+
+SCOPE: Answer ONLY about who should NOT take {drug}.
+
+━━━ HARD RULES ━━━
+1. List specific conditions, patient populations, and drug classes that are contraindicated
+2. VERDICT: AVOID if clearly contraindicated for the patient's situation,
+   CONSULT_PHARMACIST if it depends on individual factors
+3. Do NOT discuss dosing in detail
+{_OUTPUT_FORMAT}"""
+
+    if fda_context:
+        user_content = (
+            f"PATIENT QUESTION: {question}\n"
+            f"DRUG: {drug}\n\n"
+            f"FDA LABEL DATA:\n{fda_context}\n\n"
+            f"What are the contraindications for {drug}?"
+        )
+    else:
+        user_content = (
+            f"PATIENT QUESTION: {question}\n"
+            f"DRUG: {drug}\n\n"
+            f"What are the contraindications for {drug}?"
+        )
+    return system_prompt, user_content
+
+
+def _prompt_pregnancy(question: str, drug: str, fda_context: str) -> "tuple[str, str]":
+    system_prompt = f"""You are a clinical pharmacist evaluating medication safety during pregnancy or breastfeeding.
+
+SCOPE: Answer ONLY about {drug} in pregnancy or lactation.
+
+━━━ HARD RULES ━━━
+1. State the FDA pregnancy risk evidence or equivalent
+2. VERDICT: AVOID only if clearly teratogenic or contraindicated;
+   CONSULT_PHARMACIST if risk-benefit decision is needed;
+   CAUTION if limited or conflicting data
+3. Always recommend consulting OB/GYN or pharmacist for final decision
+{_OUTPUT_FORMAT}"""
+
+    if fda_context:
+        user_content = (
+            f"PATIENT QUESTION: {question}\n"
+            f"DRUG: {drug}\n\n"
+            f"FDA LABEL DATA:\n{fda_context}\n\n"
+            f"Is {drug} safe during pregnancy or breastfeeding?"
+        )
+    else:
+        user_content = (
+            f"PATIENT QUESTION: {question}\n"
+            f"DRUG: {drug}\n\n"
+            f"Is {drug} safe during pregnancy or breastfeeding?"
+        )
+    return system_prompt, user_content
+
+
+def _prompt_food_alcohol(question: str, drug: str, fda_context: str) -> "tuple[str, str]":
+    system_prompt = f"""You are a clinical pharmacist answering a food or alcohol interaction question.
+
+SCOPE: Answer ONLY about {drug} and the specific food or drink in the question.
+
+━━━ HARD RULES ━━━
+1. Directly answer whether the food/alcohol combination is safe with {drug}
+2. State the mechanism if a real interaction exists
+3. VERDICT: SAFE, CAUTION, or AVOID based on the evidence
+4. Do NOT discuss unrelated drug-drug interactions
+{_OUTPUT_FORMAT}"""
+
+    if fda_context:
+        user_content = (
+            f"PATIENT QUESTION: {question}\n"
+            f"DRUG: {drug}\n\n"
+            f"FDA LABEL DATA:\n{fda_context}\n\n"
+            f"Evaluate {drug} with the food or drink mentioned in the question."
+        )
+    else:
+        user_content = (
+            f"PATIENT QUESTION: {question}\n"
+            f"DRUG: {drug}\n\n"
+            f"Evaluate {drug} with the food or drink mentioned in the question."
+        )
+    return system_prompt, user_content
+
+
+def _prompt_general(
+    question: str, drug_names: "list[str]", fda_context: str
+) -> "tuple[str, str]":
+    drug_str = ", ".join(drug_names) if drug_names else "the medication"
+    system_prompt = f"""You are a clinical pharmacist answering a medication question.
+
+DRUGS: {drug_str}
+
+━━━ HARD RULES ━━━
+1. Answer the specific question asked about {drug_str}
+2. Be decisive — state the risk level with a specific reason
+3. Answer ONLY about {drug_str}
+{_OUTPUT_FORMAT}"""
+
+    if fda_context:
+        user_content = (
+            f"PATIENT QUESTION: {question}\n\n"
+            f"FDA LABEL DATA:\n{fda_context}\n\n"
+            f"Answer the question about {drug_str}."
+        )
+    else:
+        user_content = (
+            f"PATIENT QUESTION: {question}\n\n"
+            f"Answer the question about {drug_str}."
+        )
+    return system_prompt, user_content
+
+
+def build_intent_prompt(
+    intent_str: str,
+    question: str,
+    drug_names: "list[str]",
+    drug_name: str,
+    fda_context: str,
+) -> "tuple[str, str]":
+    """
+    Return (system_prompt, user_content) for the given intent.
+
+    Each intent has a COMPLETELY ISOLATED prompt — no shared fallback paths,
+    no cross-calling between engines.
+
+    SIDE_EFFECTS will never produce MAOI interaction warnings.
+    WHAT_IS will never produce AVOID verdicts.
+    DOSING will always produce CONSULT_PHARMACIST verdicts.
+    """
+    primary = drug_name or (drug_names[0] if drug_names else "the medication")
+
+    try:
+        intent = QuestionIntent(intent_str)
+    except ValueError:
+        intent = QuestionIntent.GENERAL
+
+    if intent == QuestionIntent.SIDE_EFFECTS:
+        return _prompt_side_effects(question, primary, fda_context)
+
+    if intent == QuestionIntent.WHAT_IS:
+        return _prompt_what_is(question, primary, fda_context)
+
+    if intent == QuestionIntent.INTERACTION:
+        d1 = drug_names[0] if drug_names else primary
+        d2 = drug_names[1] if len(drug_names) > 1 else "the second drug"
+        return _prompt_interaction(question, d1, d2, drug_names, fda_context)
+
+    if intent == QuestionIntent.DOSING:
+        return _prompt_dosing(question, primary, fda_context)
+
+    if intent == QuestionIntent.SAFETY:
+        return _prompt_safety(question, primary, fda_context)
+
+    if intent == QuestionIntent.CONTRAINDICATIONS:
+        return _prompt_contraindications(question, primary, fda_context)
+
+    if intent == QuestionIntent.PREGNANCY_LACTATION:
+        return _prompt_pregnancy(question, primary, fda_context)
+
+    if intent == QuestionIntent.FOOD_ALCOHOL:
+        return _prompt_food_alcohol(question, primary, fda_context)
+
+    return _prompt_general(question, drug_names, fda_context)
+
+
+# ── 8. VERDICT GUARDRAILS ─────────────────────────────────────────────────────
+
+def enforce_verdict_by_intent(intent_str: str, answer_text: str) -> str:
+    """
+    Post-process Claude's answer to enforce intent-specific verdict rules.
+
+    Rules:
+      SIDE_EFFECTS   → verdict must be CAUTION (never AVOID or SAFE)
+      WHAT_IS        → verdict must be SAFE or CONSULT_PHARMACIST (never AVOID)
+      DOSING         → verdict must be CONSULT_PHARMACIST always
+
+    Applied AFTER Claude + Haiku validation so the final answer is always correct.
+    """
+    try:
+        intent = QuestionIntent(intent_str)
+    except ValueError:
+        return answer_text
+
+    lines = answer_text.split("\n")
+    result: list[str] = []
+
+    for line in lines:
+        stripped_upper = line.strip().upper()
+        if stripped_upper.startswith("VERDICT:") and ":" in line:
+            current = line.split(":", 1)[1].strip().upper()
+
+            if intent == QuestionIntent.SIDE_EFFECTS:
+                if current not in ("CAUTION",):
+                    _logger.info(
+                        "[VerdictGuard] SIDE_EFFECTS: overriding %s → CAUTION", current
+                    )
+                    line = "VERDICT: CAUTION"
+
+            elif intent == QuestionIntent.WHAT_IS:
+                if current == "AVOID":
+                    _logger.info("[VerdictGuard] WHAT_IS: overriding AVOID → CONSULT_PHARMACIST")
+                    line = "VERDICT: CONSULT_PHARMACIST"
+
+            elif intent == QuestionIntent.DOSING:
+                if current != "CONSULT_PHARMACIST":
+                    _logger.info(
+                        "[VerdictGuard] DOSING: overriding %s → CONSULT_PHARMACIST", current
+                    )
+                    line = "VERDICT: CONSULT_PHARMACIST"
+
+        result.append(line)
+
+    return "\n".join(result)
+
+
+# ── 9. DRUG SCOPE GUARD ───────────────────────────────────────────────────────
+
+# Drug names / interaction drug-classes that must NEVER appear in a single-drug
+# side-effects answer if they were not part of the original query.
+_SCOPE_GUARD_KEYWORDS: frozenset[str] = frozenset({
+    "maoi", "monoamine oxidase", "phenelzine", "tranylcypromine",
+    "isocarboxazid", "selegiline", "rasagiline", "linezolid",
+    "methylene blue", "serotonin syndrome",
+})
+
+# Filterable section prefixes — safe to remove content from these
+_FILTERABLE_PREFIXES: tuple[str, ...] = ("DETAILS:", "ACTION:", "WARNING:", "ARTICLE:")
+
+
+def strip_off_topic_drugs(
+    query_drugs: "list[str]",
+    answer_text: str,
+    intent_str: str,
+) -> str:
+    """
+    For single-drug intents (SIDE_EFFECTS, WHAT_IS, DOSING, CONTRAINDICATIONS):
+    remove lines/items from DETAILS, ACTION, WARNING, and ARTICLE that mention
+    drug names or interaction classes not present in the original query.
+
+    This is the last-resort guard that prevents MAOI interaction warnings from
+    appearing in a duloxetine side effects answer even if the prompt guardrail
+    was insufficient.
+
+    ANSWER, VERDICT, CONFIDENCE, and SOURCES are never modified.
+    """
+    try:
+        intent = QuestionIntent(intent_str)
+    except ValueError:
+        return answer_text
+
+    # Only apply to single-drug focused intents
+    if intent not in (
+        QuestionIntent.SIDE_EFFECTS,
+        QuestionIntent.WHAT_IS,
+        QuestionIntent.DOSING,
+        QuestionIntent.CONTRAINDICATIONS,
+        QuestionIntent.PREGNANCY_LACTATION,
+    ):
+        return answer_text
+
+    query_lower: set[str] = {d.lower() for d in (query_drugs or [])}
+
+    # Build watch-set: scope guard keywords NOT already in query
+    watch_set: set[str] = {kw for kw in _SCOPE_GUARD_KEYWORDS if kw not in query_lower}
+
+    # Also watch HIGH_RISK_DRUGS that aren't in the query (≥5 chars to avoid false positives)
+    watch_set.update(
+        d for d in HIGH_RISK_DRUGS
+        if d not in query_lower and len(d) >= 5
+    )
+
+    if not watch_set:
+        return answer_text
+
+    lines = answer_text.split("\n")
+    result_lines: list[str] = []
+
+    for line in lines:
+        line_lower = line.lower()
+        upper = line.strip().upper()
+
+        is_filterable = any(upper.startswith(pfx) for pfx in _FILTERABLE_PREFIXES)
+
+        if not is_filterable:
+            result_lines.append(line)
+            continue
+
+        is_detail_or_action = upper.startswith("DETAILS:") or upper.startswith("ACTION:")
+
+        if is_detail_or_action and ":" in line:
+            # Filter individual pipe-separated items
+            prefix, items_str = line.split(":", 1)
+            items = [i.strip() for i in items_str.split("|")]
+            clean_items: list[str] = []
+            for item in items:
+                if any(kw in item.lower() for kw in watch_set):
+                    _logger.info(
+                        "[ScopeGuard] Stripped %s item mentioning off-topic drug: %.60s",
+                        prefix.strip(), item,
+                    )
+                else:
+                    clean_items.append(item)
+            if clean_items:
+                result_lines.append(f"{prefix}: {' | '.join(clean_items)}")
+            # else: all items stripped → omit the line entirely
+        else:
+            # WARNING or ARTICLE: remove the whole line if it mentions off-topic drugs
+            if any(kw in line_lower for kw in watch_set):
+                _logger.info(
+                    "[ScopeGuard] Stripped %s section mentioning off-topic drug",
+                    upper.split(":")[0].strip(),
+                )
+            else:
+                result_lines.append(line)
+
+    return "\n".join(result_lines)
