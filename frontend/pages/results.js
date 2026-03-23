@@ -501,6 +501,7 @@ export default function ResultsPage() {
   const [showFullAnswer, setShowFullAnswer] = useState(false);
   const [showMechanism, setShowMechanism] = useState(false);
   const [showGenericTips, setShowGenericTips] = useState(false);
+  const [streamStatus, setStreamStatus] = useState("");
 
   const title = useMemo(() => (q ? `Results - ${q}` : "Results"), [q]);
   const questionType = useMemo(() => detectQuestionType(q), [q]);
@@ -526,14 +527,78 @@ export default function ResultsPage() {
     async function run() {
       setLoading(true);
       setError("");
+      setStreamStatus("");
       setDidYouMean(null);
       setSource("database");
       setSavedToDb(false);
       setShowFullAnswer(false);
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const timeoutId = setTimeout(() => controller.abort(), 60000);
 
+      // ── Try streaming endpoint first ────────────────────────────────────
+      try {
+        const res = await fetch(`${API_BASE}/search/stream`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: q, engine, top_k: 5 }),
+          signal: controller.signal,
+        });
+
+        if (res.ok && res.body) {
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let gotResult = false;
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop();
+            for (const line of lines) {
+              if (!line.startsWith("data: ")) continue;
+              let evt;
+              try { evt = JSON.parse(line.slice(6)); } catch { continue; }
+
+              if (evt.type === "status" && !cancelled) {
+                setStreamStatus(evt.message || "");
+              } else if (evt.type === "done" && !cancelled) {
+                const r = evt.result;
+                setResults(r ? [r] : []);
+                setSource(evt.source || "ai_generated");
+                setSavedToDb(false);
+                gotResult = true;
+              } else if (evt.type === "error") {
+                throw new Error(evt.message || "Stream error");
+              }
+            }
+          }
+
+          clearTimeout(timeoutId);
+          if (!cancelled) setStreamStatus("");
+          if (gotResult) {
+            if (!cancelled) setLoading(false);
+            return;
+          }
+        }
+      } catch (streamErr) {
+        if (streamErr?.name === "AbortError") {
+          clearTimeout(timeoutId);
+          if (!cancelled) {
+            setStreamStatus("");
+            setError("This is taking longer than usual. Please try your search again.");
+            setLoading(false);
+          }
+          return;
+        }
+        // Stream failed — fall through to plain /search
+      }
+
+      // ── Fallback: plain /search ─────────────────────────────────────────
+      if (cancelled) return;
+      setStreamStatus("Searching...");
       try {
         const res = await fetch(`${API_BASE}/search`, {
           method: "POST",
@@ -549,11 +614,8 @@ export default function ResultsPage() {
         }
 
         let data;
-        try {
-          data = await res.json();
-        } catch {
-          throw new Error("Server returned an unreadable response. Please try again.");
-        }
+        try { data = await res.json(); }
+        catch { throw new Error("Server returned an unreadable response. Please try again."); }
 
         if (!cancelled) {
           setResults(Array.isArray(data.results) ? data.results : []);
@@ -565,17 +627,29 @@ export default function ResultsPage() {
         clearTimeout(timeoutId);
         if (!cancelled) {
           setError(e?.name === "AbortError"
-            ? "Taking too long — please try again."
+            ? "This is taking longer than usual. Please try your search again."
             : (e?.message || "Could not load results."));
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setStreamStatus("");
+          setLoading(false);
+        }
       }
     }
 
     run();
     return () => { cancelled = true; };
   }, [router.isReady, q, engine]);
+
+  // Timer-based loading status messages (shown when loading & no SSE status yet)
+  const [loadingMessage, setLoadingMessage] = useState("");
+  useEffect(() => {
+    if (!loading) { setLoadingMessage(""); return; }
+    const t1 = setTimeout(() => setLoadingMessage("Checking additional sources..."), 8000);
+    const t2 = setTimeout(() => setLoadingMessage("Almost there..."), 20000);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [loading]);
 
   useEffect(() => {
     if (!router.isReady || !q) return;
@@ -693,9 +767,30 @@ export default function ResultsPage() {
           </div>
 
           {loading ? (
-            <div className="rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm">
-              <div className="mx-auto h-8 w-8 animate-spin rounded-full border-3 border-slate-200 border-t-emerald-500" />
-              <p className="mt-3 text-sm text-slate-600">Generating your answer...</p>
+            <div className="rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+              {/* Banner skeleton */}
+              <div className="flex items-center gap-3 px-5 py-4 bg-slate-100 border-b border-slate-200">
+                <div className="h-9 w-9 rounded-full bg-slate-300 animate-pulse shrink-0" />
+                <div className="h-5 w-28 rounded-full bg-slate-300 animate-pulse" />
+              </div>
+              {/* Body skeleton */}
+              <div className="p-5 space-y-4 bg-white">
+                <div className="h-4 w-3/4 rounded bg-slate-200 animate-pulse" />
+                <div className="h-4 w-1/2 rounded bg-slate-200 animate-pulse" />
+                <div className="space-y-2 pt-1">
+                  <div className="h-3 w-1/3 rounded bg-slate-200 animate-pulse" />
+                  <div className="h-3 w-2/3 rounded bg-slate-200 animate-pulse" />
+                  <div className="h-3 w-1/2 rounded bg-slate-200 animate-pulse" />
+                </div>
+                <div className="space-y-2 pt-1">
+                  <div className="h-3 w-1/3 rounded bg-slate-200 animate-pulse" />
+                  <div className="h-3 w-3/5 rounded bg-slate-200 animate-pulse" />
+                  <div className="h-3 w-2/5 rounded bg-slate-200 animate-pulse" />
+                </div>
+                <div className="pt-2 text-center text-sm text-slate-500 min-h-[1.5rem]">
+                  {streamStatus || loadingMessage}
+                </div>
+              </div>
             </div>
           ) : error ? (
             <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 shadow-sm">

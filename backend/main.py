@@ -21,7 +21,8 @@ logger = logging.getLogger("rxbuddy")
 logging.basicConfig(level=logging.INFO)
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+import json
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import Boolean, DateTime, Integer, MetaData, Table, Text, create_engine, select
 from sqlalchemy.dialects.postgresql import ARRAY, VARCHAR
@@ -935,7 +936,7 @@ def _is_valid_pharmacy_question(question: str) -> bool:
         return False
 
     try:
-        client = anthropic.Anthropic(api_key=api_key)
+        client = anthropic.Anthropic(api_key=api_key, timeout=45.0)
         prompt = (
             f"Is this a valid pharmacy/medication question worth saving to a medical FAQ database? "
             f"Answer only YES or NO.\n\nQuestion: {question}"
@@ -962,7 +963,7 @@ def _get_best_category(question: str) -> str:
         return "General"
 
     try:
-        client = anthropic.Anthropic(api_key=api_key)
+        client = anthropic.Anthropic(api_key=api_key, timeout=45.0)
         categories_str = ", ".join(PHARMACY_CATEGORIES)
         prompt = (
             f"Classify this pharmacy question into exactly one category.\n"
@@ -1074,6 +1075,33 @@ def _anthropic_api_key() -> str | None:
 _has_anthropic_key = bool(_anthropic_api_key())
 logger.info("ANTHROPIC_API_KEY configured: %s", _has_anthropic_key)
 
+# ── In-memory answer cache ────────────────────────────────────────────────────
+# Keyed by normalised query string; value is (answer_text, citations, intent, rs, timestamp).
+# 1-hour TTL; evict oldest 100 entries when the cap is reached.
+_ANSWER_CACHE: dict[str, tuple] = {}
+_CACHE_TTL = 3600        # seconds
+_CACHE_MAX = 500         # max entries before eviction
+
+
+def _cache_get(key: str) -> "tuple | None":
+    entry = _ANSWER_CACHE.get(key)
+    if not entry:
+        return None
+    *payload, ts = entry
+    if (datetime.now(timezone.utc).timestamp() - ts) > _CACHE_TTL:
+        _ANSWER_CACHE.pop(key, None)
+        return None
+    return tuple(payload)
+
+
+def _cache_set(key: str, answer_text: str, citations: list, intent_str: str, rs: str) -> None:
+    if len(_ANSWER_CACHE) >= _CACHE_MAX:
+        # Evict the 100 oldest entries by insertion-order (dicts are ordered in Py 3.7+)
+        to_evict = list(_ANSWER_CACHE.keys())[:100]
+        for k in to_evict:
+            _ANSWER_CACHE.pop(k, None)
+    _ANSWER_CACHE[key] = (answer_text, citations, intent_str, rs, datetime.now(timezone.utc).timestamp())
+
 
 # ---------- Slang normalization (zero API calls, runs before every search) ----------
 SPELLING_FIXES = {
@@ -1160,7 +1188,7 @@ def _validate_ai_answer(question: str, answer: str) -> str:
     if not api_key:
         return answer
     try:
-        client = anthropic.Anthropic(api_key=api_key)
+        client = anthropic.Anthropic(api_key=api_key, timeout=45.0)
         validation_prompt = f"""Check this medication answer for accuracy and verdict consistency:
 
 ORIGINAL QUESTION: {question}
@@ -1217,6 +1245,13 @@ def _generate_ai_answer(question: str) -> "tuple[str, list[dict], str, str]":
     4. Confidence score – HIGH/MEDIUM/LOW returned with every answer
     5. Validator pass   – Claude Haiku checks verdict consistency post-generation
     """
+    # ── Cache check — skip Claude entirely if we have a fresh answer ─────────
+    _cache_key = question.strip().lower()
+    _cached = _cache_get(_cache_key)
+    if _cached:
+        logger.info("[Cache] HIT for: %.80s", question)
+        return _cached  # (answer_text, citations, intent_str, retrieval_status_str)
+
     api_key = _anthropic_api_key()
     if not api_key:
         logger.error("[Claude] ANTHROPIC_API_KEY is NOT set in environment!")
@@ -1341,7 +1376,7 @@ def _generate_ai_answer(question: str) -> "tuple[str, list[dict], str, str]":
         fda_context = _build_fda_context(fda_data, question, medlineplus_data)
 
     try:
-        client = anthropic.Anthropic(api_key=api_key)
+        client = anthropic.Anthropic(api_key=api_key, timeout=45.0)
 
         multi_drug_context = ""
         if len(drug_names) >= 2:
@@ -1525,6 +1560,7 @@ If any check fails → rewrite that section before outputting."""
             )
 
         logger.info("[Claude] Answer ready (%d words): %.200s", len(answer.split()), answer)
+        _cache_set(_cache_key, answer, citations_dicts, intent_str, retrieval_status_str)
         return answer, citations_dicts, intent_str, retrieval_status_str
 
     except anthropic.APIError as e:
@@ -1668,13 +1704,23 @@ async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSON
 
 @app.on_event("startup")
 def startup_event() -> None:
-    """Initialize spell checker with RxNorm drug names on startup."""
+    """Initialize spell checker and start keep-alive pinger on startup."""
     _init_spell_checker()
+    try:
+        import keep_alive
+        keep_alive.start()
+    except Exception as _ka_exc:
+        logger.warning("[KeepAlive] Could not start keep-alive pinger: %s", _ka_exc)
 
 
 @app.get("/")
 def health_check() -> dict[str, str]:
     return {"status": "RxBuddy is live"}
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
 
 
 # ---------- 4) Request/response models ----------
@@ -3185,6 +3231,150 @@ def search(req: SearchRequest) -> SearchResponse:
         did_you_mean=did_you_mean,
         source=source,
         saved_to_db=saved_to_db,
+    )
+
+
+@app.post("/search/stream")
+def search_stream(req: SearchRequest) -> StreamingResponse:
+    """
+    SSE streaming variant of /search.
+
+    Sends Server-Sent Events so the browser connection stays alive during
+    Railway cold-starts and long Claude API calls — bypassing the 30-second
+    proxy read-timeout that affects buffered responses.
+
+    Event types:
+      data: {"type": "status",  "message": "..."}          — progress ping
+      data: {"type": "done",    "source": "...", "result": {...}}  — final answer
+      data: {"type": "error",   "message": "..."}           — failure
+    """
+
+    def _sse(payload: dict) -> str:
+        return f"data: {json.dumps(payload)}\n\n"
+
+    def generate():
+        user_query = req.query.strip()
+        if not user_query:
+            yield _sse({"type": "error", "message": "Query cannot be empty."})
+            return
+
+        yield _sse({"type": "status", "message": "Searching database..."})
+
+        # ── Exact match (instant) ───────────────────────────────────────────
+        try:
+            from services.drug_resolver import resolve_query_drugs
+            resolved = resolve_query_drugs(user_query)
+            if resolved:
+                rewritten = user_query
+                for rd in resolved:
+                    inp, gen, cor = rd.get("input", ""), rd.get("generic", ""), rd.get("corrected", "")
+                    if cor and cor.lower() != inp.lower() and cor.lower() in rewritten.lower():
+                        rewritten = re.sub(re.escape(cor), gen, rewritten, flags=re.IGNORECASE)
+                if rewritten != user_query:
+                    user_query = rewritten
+        except Exception:
+            pass
+
+        exact = find_exact_match(user_query)
+        if (
+            exact and exact.answer
+            and not _is_corrupted_db_answer(exact.answer)
+            and not _is_wrong_drug_answer(user_query, exact.answer)
+        ):
+            structured = _parse_structured_answer(exact.answer, exact.question)
+            yield _sse({
+                "type": "done",
+                "source": "database",
+                "result": {
+                    "id": exact.id,
+                    "question": exact.question,
+                    "category": exact.category,
+                    "tags": exact.tags or [],
+                    "score": 1.0,
+                    "answer": exact.answer,
+                    "structured": structured,
+                },
+            })
+            return
+
+        # ── TF-IDF search ───────────────────────────────────────────────────
+        original_query, cleaned_query = normalize_query(user_query)
+        search_query = cleaned_query if cleaned_query else user_query
+        did_you_mean = spell_check_query(search_query)
+
+        drug_names = _extract_drug_names(search_query)
+        query_intent = _classify_query_intent(search_query)
+        enhanced_query = _build_intent_query(search_query, query_intent, drug_names)
+
+        matches = tfidf_search(search_query, top_k=3)
+        if enhanced_query != search_query:
+            extra = tfidf_search(enhanced_query, top_k=3)
+            seen = {m[0] for m in matches}
+            matches += [m for m in extra if m[0] not in seen]
+
+        if matches:
+            best_id, best_score = matches[0]
+            if best_score >= 0.35:
+                try:
+                    with engine.connect() as conn:
+                        row = conn.execute(
+                            select(questions_table).where(questions_table.c.id == int(best_id))
+                        ).mappings().first()
+                    if row:
+                        ans = str(row.get("answer") or "").strip() or None
+                        if ans and not _is_corrupted_db_answer(ans) and not _is_wrong_drug_answer(user_query, ans):
+                            structured = _parse_structured_answer(ans, user_query)
+                            yield _sse({
+                                "type": "done",
+                                "source": "database",
+                                "result": {
+                                    "id": int(row["id"]),
+                                    "question": str(row["question"]),
+                                    "category": row.get("category"),
+                                    "tags": list(row.get("tags") or []),
+                                    "score": best_score,
+                                    "answer": ans,
+                                    "structured": structured,
+                                },
+                            })
+                            return
+                except Exception as exc:
+                    logger.warning("[Stream] DB lookup failed: %s", exc)
+
+        # ── AI generation ───────────────────────────────────────────────────
+        if not _anthropic_api_key():
+            yield _sse({"type": "error", "message": "AI unavailable — no API key configured."})
+            return
+
+        yield _sse({"type": "status", "message": "Generating answer with AI..."})
+
+        try:
+            answer_text, citations, intent_str, rs = _generate_ai_answer(original_query)
+            structured = _parse_structured_answer(answer_text, original_query)
+            yield _sse({
+                "type": "done",
+                "source": "ai_generated",
+                "result": {
+                    "id": None,
+                    "question": original_query,
+                    "category": None,
+                    "tags": [],
+                    "score": 1.0,
+                    "answer": answer_text,
+                    "structured": structured,
+                },
+            })
+        except Exception as exc:
+            logger.error("[Stream] AI generation failed: %s", exc, exc_info=True)
+            yield _sse({"type": "error", "message": "Could not generate an answer. Please try again."})
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # disable Nginx buffering on Railway
+        },
     )
 
 
