@@ -98,6 +98,12 @@ function stripMarkdown(text) {
 }
 
 function sanitizeItems(items) {
+  if (typeof items === "string") {
+    return items
+      .split(/[;|\n]+/)
+      .map((item) => stripMarkdown(String(item || "")))
+      .filter(Boolean);
+  }
   if (!Array.isArray(items)) return [];
   return items
     .map((item) => stripMarkdown(String(item || "")))

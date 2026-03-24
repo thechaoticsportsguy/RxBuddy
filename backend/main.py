@@ -50,7 +50,20 @@ from answer_engine import (
     strip_off_topic_drugs,
 )
 import label_updater
-from data.drug_csv_loader import DRUG_CSV_RELATIVE_PATH, drug_lookup_size, load_drug_lookup
+try:
+    from backend.data.drug_csv_loader import (
+        DRUG_CSV_RELATIVE_PATH,
+        drug_lookup_size,
+        get_drug_by_generic,
+        load_drug_lookup,
+    )
+except ImportError:
+    from data.drug_csv_loader import (
+        DRUG_CSV_RELATIVE_PATH,
+        drug_lookup_size,
+        get_drug_by_generic,
+        load_drug_lookup,
+    )
 from drug_catalog import find_drug, is_high_risk as catalog_is_high_risk, is_known_drug
 
 
@@ -1900,6 +1913,9 @@ class StructuredAnswer(BaseModel):
     citations: list[dict] = Field(default_factory=list)
     intent: str = "general"
     retrieval_status: str = "LABEL_NOT_FOUND"
+    drug: str = ""
+    common_side_effects: str = ""
+    mechanism: str = ""
 
 
 DOSAGE_TERMS = (
@@ -2958,7 +2974,7 @@ class SearchResponse(BaseModel):
     query: str
     results: list[QuestionMatch]
     did_you_mean: Optional[str] = None  # Spell check suggestion (only if something changed)
-    source: str = "database"  # "database" or "ai_generated"
+    source: str = "database"  # "database", "ai_generated", or "dataset"
     saved_to_db: bool = False  # True if AI-generated question was saved to database
 
 
@@ -2982,6 +2998,50 @@ class AnswerRequest(BaseModel):
 class AnswerResponse(BaseModel):
     question: str
     answer: str
+
+
+def _build_dataset_result(query: str) -> QuestionMatch | None:
+    query_lower = (query or "").strip().lower()
+    if not query_lower:
+        return None
+
+    dataset_drug_name: str | None = None
+    for candidate_drug_name in load_drug_lookup():
+        if candidate_drug_name in query_lower:
+            dataset_drug_name = candidate_drug_name
+            break
+
+    if not dataset_drug_name:
+        return None
+
+    drug = get_drug_by_generic(dataset_drug_name)
+    if not drug:
+        return None
+
+    logger.info(
+        "[Dataset] Returning CSV dataset answer for '%s' without calling AI",
+        dataset_drug_name,
+    )
+    side_effects = str(drug.get("side_effects_simple", "")).strip()
+    mechanism = str(drug.get("mechanism_simple", "")).strip()
+    return QuestionMatch(
+        id=0,
+        question=query,
+        category="side_effects",
+        tags=[dataset_drug_name, "dataset"],
+        score=1.0,
+        answer=side_effects,
+        structured=StructuredAnswer(
+            answer=side_effects,
+            short_answer=side_effects,
+            article=mechanism,
+            sources="dataset",
+            intent="side_effects",
+            drug=dataset_drug_name,
+            common_side_effects=side_effects,
+            mechanism=mechanism,
+        ),
+    )
 
 
 @app.post("/answer", response_model=AnswerResponse)
@@ -3028,6 +3088,16 @@ def search(req: SearchRequest) -> SearchResponse:
     user_query = req.query.strip()
     if not user_query:
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
+    dataset_result = _build_dataset_result(user_query)
+    if dataset_result:
+        _log_search(user_query, None)
+        return SearchResponse(
+            query=user_query,
+            results=[dataset_result],
+            did_you_mean=None,
+            source="dataset",
+            saved_to_db=False,
+        )
 
     # ── Drug normalization (Phase 6 wire-in) ─────────────────────────────────
     # Resolve drug names before any search so the rest of the pipeline works
@@ -3400,6 +3470,15 @@ def search_stream(req: SearchRequest) -> StreamingResponse:
         user_query = req.query.strip()
         if not user_query:
             yield _sse({"type": "error", "message": "Query cannot be empty."})
+            return
+
+        dataset_result = _build_dataset_result(user_query)
+        if dataset_result:
+            yield _sse({
+                "type": "done",
+                "source": "dataset",
+                "result": dataset_result.model_dump(),
+            })
             return
 
         yield _sse({"type": "status", "message": "Searching database..."})
@@ -3868,6 +3947,18 @@ async def search_v2(req: SearchRequest) -> JSONResponse:
     if not user_query:
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
+    dataset_result = _build_dataset_result(user_query)
+    if dataset_result:
+        return JSONResponse(
+            content=SearchResponse(
+                query=user_query,
+                results=[dataset_result],
+                did_you_mean=None,
+                source="dataset",
+                saved_to_db=False,
+            ).model_dump()
+        )
+
     try:
         result = await run_pipeline(user_query)
         return JSONResponse(content=result)
@@ -3897,6 +3988,15 @@ async def search_v2_stream(req: SearchRequest) -> StreamingResponse:
         user_query = req.query.strip()
         if not user_query:
             yield _sse_v2({"type": "error", "message": "Query cannot be empty."})
+            return
+
+        dataset_result = _build_dataset_result(user_query)
+        if dataset_result:
+            yield _sse_v2({
+                "type": "done",
+                "source": "dataset",
+                "result": dataset_result.model_dump(),
+            })
             return
 
         # Emergency check
