@@ -87,6 +87,23 @@ function splitPipe(str) {
   return str.split("|").map((s) => s.trim()).filter(Boolean);
 }
 
+function stripMarkdown(text) {
+  if (!text || typeof text !== "string") return "";
+  return text
+    .replace(/^\s{0,3}#{1,6}\s*/gm, "")
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/\*(.*?)\*/g, "$1")
+    .replace(/`(.*?)`/g, "$1")
+    .trim();
+}
+
+function sanitizeItems(items) {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((item) => stripMarkdown(String(item || "")))
+    .filter(Boolean);
+}
+
 // Patterns that indicate a corrupted / raw-internal DB answer — never render these
 const _CORRUPTED_PATTERNS = [
   /category\s+[3-6]/i,
@@ -111,30 +128,53 @@ function _isCorrupted(text) {
 function parseSections(result) {
   const s = result.structured || {};
   const raw = _isCorrupted(result.answer) ? "" : (result.answer || "");
+  const sideEffectSections = [
+    { title: "Common side effects", items: sanitizeItems(s.common_side_effects) },
+    { title: "Serious but rare", items: sanitizeItems(s.serious_side_effects) },
+    { title: "Get help if", items: sanitizeItems(s.warning_signs) },
+    { title: "Higher risk", items: sanitizeItems(s.higher_risk_groups) },
+    { title: "What to do", items: sanitizeItems(s.what_to_do) },
+  ];
+  const hasStructuredSideEffects = sideEffectSections.some((section) => section.items.length > 0);
+
+  if (s.intent === "side_effects" && hasStructuredSideEffects) {
+    return {
+      answer: "",
+      warning: "",
+      details: [],
+      action: [],
+      article: "",
+      sideEffectSections,
+    };
+  }
 
   // ── New-format fields ────────────────────────────────────────────────────────
   // Also accept short_answer (RxBuddyAnswer v2 field name)
-  const primaryAnswer = s.answer || s.short_answer || s.direct || "";
+  const primaryAnswer = stripMarkdown(s.answer || s.short_answer || s.direct || "");
   if (primaryAnswer || s.details?.length || s.action?.length || s.article) {
     return {
       answer:  primaryAnswer,
-      warning: s.warning || "",
-      details: Array.isArray(s.details) && s.details.length ? s.details : [],
-      action:  Array.isArray(s.action)  && s.action.length  ? s.action  :
-               (Array.isArray(s.do)     && s.do.length      ? s.do      : []),
-      article: s.article || s.why || "",
+      warning: stripMarkdown(s.warning || ""),
+      details: sanitizeItems(Array.isArray(s.details) && s.details.length ? s.details : []),
+      action:  sanitizeItems(
+        Array.isArray(s.action)  && s.action.length  ? s.action  :
+               (Array.isArray(s.do)     && s.do.length      ? s.do      : [])
+      ),
+      article: stripMarkdown(s.article || s.why || ""),
+      sideEffectSections: [],
     };
   }
 
   // ── Legacy structured fields (old DB rows) ───────────────────────────────────
   if (s.direct || s.do?.length) {
-    const details = [...(s.avoid || []), ...(s.doctor || [])];
+    const details = sanitizeItems([...(s.avoid || []), ...(s.doctor || [])]);
     return {
-      answer:  s.direct || "",
+      answer:  stripMarkdown(s.direct || ""),
       warning: details.length ? details[0] : "",
       details: details.slice(1),
-      action:  s.do || [],
-      article: s.why || "",
+      action:  sanitizeItems(s.do || []),
+      article: stripMarkdown(s.why || ""),
+      sideEffectSections: [],
     };
   }
 
@@ -142,7 +182,7 @@ function parseSections(result) {
   if (!raw) {
     return {
       answer: "Answer unavailable. Please consult a pharmacist.",
-      warning: "", details: [], action: [], article: "",
+      warning: "", details: [], action: [], article: "", sideEffectSections: [],
     };
   }
   const lines = raw.split("\n");
@@ -168,7 +208,14 @@ function parseSections(result) {
   if (!out.answer) {
     out.answer = "Answer unavailable. Please consult a pharmacist.";
   }
-  return out;
+  return {
+    answer: stripMarkdown(out.answer),
+    warning: stripMarkdown(out.warning),
+    details: sanitizeItems(out.details),
+    action: sanitizeItems(out.action),
+    article: stripMarkdown(out.article),
+    sideEffectSections: [],
+  };
 }
 
 // ── JSON-LD builder ────────────────────────────────────────────────────────────
@@ -352,10 +399,10 @@ export default function AnswerCard({ result, query }) {
   if (!result) return null;
 
   const structured = result.structured || {};
-  const rawVerdict = structured.verdict || "CONSULT_PHARMACIST";
+  const rawVerdict = structured.intent === "side_effects" ? "CAUTION" : (structured.verdict || "CONSULT_PHARMACIST");
   const config = VERDICT_CONFIG[rawVerdict] || DEFAULT_VERDICT;
 
-  const { answer, warning, details, action, article } = parseSections(result);
+  const { answer, warning, details, action, article, sideEffectSections } = parseSections(result);
   const citations  = structured.citations || [];
   const confidence = structured.confidence || "";
   const source     = structured.sources || "";
@@ -389,24 +436,38 @@ export default function AnswerCard({ result, query }) {
           {/* 2. Warning */}
           <WarningBox text={warning} verdict={rawVerdict} />
 
-          {/* 3. Details */}
-          <BulletList
-            title="Key facts"
-            items={details}
-            colorClass="text-slate-600"
-            dotClass="bg-slate-400"
-          />
+          {sideEffectSections.length > 0 ? (
+            sideEffectSections.map((section) => (
+              <BulletList
+                key={section.title}
+                title={section.title}
+                items={section.items}
+                colorClass={section.title === "What to do" ? "text-emerald-700" : "text-slate-600"}
+                dotClass={section.title === "What to do" ? "bg-emerald-500" : "bg-slate-400"}
+              />
+            ))
+          ) : (
+            <>
+              {/* 3. Details */}
+              <BulletList
+                title="Key facts"
+                items={details}
+                colorClass="text-slate-600"
+                dotClass="bg-slate-400"
+              />
 
-          {/* 4. What to do */}
-          <BulletList
-            title="What to do"
-            items={action}
-            colorClass="text-emerald-700"
-            dotClass="bg-emerald-500"
-          />
+              {/* 4. What to do */}
+              <BulletList
+                title="What to do"
+                items={action}
+                colorClass="text-emerald-700"
+                dotClass="bg-emerald-500"
+              />
 
-          {/* 5. Mini article */}
-          <MiniArticle text={article} />
+              {/* 5. Mini article */}
+              <MiniArticle text={article} />
+            </>
+          )}
 
           {/* Footer: confidence + AI badge + source */}
           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3">
