@@ -1627,6 +1627,37 @@ def _generate_ai_answer(question: str) -> "tuple[str, list[dict], str, str]":
         if not text:
             raise RuntimeError("Claude returned an empty response.")
 
+        # ── Parse JSON response from unified prompt ───────────────────────────
+        # The new system prompt returns {"verdict": "...", "explanation": "..."}.
+        # Convert to internal text format so enforce_verdict_by_intent(),
+        # strip_off_topic_drugs(), and _parse_structured_answer() all work unchanged.
+        try:
+            _raw = text.strip()
+            # Strip markdown code fences if Claude wrapped the JSON
+            if _raw.startswith("```"):
+                _raw = "\n".join(
+                    line for line in _raw.splitlines()
+                    if not line.strip().startswith("```")
+                ).strip()
+            _parsed = json.loads(_raw)
+            _verdict = str(_parsed.get("verdict", "CONSULT_PHARMACIST")).upper().strip()
+            _explanation = str(_parsed.get("explanation", "")).strip()
+            # Normalise verdict to known values
+            _valid = {"SAFE", "CAUTION", "AVOID", "CONSULT_PHARMACIST"}
+            if _verdict not in _valid:
+                _verdict = "CONSULT_PHARMACIST"
+            # Rebuild as internal text format
+            text = (
+                f"VERDICT: {_verdict}\n"
+                f"ANSWER: {_explanation}\n"
+                f"CONFIDENCE: HIGH\n"
+                f"SOURCES: FDA label (DailyMed) | RxNorm | openFDA"
+            )
+            logger.debug("[Claude] JSON parsed — verdict=%s explanation_len=%d", _verdict, len(_explanation))
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            # Not JSON — Claude returned old text format; use as-is
+            logger.debug("[Claude] Response is not JSON — using raw text format")
+
         answer = _truncate_words(text, 400)
 
         # ── Vague-phrase check ────────────────────────────────────────────────
@@ -1835,11 +1866,12 @@ class StructuredAnswer(BaseModel):
     """Parsed structured answer with specific bullets for each section."""
     verdict: str = "CONSULT_PHARMACIST"  # SAFE, AVOID, CAUTION, CONSULT_PHARMACIST, INSUFFICIENT_DATA
     # ── 5-section response schema ──────────────────────────────────────────────
-    answer: str = ""    # 1. Primary answer — one decisive sentence
-    warning: str = ""   # 2. Safety warning (empty when SAFE)
+    answer: str = ""         # 1. Primary answer — one decisive sentence
+    short_answer: str = ""   # Clean 1-2 sentence answer from JSON-output prompt (no markdown)
+    warning: str = ""        # 2. Safety warning (empty when SAFE)
     details: list[str] = []  # 3. Clinical fact bullets
     action: list[str] = []   # 4. What to do bullets
-    article: str = ""   # 5. Mini article — mechanism / context paragraph
+    article: str = ""        # 5. Mini article — mechanism / context paragraph
     # ── Legacy fields (kept for backward compat with old DB rows) ───────────
     direct: str = ""    # alias for answer (populated from DIRECT: or ANSWER:)
     do: list[str] = []
@@ -2567,6 +2599,7 @@ def _parse_structured_answer(answer_text: str, question: str = "") -> Structured
 
         # Populate new fields
         result.answer = answer_raw or ""
+        result.short_answer = answer_raw or ""  # clean 1-2 sentence answer; no markdown
         result.direct = answer_raw or ""  # keep in sync for legacy consumers
         result.warning = warning_raw or ""
         result.details = _split_items(details_raw)
