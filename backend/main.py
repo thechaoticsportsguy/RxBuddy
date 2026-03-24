@@ -1916,6 +1916,9 @@ class StructuredAnswer(BaseModel):
     drug: str = ""
     common_side_effects: str = ""
     mechanism: str = ""
+    serious_side_effects: list[str] = Field(default_factory=list)
+    warning_signs: list[str] = Field(default_factory=list)
+    pubmed_studies: list[dict] = Field(default_factory=list)
 
 
 DOSAGE_TERMS = (
@@ -3000,6 +3003,88 @@ class AnswerResponse(BaseModel):
     answer: str
 
 
+
+# ── PubMed studies fetcher with 24h cache ─────────────────────────────────────
+
+import time as _time
+
+_pubmed_cache: dict[str, tuple[float, list[dict]]] = {}
+_PUBMED_CACHE_TTL = 86400  # 24 hours
+
+
+def _fetch_pubmed_studies(drug_name: str, topic: str = "side effects") -> list[dict]:
+    """Fetch related PubMed studies for a drug. Returns max 3 studies. Never crashes."""
+    cache_key = f"{drug_name.lower()}:{topic.lower()}"
+    now = _time.time()
+
+    # Check cache
+    if cache_key in _pubmed_cache:
+        cached_at, cached_results = _pubmed_cache[cache_key]
+        if now - cached_at < _PUBMED_CACHE_TTL:
+            return cached_results
+
+    try:
+        # Step 1: Search for PMIDs
+        search_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+        search_params = {
+            "db": "pubmed",
+            "term": f"{drug_name} {topic}",
+            "retmax": "3",
+            "retmode": "json",
+            "sort": "relevance",
+        }
+        search_resp = http_requests.get(search_url, params=search_params, timeout=5)
+        if not search_resp.ok:
+            return []
+
+        search_data = search_resp.json()
+        ids = search_data.get("esearchresult", {}).get("idlist", [])
+        if not ids:
+            return []
+
+        # Step 2: Fetch article summaries
+        summary_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
+        summary_params = {
+            "db": "pubmed",
+            "id": ",".join(ids),
+            "retmode": "json",
+        }
+        summary_resp = http_requests.get(summary_url, params=summary_params, timeout=5)
+        if not summary_resp.ok:
+            return []
+
+        summary_data = summary_resp.json()
+        results_dict = summary_data.get("result", {})
+
+        studies = []
+        for pmid in ids:
+            article = results_dict.get(pmid)
+            if not article:
+                continue
+            title = str(article.get("title", "")).strip()
+            # Clean HTML tags from title
+            title = re.sub(r"<[^>]*>", "", title).strip()
+            journal = str(article.get("fulljournalname", article.get("source", "PubMed"))).strip()
+            pubdate = str(article.get("pubdate", ""))
+            year_match = re.search(r"\b(19|20)\d{2}\b", pubdate)
+            year = year_match.group(0) if year_match else ""
+
+            studies.append({
+                "title": title,
+                "journal": journal,
+                "year": year,
+                "pmid": pmid,
+                "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
+            })
+
+        # Cache the results
+        _pubmed_cache[cache_key] = (now, studies)
+        return studies
+
+    except Exception:
+        return []
+
+
 def _build_dataset_result(query: str) -> QuestionMatch | None:
     query_lower = (query or "").strip().lower()
     if not query_lower:
@@ -3024,6 +3109,10 @@ def _build_dataset_result(query: str) -> QuestionMatch | None:
     )
     side_effects = str(drug.get("side_effects_simple", "")).strip()
     mechanism = str(drug.get("mechanism_simple", "")).strip()
+
+    # Fetch PubMed studies (non-blocking, never crashes)
+    pubmed_studies = _fetch_pubmed_studies(dataset_drug_name)
+
     return QuestionMatch(
         id=0,
         question=query,
@@ -3040,6 +3129,7 @@ def _build_dataset_result(query: str) -> QuestionMatch | None:
             drug=dataset_drug_name,
             common_side_effects=side_effects,
             mechanism=mechanism,
+            pubmed_studies=pubmed_studies,
         ),
     )
 

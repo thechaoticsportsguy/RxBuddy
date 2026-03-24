@@ -113,6 +113,7 @@ def _build_structured_answer(
         "warning_signs": explanation.warning_signs,
         "higher_risk_groups": explanation.higher_risk_groups,
         "what_to_do": explanation.what_to_do,
+        "mechanism": explanation.article if intent == "side_effects" else "",
         "drugs": drug_names,
         # Legacy fields (kept for frontend backward compat)
         "direct": explanation.answer,

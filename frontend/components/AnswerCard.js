@@ -110,7 +110,6 @@ function sanitizeItems(items) {
     .filter(Boolean);
 }
 
-
 // Patterns that indicate a corrupted / raw-internal DB answer — never render these
 const _CORRUPTED_PATTERNS = [
   /category\s+[3-6]/i,
@@ -137,7 +136,6 @@ function parseSections(result) {
   const raw = _isCorrupted(result.answer) ? "" : (result.answer || "");
 
   // ── New-format fields ────────────────────────────────────────────────────────
-  // Also accept short_answer (RxBuddyAnswer v2 field name)
   const primaryAnswer = stripMarkdown(s.answer || s.short_answer || s.direct || "");
   if (primaryAnswer || s.details?.length || s.action?.length || s.article) {
     return {
@@ -145,8 +143,8 @@ function parseSections(result) {
       warning: stripMarkdown(s.warning || ""),
       details: sanitizeItems(Array.isArray(s.details) && s.details.length ? s.details : []),
       action:  sanitizeItems(
-        Array.isArray(s.action)  && s.action.length  ? s.action  :
-               (Array.isArray(s.do)     && s.do.length      ? s.do      : [])
+        Array.isArray(s.action) && s.action.length ? s.action :
+               (Array.isArray(s.do) && s.do.length ? s.do : [])
       ),
       article: stripMarkdown(s.article || s.why || ""),
     };
@@ -186,7 +184,6 @@ function parseSections(result) {
     else if (upper.startsWith("ARTICLE:") || upper.startsWith("WHY:"))
       out.article = line.slice(line.indexOf(":") + 1).trim();
   }
-  // Last resort: use first sentence of raw text as the answer
   if (!out.answer && raw) {
     const first = raw.split(/[.!?]/)[0];
     out.answer = first ? first.trim() + "." : raw.slice(0, 200);
@@ -262,7 +259,6 @@ function VerdictBanner({ config }) {
   );
 }
 
-/** Section 1 — Primary answer sentence */
 function PrimaryAnswer({ text }) {
   if (!text) return null;
   return (
@@ -272,7 +268,6 @@ function PrimaryAnswer({ text }) {
   );
 }
 
-/** Section 2 — Warning callout */
 function WarningBox({ text, verdict }) {
   if (!text) return null;
   const isEmergency = verdict === "EMERGENCY";
@@ -299,7 +294,6 @@ function WarningBox({ text, verdict }) {
   );
 }
 
-/** Sections 3 & 4 — Bullet lists */
 function BulletList({ title, items, colorClass = "text-slate-700", dotClass = "bg-slate-400" }) {
   if (!items?.length) return null;
   const headingId = `section-${title.replace(/\s+/g, "-").toLowerCase()}`;
@@ -323,7 +317,6 @@ function BulletList({ title, items, colorClass = "text-slate-700", dotClass = "b
   );
 }
 
-/** Section 5 — Mini article */
 function MiniArticle({ text }) {
   if (!text) return null;
   return (
@@ -378,6 +371,23 @@ function ConfidencePill({ confidence }) {
   );
 }
 
+// ── Banned phrases — filter generic disclaimers from side-effects bullets ─────
+
+const BANNED_SE_PHRASES = [
+  "side effects vary",
+  "consult your pharmacist for a complete list",
+  "consult your pharmacist or prescriber for a complete list",
+  "serious side effects are possible",
+  "contact your provider if you experience unusual symptoms",
+  "read the patient information leaflet",
+];
+
+function filterBanned(items) {
+  return items.filter((item) => {
+    const lower = item.toLowerCase();
+    return !BANNED_SE_PHRASES.some((phrase) => lower.includes(phrase));
+  });
+}
 
 // ── Main export ────────────────────────────────────────────────────────────────
 
@@ -385,201 +395,134 @@ export default function AnswerCard({ result, query }) {
   if (!result) return null;
 
   const structured = result.structured || {};
-  const commonSideEffects = sanitizeItems(structured.common_side_effects);
-  const seriousSideEffects = sanitizeItems(structured.serious_side_effects);
-  const warningSigns = sanitizeItems(structured.warning_signs);
-  const higherRiskGroups = sanitizeItems(structured.higher_risk_groups);
-  const whatToDo = sanitizeItems(structured.what_to_do);
-  const isDatasetSideEffects = structured?.intent === "side_effects" &&
-    (structured?.sources === "dataset" || structured?.source === "dataset");
-  const datasetMechanism = stripMarkdown(structured.mechanism || structured.article || "");
 
-  // ── Side-effects render path — TRUE EARLY RETURN ────────────────────────────
-  // Fires for ALL side_effects intent results, with or without populated arrays.
-  // The CAUTION banner always shows; arrays show if populated or a fallback message.
-  if (structured?.intent === "side_effects") {
-    const cautionConfig = VERDICT_CONFIG.CAUTION;
-    const hasSections = (
-      commonSideEffects.length > 0 ||
-      seriousSideEffects.length > 0 ||
-      warningSigns.length > 0 ||
-      whatToDo.length > 0
-    );
+  // ── Unified side-effects detection — works for BOTH dataset and AI ──────────
+  const isSideEffects =
+    structured?.intent === "side_effects" ||
+    structured?.intent === "SIDE_EFFECTS";
 
-    return (
-      <article
-        className="rounded-xl border border-yellow-300 shadow-sm overflow-hidden"
-        aria-label="Side effects information — use with caution"
-        role="article"
-      >
-        {/* CAUTION verdict banner */}
-        <VerdictBanner config={cautionConfig} />
+  if (isSideEffects) {
+    const commonSE = filterBanned(sanitizeItems(structured.common_side_effects));
+    const seriousSE = filterBanned(sanitizeItems(structured.serious_side_effects));
+    const warnSigns = filterBanned(sanitizeItems(structured.warning_signs || structured.when_to_get_help));
+    const mechText = stripMarkdown(structured.mechanism || structured.mechanism_simple || structured.article || "");
+    const studies = Array.isArray(structured.pubmed_studies) ? structured.pubmed_studies : [];
+    const hasData = commonSE.length > 0;
+    const cautionCfg = VERDICT_CONFIG.CAUTION;
 
-        <div className="bg-yellow-50 p-5 space-y-4">
-
-          {isDatasetSideEffects ? (
-            <>
-              {commonSideEffects.length > 0 && (
-                <section aria-labelledby="se-dataset-common-heading">
-                  <h3
-                    id="se-dataset-common-heading"
-                    className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-600"
-                  >
-                    COMMON SIDE EFFECTS
-                  </h3>
-                  <ul className="space-y-1" role="list">
-                    {commonSideEffects.map((x, i) => (
-                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-yellow-400" aria-hidden="true" />
-                        {x}
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              )}
-
-              {datasetMechanism && (
-                <section aria-labelledby="se-dataset-mechanism-heading">
-                  <h3
-                    id="se-dataset-mechanism-heading"
-                    className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-600"
-                  >
-                    HOW IT WORKS
-                  </h3>
-                  <p className="text-sm leading-relaxed text-slate-700">
-                    {datasetMechanism}
-                  </p>
-                </section>
-              )}
-            </>
-          ) : hasSections ? (
-            <>
-              {commonSideEffects.length > 0 && (
-                <section aria-labelledby="se-common-heading">
-                  <h3
-                    id="se-common-heading"
-                    className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-600"
-                  >
-                    Common side effects
-                  </h3>
-                  <ul className="space-y-1" role="list">
-                    {commonSideEffects.map((x, i) => (
-                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-yellow-400" aria-hidden="true" />
-                        {x}
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              )}
-
-              {seriousSideEffects.length > 0 && (
-                <section aria-labelledby="se-serious-heading">
-                  <h3
-                    id="se-serious-heading"
-                    className="mb-2 text-xs font-bold uppercase tracking-wider text-orange-700"
-                  >
-                    Serious but rare
-                  </h3>
-                  <ul className="space-y-1" role="list">
-                    {seriousSideEffects.map((x, i) => (
-                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-orange-400" aria-hidden="true" />
-                        {x}
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              )}
-
-              {warningSigns.length > 0 && (
-                <section aria-labelledby="se-warning-heading">
-                  <h3
-                    id="se-warning-heading"
-                    className="mb-2 text-xs font-bold uppercase tracking-wider text-red-700"
-                  >
-                    Get help right away if you have
-                  </h3>
-                  <ul className="space-y-1" role="list">
-                    {warningSigns.map((x, i) => (
-                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" aria-hidden="true" />
-                        {x}
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              )}
-
-              {higherRiskGroups.length > 0 && (
-                <section aria-labelledby="se-risk-heading">
-                  <h3
-                    id="se-risk-heading"
-                    className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-600"
-                  >
-                    Higher risk groups
-                  </h3>
-                  <ul className="space-y-1" role="list">
-                    {higherRiskGroups.map((x, i) => (
-                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-400" aria-hidden="true" />
-                        {x}
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              )}
-
-              {whatToDo.length > 0 && (
-                <section aria-labelledby="se-todo-heading">
-                  <h3
-                    id="se-todo-heading"
-                    className="mb-2 text-xs font-bold uppercase tracking-wider text-emerald-700"
-                  >
-                    What to do
-                  </h3>
-                  <ul className="space-y-1" role="list">
-                    {whatToDo.map((x, i) => (
-                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />
-                        {x}
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              )}
-            </>
-          ) : (
-            /* Empty state — backend returned no side-effects arrays */
+    // Empty state — no real side effects data
+    if (!hasData) {
+      return (
+        <article className="rounded-xl border border-yellow-300 shadow-sm overflow-hidden" aria-label="Side effects information" role="article">
+          <VerdictBanner config={cautionCfg} />
+          <div className="bg-yellow-50 p-5">
             <div className="rounded-lg border border-yellow-200 bg-white p-4">
               <p className="text-sm font-semibold text-slate-800">
-                {stripMarkdown(structured.answer) || "Side effect information is available for this medication."}
+                {"We don't have detailed side effect data for this medication yet."}
               </p>
               <p className="mt-2 text-sm text-slate-600">
-                {stripMarkdown(structured.warning) || "Consult your pharmacist or prescriber for a complete list of side effects."}
+                Please consult your pharmacist or prescriber for a complete list of side effects.
               </p>
             </div>
+          </div>
+        </article>
+      );
+    }
+
+    // ── Unified side effects card — identical for dataset AND AI ──────────────
+    return (
+      <article className="rounded-xl border border-yellow-300 shadow-sm overflow-hidden" aria-label="Side effects information — use with caution" role="article">
+        <VerdictBanner config={cautionCfg} />
+        <div className="bg-yellow-50 p-5 space-y-4">
+
+          {/* COMMON SIDE EFFECTS */}
+          <section aria-labelledby="se-common-heading">
+            <h3 id="se-common-heading" className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-600">COMMON SIDE EFFECTS</h3>
+            <ul className="space-y-1" role="list">
+              {commonSE.map((x, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-yellow-400" aria-hidden="true" />
+                  {x}
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          {/* SERIOUS BUT RARE */}
+          {seriousSE.length > 0 && (
+            <section aria-labelledby="se-serious-heading">
+              <h3 id="se-serious-heading" className="mb-2 text-xs font-bold uppercase tracking-wider text-orange-700">SERIOUS BUT RARE</h3>
+              <ul className="space-y-1" role="list">
+                {seriousSE.map((x, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-orange-400" aria-hidden="true" />
+                    {x}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {/* HOW IT WORKS */}
+          {mechText && (
+            <section aria-labelledby="se-mechanism-heading">
+              <h3 id="se-mechanism-heading" className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-600">HOW IT WORKS</h3>
+              <p className="text-sm leading-relaxed text-slate-700">{mechText}</p>
+            </section>
+          )}
+
+          {/* WHEN TO GET HELP */}
+          {warnSigns.length > 0 && (
+            <section aria-labelledby="se-help-heading">
+              <h3 id="se-help-heading" className="mb-2 text-xs font-bold uppercase tracking-wider text-red-700">WHEN TO GET HELP</h3>
+              <ul className="space-y-1" role="list">
+                {warnSigns.map((x, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" aria-hidden="true" />
+                    {x}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {/* RELATED RESEARCH */}
+          {studies.length > 0 && (
+            <section aria-labelledby="se-studies-heading">
+              <h3 id="se-studies-heading" className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-600">RELATED RESEARCH</h3>
+              <div className="space-y-2">
+                {studies.slice(0, 3).map((study, i) => (
+                  <a
+                    key={study.pmid || i}
+                    href={study.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block rounded-lg border border-slate-200 bg-white p-3 hover:border-emerald-300 hover:shadow transition-all"
+                  >
+                    <p className="text-sm font-medium text-slate-800 line-clamp-2">{study.title}</p>
+                    <p className="mt-1 text-xs text-slate-500">{study.journal}{study.year ? ` • ${study.year}` : ""}</p>
+                  </a>
+                ))}
+              </div>
+            </section>
           )}
 
           {/* Footer */}
           <div className="border-t border-yellow-200 pt-3">
             <p className="text-xs text-slate-400 italic">
               Data sourced from{" "}
-              <a href="https://dailymed.nlm.nih.gov" target="_blank" rel="noopener noreferrer" className="underline">
-                DailyMed
-              </a>{" "}
+              <a href="https://dailymed.nlm.nih.gov" target="_blank" rel="noopener noreferrer" className="underline">DailyMed</a>{" "}
               and{" "}
-              <a href="https://www.fda.gov/drugs" target="_blank" rel="noopener noreferrer" className="underline">
-                Drugs@FDA
-              </a>
+              <a href="https://www.fda.gov/drugs" target="_blank" rel="noopener noreferrer" className="underline">Drugs@FDA</a>
               . Not medical advice — always consult a licensed healthcare provider.
             </p>
           </div>
-
         </div>
       </article>
     );
   }
+
+  // ── Non-side-effects render path (interactions, dosage, general) ─────────────
 
   const rawVerdict = structured.verdict || "CONSULT_PHARMACIST";
   const config = VERDICT_CONFIG[rawVerdict] || DEFAULT_VERDICT;
@@ -605,38 +548,15 @@ export default function AnswerCard({ result, query }) {
         aria-label={`Answer: ${config.aria}`}
         role="article"
       >
-        {/* Verdict banner */}
         <VerdictBanner config={config} />
 
-        {/* Card body */}
         <div className={`p-5 space-y-4 ${config.bg}`}>
-
-          {/* 1. Primary answer */}
           <PrimaryAnswer text={answer} />
-
-          {/* 2. Warning */}
           <WarningBox text={warning} verdict={rawVerdict} />
-
-          {/* 3. Details */}
-          <BulletList
-            title="Key facts"
-            items={details}
-            colorClass="text-slate-600"
-            dotClass="bg-slate-400"
-          />
-
-          {/* 4. What to do */}
-          <BulletList
-            title="What to do"
-            items={action}
-            colorClass="text-emerald-700"
-            dotClass="bg-emerald-500"
-          />
-
-          {/* 5. Mini article */}
+          <BulletList title="Key facts" items={details} colorClass="text-slate-600" dotClass="bg-slate-400" />
+          <BulletList title="What to do" items={action} colorClass="text-emerald-700" dotClass="bg-emerald-500" />
           <MiniArticle text={article} />
 
-          {/* Footer: confidence + AI badge + source */}
           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3">
             <div className="flex items-center gap-2">
               <ConfidencePill confidence={confidence} />
@@ -653,19 +573,13 @@ export default function AnswerCard({ result, query }) {
             )}
           </div>
 
-          {/* Citations */}
           <CitationList citations={citations} />
 
-          {/* Disclaimer */}
           <p className="text-xs text-slate-400 italic">
             Data sourced from{" "}
-            <a href="https://dailymed.nlm.nih.gov" target="_blank" rel="noopener noreferrer" className="underline">
-              DailyMed
-            </a>{" "}
+            <a href="https://dailymed.nlm.nih.gov" target="_blank" rel="noopener noreferrer" className="underline">DailyMed</a>{" "}
             and{" "}
-            <a href="https://www.fda.gov/drugs" target="_blank" rel="noopener noreferrer" className="underline">
-              Drugs@FDA
-            </a>
+            <a href="https://www.fda.gov/drugs" target="_blank" rel="noopener noreferrer" className="underline">Drugs@FDA</a>
             . Not medical advice — always consult a licensed healthcare provider.
           </p>
         </div>

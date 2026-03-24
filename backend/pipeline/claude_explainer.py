@@ -161,18 +161,13 @@ _DRUG_SE_FALLBACK: dict[str, dict] = {
             "Stomach pain with nausea or vomiting",
             "Feeling very cold, dizzy, or lightheaded",
         ],
-        "higher_risk": [
-            "People with kidney disease",
-            "Heavy alcohol users",
-            "Elderly patients",
-            "Anyone having surgery or imaging tests that use contrast dye",
-        ],
         "what_to_do": [
             "Take metformin with food to reduce stomach side effects",
             "Start with a low dose — your doctor will increase it gradually",
             "Get regular kidney tests as your doctor recommends",
             "Tell your doctor about any unusual weakness or stomach pain",
         ],
+        "mechanism": "This drug helps the body use insulin better and lowers how much sugar the liver makes.",
     },
     "lisinopril": {
         "common": [
@@ -191,19 +186,13 @@ _DRUG_SE_FALLBACK: dict[str, dict] = {
             "Sudden or severe swelling of the face, lips, tongue, or throat",
             "Severe dizziness or fainting",
             "Decreased urination or leg swelling (may signal kidney problems)",
-            "Chest pain",
-        ],
-        "higher_risk": [
-            "People with pre-existing kidney disease",
-            "Those also taking potassium supplements or salt substitutes",
-            "People with a history of angioedema",
         ],
         "what_to_do": [
-            "The cough is a known, common side effect — talk to your doctor if it bothers you (an alternative can be prescribed)",
+            "The cough is a known, common side effect — talk to your doctor if it bothers you",
             "Rise slowly when standing up to prevent dizziness",
             "Monitor your blood pressure regularly",
-            "Avoid potassium supplements unless your doctor says otherwise",
         ],
+        "mechanism": "This drug helps relax blood vessels so blood can flow more easily.",
     },
     "methotrexate": {
         "common": [
@@ -225,18 +214,13 @@ _DRUG_SE_FALLBACK: dict[str, dict] = {
             "Shortness of breath or a new dry cough",
             "Yellowing of the skin or eyes (jaundice)",
         ],
-        "higher_risk": [
-            "People who drink alcohol",
-            "Those with kidney or liver disease",
-            "People also taking NSAIDs (ibuprofen, naproxen)",
-            "Elderly patients",
-        ],
         "what_to_do": [
             "Take folic acid supplements as directed — this significantly reduces side effects",
             "Avoid alcohol completely while on methotrexate",
             "Get all scheduled blood tests (liver, kidney, blood counts)",
             "Report any signs of infection immediately to your doctor",
         ],
+        "mechanism": "This drug slows down the immune system and blocks cell growth to treat autoimmune conditions and cancer.",
     },
     "semaglutide": {
         "common": [
@@ -255,21 +239,249 @@ _DRUG_SE_FALLBACK: dict[str, dict] = {
         "warning_signs": [
             "Severe stomach pain that radiates to your back and doesn't go away",
             "Vomiting that prevents keeping any fluids down",
-            "Signs of low blood sugar (if combined with other diabetes meds): shakiness, sweating, confusion",
+            "Signs of low blood sugar: shakiness, sweating, confusion",
             "Lump or swelling in the neck",
         ],
-        "higher_risk": [
-            "People with a personal or family history of thyroid cancer",
-            "Those with a history of pancreatitis",
-            "People with severe kidney disease",
-            "Those prone to gallbladder problems",
-        ],
         "what_to_do": [
-            "Dose starts low and increases slowly — nausea usually fades after 4–8 weeks",
+            "Dose starts low and increases slowly — nausea usually fades after 4-8 weeks",
             "Eat smaller, lower-fat meals to reduce nausea",
             "Stay well hydrated, especially if experiencing vomiting or diarrhea",
             "Tell your doctor about any severe stomach pain or vomiting that won't stop",
         ],
+        "mechanism": "This drug mimics GLP-1 hormone to regulate blood sugar and reduce appetite.",
+    },
+    # ── New drugs ──────────────────────────────────────────────────────────────
+    "adderall": {
+        "common": [
+            "Decreased appetite",
+            "Trouble sleeping",
+            "Dry mouth",
+            "Headache",
+            "Increased heart rate",
+            "Irritability",
+        ],
+        "serious": [
+            "Heart problems",
+            "High blood pressure",
+            "Psychiatric symptoms",
+            "Growth suppression in children",
+        ],
+        "warning_signs": [
+            "Chest pain or shortness of breath",
+            "New or worsening mood or behavior changes",
+            "Signs of circulation problems: numbness, pain, or color changes in fingers or toes",
+        ],
+        "what_to_do": [
+            "Take exactly as prescribed — do not increase your dose",
+            "Report any chest pain, fast heartbeat, or mood changes to your doctor",
+            "Avoid taking late in the day to prevent sleep problems",
+        ],
+        "mechanism": "This drug increases dopamine and norepinephrine in the brain to improve focus and reduce impulsivity.",
+    },
+    "risperidone": {
+        "common": [
+            "Drowsiness",
+            "Weight gain",
+            "Dizziness",
+            "Constipation",
+            "Dry mouth",
+            "Increased appetite",
+        ],
+        "serious": [
+            "Tardive dyskinesia",
+            "High blood sugar",
+            "Neuroleptic malignant syndrome",
+            "QT prolongation",
+        ],
+        "warning_signs": [
+            "Uncontrollable movements of the face, tongue, or jaw",
+            "High fever with muscle stiffness and confusion",
+            "Excessive thirst or frequent urination (may signal high blood sugar)",
+        ],
+        "what_to_do": [
+            "Report any involuntary movements immediately to your doctor",
+            "Have regular blood sugar monitoring",
+            "Rise slowly from sitting or lying to prevent dizziness",
+        ],
+        "mechanism": "This drug blocks dopamine and serotonin receptors to reduce psychotic symptoms.",
+    },
+    "amlodipine": {
+        "common": [
+            "Swelling in ankles or feet",
+            "Flushing",
+            "Headache",
+            "Dizziness",
+            "Fatigue",
+            "Nausea",
+        ],
+        "serious": [
+            "Severe low blood pressure",
+            "Worsening chest pain",
+            "Heart attack in rare cases",
+        ],
+        "warning_signs": [
+            "Severe dizziness or fainting",
+            "Rapid or irregular heartbeat",
+            "Worsening chest pain when starting or increasing dose",
+        ],
+        "what_to_do": [
+            "Report any ankle swelling to your doctor",
+            "Rise slowly from sitting to prevent dizziness",
+            "Do not stop taking suddenly without talking to your doctor",
+        ],
+        "mechanism": "This drug relaxes blood vessels by blocking calcium channels, lowering blood pressure.",
+    },
+    "methocarbamol": {
+        "common": [
+            "Drowsiness",
+            "Dizziness",
+            "Nausea",
+            "Blurred vision",
+            "Headache",
+        ],
+        "serious": [
+            "Seizures",
+            "Allergic reaction",
+            "Fainting",
+        ],
+        "warning_signs": [
+            "Severe dizziness or fainting",
+            "Seizures or convulsions",
+            "Signs of allergic reaction: rash, swelling, difficulty breathing",
+        ],
+        "what_to_do": [
+            "Do not drive or operate heavy machinery until you know how it affects you",
+            "Avoid alcohol while taking this medication",
+            "Tell your doctor if drowsiness becomes severe",
+        ],
+        "mechanism": "This drug relaxes muscles by depressing the central nervous system.",
+    },
+    "quetiapine": {
+        "common": [
+            "Drowsiness",
+            "Dry mouth",
+            "Dizziness",
+            "Weight gain",
+            "Constipation",
+        ],
+        "serious": [
+            "Tardive dyskinesia",
+            "High blood sugar",
+            "Neuroleptic malignant syndrome",
+        ],
+        "warning_signs": [
+            "Uncontrollable movements of the face, tongue, or jaw",
+            "High fever with muscle stiffness",
+            "Excessive thirst or frequent urination",
+        ],
+        "what_to_do": [
+            "Have regular blood sugar and cholesterol monitoring",
+            "Report any involuntary movements to your doctor",
+            "Do not stop suddenly — taper under medical supervision",
+        ],
+        "mechanism": "This drug blocks multiple neurotransmitter receptors to treat psychosis and mood disorders.",
+    },
+    "gabapentin": {
+        "common": [
+            "Drowsiness",
+            "Dizziness",
+            "Fatigue",
+            "Coordination problems",
+            "Blurred vision",
+        ],
+        "serious": [
+            "Respiratory depression",
+            "Suicidal thoughts",
+            "Severe allergic reaction",
+        ],
+        "warning_signs": [
+            "Shallow or slow breathing",
+            "New or worsening depression or suicidal thoughts",
+            "Severe dizziness or drowsiness",
+        ],
+        "what_to_do": [
+            "Do not stop suddenly — may cause withdrawal seizures",
+            "Tell your doctor about any mood changes",
+            "Avoid alcohol while taking this medication",
+        ],
+        "mechanism": "This drug reduces nerve signaling to control seizures and nerve pain.",
+    },
+    "omeprazole": {
+        "common": [
+            "Headache",
+            "Nausea",
+            "Diarrhea",
+            "Stomach pain",
+            "Constipation",
+        ],
+        "serious": [
+            "Kidney problems",
+            "Low magnesium",
+            "C. diff infection",
+            "Bone fractures with long-term use",
+        ],
+        "warning_signs": [
+            "Severe diarrhea that does not improve",
+            "Muscle spasms or irregular heartbeat (may signal low magnesium)",
+            "Joint pain or bone pain",
+        ],
+        "what_to_do": [
+            "Use the lowest dose for the shortest time needed",
+            "Talk to your doctor about long-term use risks",
+            "Report watery diarrhea or stomach pain that doesn't go away",
+        ],
+        "mechanism": "This drug reduces stomach acid by blocking the proton pump in stomach cells.",
+    },
+    "sertraline": {
+        "common": [
+            "Nausea",
+            "Diarrhea",
+            "Insomnia",
+            "Dry mouth",
+            "Sweating",
+            "Sexual dysfunction",
+        ],
+        "serious": [
+            "Suicidal thoughts in young adults",
+            "Serotonin syndrome",
+            "Bleeding risk",
+        ],
+        "warning_signs": [
+            "New or worsening depression or suicidal thoughts",
+            "Agitation, fever, fast heartbeat, muscle stiffness (serotonin syndrome)",
+            "Unusual bleeding or bruising",
+        ],
+        "what_to_do": [
+            "Do not stop suddenly — taper under medical supervision",
+            "Report any mood changes or suicidal thoughts immediately",
+            "Avoid alcohol while taking this medication",
+        ],
+        "mechanism": "This drug blocks serotonin reuptake in the brain to treat depression and anxiety.",
+    },
+    "escitalopram": {
+        "common": [
+            "Nausea",
+            "Insomnia",
+            "Sweating",
+            "Fatigue",
+            "Sexual dysfunction",
+        ],
+        "serious": [
+            "Suicidal thoughts",
+            "Serotonin syndrome",
+            "QT prolongation",
+        ],
+        "warning_signs": [
+            "New or worsening depression or suicidal thoughts",
+            "Agitation, fever, fast heartbeat, muscle stiffness",
+            "Fainting or irregular heartbeat",
+        ],
+        "what_to_do": [
+            "Do not stop suddenly — taper under medical supervision",
+            "Report any mood changes or suicidal thoughts immediately",
+            "Avoid alcohol while taking this medication",
+        ],
+        "mechanism": "This drug selectively blocks serotonin reuptake to improve mood and reduce anxiety.",
     },
 }
 
@@ -279,8 +491,40 @@ for _alias, _generic in [
     ("glucophage", "metformin"), ("fortamet", "metformin"), ("glumetza", "metformin"),
     ("zestril", "lisinopril"), ("prinivil", "lisinopril"), ("qbrelis", "lisinopril"),
     ("rheumatrex", "methotrexate"), ("otrexup", "methotrexate"), ("rasuvo", "methotrexate"),
+    # New aliases
+    ("amphetamine", "adderall"), ("dextroamphetamine", "adderall"),
+    ("risperdal", "risperidone"),
+    ("norvasc", "amlodipine"),
+    ("robaxin", "methocarbamol"),
+    ("seroquel", "quetiapine"),
+    ("neurontin", "gabapentin"),
+    ("prilosec", "omeprazole"),
+    ("zoloft", "sertraline"),
+    ("lexapro", "escitalopram"),
 ]:
     _DRUG_SE_FALLBACK[_alias] = _DRUG_SE_FALLBACK[_generic]
+
+
+# ── Banned generic phrases — these must never appear in side-effects bullets ───
+
+_BANNED_SE_PHRASES = [
+    "side effects vary",
+    "consult your pharmacist for a complete list",
+    "consult your pharmacist or prescriber for a complete list",
+    "serious side effects are possible",
+    "contact your provider if you experience unusual symptoms",
+    "read the patient information leaflet",
+]
+
+
+def _has_banned_phrases(items: list[str]) -> bool:
+    """Return True if any item in the list contains a banned generic phrase."""
+    for item in items:
+        lower = item.lower()
+        for phrase in _BANNED_SE_PHRASES:
+            if phrase in lower:
+                return True
+    return False
 
 
 def _build_fallback_side_effects(drug_names: list[str]) -> "Explanation":
@@ -295,52 +539,32 @@ def _build_fallback_side_effects(drug_names: list[str]) -> "Explanation":
             warning="If you experience severe or unusual symptoms, contact your healthcare provider.",
             details=[],
             action=data["what_to_do"][:3],
-            article=(
-                f"{drugs_str.capitalize()} can cause side effects in some people. "
-                "Most are mild and improve over time, but some require medical attention."
-            ),
+            article=data.get("mechanism", ""),
             common_side_effects=data["common"],
             serious_side_effects=data["serious"],
             warning_signs=data["warning_signs"],
-            higher_risk_groups=data["higher_risk"],
+            higher_risk_groups=[],
             what_to_do=data["what_to_do"],
             from_claude=False,
         )
 
-    # Generic fallback — drug not in our table
+    # Generic fallback — drug not in our table. Return empty arrays so
+    # the frontend shows the "consult a pharmacist" card instead of
+    # rendering fake generic bullets.
     return Explanation(
-        answer=f"Like all medications, {drugs_str} can cause side effects.",
-        warning="Consult your pharmacist or prescriber about side effects that concern you.",
+        answer=f"We don't have detailed side effect data for {drugs_str} yet. Please consult your pharmacist.",
+        warning="Consult your pharmacist or prescriber about side effects.",
         details=[],
         action=[
-            "Tell your doctor about any new or worsening symptoms",
+            "Ask your pharmacist for the full side effects list",
             "Read the medication guide that comes with your prescription",
-            "Contact your pharmacist with questions",
         ],
-        article=(
-            f"Side effects vary by person. Your pharmacist can provide a complete list of "
-            f"known side effects for {drugs_str}."
-        ),
-        common_side_effects=[
-            "Side effects vary — consult your pharmacist or prescriber for a complete list for this medication",
-        ],
-        serious_side_effects=[
-            "Serious side effects are possible — contact your provider if you experience unusual symptoms",
-        ],
-        warning_signs=[
-            "Signs of a severe allergic reaction: rash, difficulty breathing, swelling of face or throat",
-            "Symptoms that feel unusual or worsen unexpectedly",
-        ],
-        higher_risk_groups=[
-            "Elderly patients",
-            "People with kidney or liver disease",
-            "Those taking multiple medications",
-        ],
-        what_to_do=[
-            "Read the patient information leaflet that comes with your prescription",
-            "Tell your doctor about all medications and supplements you take",
-            "Report any unexpected or troubling side effects to your pharmacist or doctor",
-        ],
+        article="",
+        common_side_effects=[],
+        serious_side_effects=[],
+        warning_signs=[],
+        higher_risk_groups=[],
+        what_to_do=[],
         from_claude=False,
     )
 
@@ -348,36 +572,53 @@ def _build_fallback_side_effects(drug_names: list[str]) -> "Explanation":
 # ── System prompts per intent ─────────────────────────────────────────────────
 # Each prompt forces Claude to explain the GIVEN verdict, never override it.
 
-_SIDE_EFFECTS_PROMPT = """You are a clinical pharmacist assistant for RxBuddy.
-Your job is to explain the side effects of {drugs} in plain, patient-friendly language.
-The backend has already decided the verdict is CAUTION.
+_SIDE_EFFECTS_PROMPT = """You are a clinical pharmacist. The patient asked: '{query}'
+The drug is: {drugs}
 
-RULES:
-1. Use simple, everyday language — translate all medical jargon:
-   somnolence → "feeling drowsy or sleepy"
-   nausea → "feeling sick to your stomach"
-   diarrhea → "loose or watery stools"
-   dyspepsia → "indigestion or stomach upset"
-   pruritus → "itching"
-   myalgia → "muscle aches or pain"
-   flatulence → "gas"
-   alopecia → "hair loss"
-   pyrexia → "fever"
-   edema → "swelling"
-   erythema → "redness"
-   dysgeusia → "taste changes or metallic taste"
-2. Use ONLY the FDA label data and FAERS adverse events provided. Do not use your training data.
-3. Only mention {drugs}. Do NOT mention other drug names.
-4. Do NOT mention drug interactions, drug combinations, or other drugs.
-5. No markdown, no asterisks, no bullet symbols, no headers.
-6. Keep each list item to 1 sentence. Be concise and specific.
+Return the ACTUAL known side effects of {drugs} specifically.
+Do NOT return generic disclaimers.
+Do NOT say "side effects vary".
+Do NOT say "consult your pharmacist for a complete list".
+Do NOT say "Serious side effects are possible".
+Do NOT mention other drugs.
 
-Return ONLY valid JSON with this exact structure:
-{{"common_side_effects": ["plain-language side effect 1", "side effect 2", "side effect 3", "side effect 4"],
-  "serious_side_effects": ["serious but rare effect 1", "serious effect 2"],
-  "warning_signs": ["sign to get help 1", "sign 2", "sign 3"],
-  "higher_risk_groups": ["group 1", "group 2"],
-  "what_to_do": ["action 1", "action 2", "action 3"]}}
+You MUST return real, specific, named side effects from FDA label data.
+
+For {drugs}, list:
+- common_side_effects: the 4-6 most frequently reported side effects
+  (e.g. "nausea", "headache", "dizziness", "dry mouth")
+- serious_side_effects: 2-4 serious or rare but important side effects
+  (e.g. "liver damage", "severe allergic reaction", "QT prolongation")
+- mechanism_simple: one plain-English sentence explaining how {drugs} works
+  (e.g. "This drug blocks serotonin reuptake to improve mood.")
+
+Use simple everyday language. Translate medical jargon:
+  somnolence -> "feeling drowsy", pruritus -> "itching", edema -> "swelling",
+  dyspepsia -> "stomach upset", myalgia -> "muscle pain"
+
+Return ONLY this JSON, no other text:
+{{"common_side_effects": ["side effect 1", "side effect 2", "side effect 3", "side effect 4"],
+  "serious_side_effects": ["serious effect 1", "serious effect 2"],
+  "mechanism_simple": "one sentence plain English explanation",
+  "short_answer": "one sentence summary of side effect profile",
+  "when_to_get_help": ["warning sign 1", "warning sign 2"],
+  "confidence": "HIGH"}}
+
+EVIDENCE:
+{context}"""
+
+_SIDE_EFFECTS_RETRY_PROMPT = """RETRY: Your previous response contained generic disclaimers.
+Do NOT use generic phrases. List SPECIFIC NAMED side effects only.
+For {drugs}, return ONLY real, specific side effects like "nausea", "headache", "dizziness".
+Never say "side effects vary" or "consult your pharmacist for a complete list".
+
+Return ONLY valid JSON:
+{{"common_side_effects": ["specific effect 1", "specific effect 2", "specific effect 3", "specific effect 4"],
+  "serious_side_effects": ["specific serious effect 1", "specific serious effect 2"],
+  "mechanism_simple": "one sentence how the drug works",
+  "short_answer": "one sentence summary",
+  "when_to_get_help": ["warning sign 1", "warning sign 2"],
+  "confidence": "HIGH"}}
 
 EVIDENCE:
 {context}"""
@@ -536,8 +777,8 @@ def _generate_side_effects_explanation(
 ) -> Explanation:
     """
     Dedicated side-effects explanation generator.
-    Uses a patient-friendly prompt that returns structured arrays instead of
-    the generic explanation/key_points/warning/action JSON.
+    Uses a strict prompt that demands specific named effects.
+    Validates response against banned generic phrases and retries if needed.
     """
     if not api_key:
         logger.warning("[Claude-SE] No API key — using per-drug fallback")
@@ -551,77 +792,107 @@ def _generate_side_effects_explanation(
         adverse_events=adverse_events,
     )
 
-    try:
-        import anthropic
+    drugs_str = " and ".join(drug_names) if drug_names else "this medication"
+    max_retries = 2
 
-        client = anthropic.Anthropic(api_key=api_key, timeout=10.0)
+    for attempt in range(max_retries + 1):
+        try:
+            import anthropic
 
-        system_prompt = _SIDE_EFFECTS_PROMPT.format(
-            drugs=", ".join(drug_names),
-            context=context,
-        )
+            client = anthropic.Anthropic(api_key=api_key, timeout=10.0)
 
-        user_message = f"Question: {query}\n\nList the side effects of {', '.join(drug_names)} in plain language."
+            # Use retry prompt on subsequent attempts
+            if attempt == 0:
+                system_prompt = _SIDE_EFFECTS_PROMPT.format(
+                    drugs=", ".join(drug_names),
+                    query=query,
+                    context=context,
+                )
+            else:
+                system_prompt = _SIDE_EFFECTS_RETRY_PROMPT.format(
+                    drugs=", ".join(drug_names),
+                    context=context,
+                )
 
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=600,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_message}],
-        )
+            user_message = f"Question: {query}\n\nList the specific, named side effects of {', '.join(drug_names)}."
 
-        if not response.content:
-            raise RuntimeError("Claude returned no content.")
+            response = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=600,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_message}],
+            )
 
-        text = (response.content[0].text or "").strip()
-        if not text:
-            raise RuntimeError("Claude returned empty text.")
+            if not response.content:
+                raise RuntimeError("Claude returned no content.")
 
-        # Strip markdown fences
-        raw = text
-        if raw.startswith("```"):
-            raw = "\n".join(l for l in raw.splitlines() if not l.strip().startswith("```")).strip()
+            text = (response.content[0].text or "").strip()
+            if not text:
+                raise RuntimeError("Claude returned empty text.")
 
-        parsed = json.loads(raw)
+            # Strip markdown fences
+            raw = text
+            if raw.startswith("```"):
+                raw = "\n".join(l for l in raw.splitlines() if not l.strip().startswith("```")).strip()
 
-        drugs_str = " and ".join(drug_names) if drug_names else "this medication"
-        result = Explanation(
-            answer=f"Here are the known side effects of {drugs_str}.",
-            warning="Contact your healthcare provider if you experience severe or unusual symptoms.",
-            details=[],
-            action=list(parsed.get("what_to_do", []))[:3],
-            article=f"{drugs_str.capitalize()} can cause side effects in some people. Most are mild, but some require medical attention.",
-            common_side_effects=list(parsed.get("common_side_effects", []))[:5],
-            serious_side_effects=list(parsed.get("serious_side_effects", []))[:3],
-            warning_signs=list(parsed.get("warning_signs", []))[:4],
-            higher_risk_groups=list(parsed.get("higher_risk_groups", []))[:3],
-            what_to_do=list(parsed.get("what_to_do", []))[:4],
-            from_claude=True,
-        )
+            parsed = json.loads(raw)
 
-        # Guard: Claude must never return empty common_side_effects for a side_effects query.
-        # If it did, backfill from the hardcoded per-drug table (or generic fallback).
-        if not result.common_side_effects:
-            fallback = _build_fallback_side_effects(drug_names)
-            result.common_side_effects = fallback.common_side_effects
-            if not result.serious_side_effects:
-                result.serious_side_effects = fallback.serious_side_effects
-            if not result.warning_signs:
-                result.warning_signs = fallback.warning_signs
-            if not result.higher_risk_groups:
-                result.higher_risk_groups = fallback.higher_risk_groups
-            if not result.what_to_do:
-                result.what_to_do = fallback.what_to_do
+            common = list(parsed.get("common_side_effects", []))[:6]
+            serious = list(parsed.get("serious_side_effects", []))[:4]
+            mechanism = str(parsed.get("mechanism_simple", ""))[:300]
+            short_answer = str(parsed.get("short_answer", ""))[:300]
+            when_to_get_help = list(parsed.get("when_to_get_help", parsed.get("warning_signs", [])))[:4]
 
-        logger.info("[Claude-SE] Side-effects explanation generated for %s", drug_names)
-        return result
+            # ── Validate: reject generic disclaimers ──────────────────────
+            if len(common) < 3 or _has_banned_phrases(common) or _has_banned_phrases(serious):
+                if attempt < max_retries:
+                    logger.warning(
+                        "[Claude-SE] Attempt %d returned generic/empty — retrying",
+                        attempt + 1,
+                    )
+                    continue
+                # Max retries exhausted — fall through to fallback
+                logger.warning("[Claude-SE] All retries exhausted — using fallback")
+                return _build_fallback_side_effects(drug_names)
 
-    except (json.JSONDecodeError, KeyError):
-        logger.warning("[Claude-SE] JSON parse failed — using per-drug fallback")
-        return _build_fallback_side_effects(drug_names)
-    except Exception as exc:
-        logger.warning("[Claude-SE] Failed: %s — using per-drug fallback", exc)
-        return _build_fallback_side_effects(drug_names)
+            result = Explanation(
+                answer=short_answer or f"Here are the known side effects of {drugs_str}.",
+                warning="Contact your healthcare provider if you experience severe or unusual symptoms.",
+                details=[],
+                action=[],
+                article=mechanism,
+                common_side_effects=common,
+                serious_side_effects=serious,
+                warning_signs=when_to_get_help,
+                higher_risk_groups=[],
+                what_to_do=[],
+                from_claude=True,
+            )
+
+            # Guard: backfill from fallback table if empty
+            if not result.common_side_effects:
+                fallback = _build_fallback_side_effects(drug_names)
+                result.common_side_effects = fallback.common_side_effects
+                if not result.serious_side_effects:
+                    result.serious_side_effects = fallback.serious_side_effects
+                if not result.warning_signs:
+                    result.warning_signs = fallback.warning_signs
+
+            logger.info("[Claude-SE] Side-effects generated for %s (attempt %d)", drug_names, attempt + 1)
+            return result
+
+        except (json.JSONDecodeError, KeyError) as exc:
+            if attempt < max_retries:
+                logger.warning("[Claude-SE] JSON parse failed (attempt %d) — retrying", attempt + 1)
+                continue
+            logger.warning("[Claude-SE] JSON parse failed after retries — using fallback")
+            return _build_fallback_side_effects(drug_names)
+        except Exception as exc:
+            logger.warning("[Claude-SE] Failed: %s — using per-drug fallback", exc)
+            return _build_fallback_side_effects(drug_names)
+
+    # Should never reach here, but just in case
+    return _build_fallback_side_effects(drug_names)
 
 
 def _build_fallback(
