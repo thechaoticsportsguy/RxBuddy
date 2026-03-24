@@ -12,3 +12,4 @@ streamlit
 plotly
 anthropic
 pyspellchecker
+aiohttp

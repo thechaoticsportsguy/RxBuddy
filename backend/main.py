@@ -3814,3 +3814,110 @@ def admin_refresh_label(drug: str) -> dict:
         "date_fetched": meta.get("date_fetched"),
         "cache_expires_at": meta.get("cache_expires_at"),
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PIPELINE V2 — Modular, deterministic, fast
+# ══════════════════════════════════════════════════════════════════════════════
+# This is the refactored pipeline that replaces the monolithic search flow.
+# 10 steps: classify → cache → drugs → APIs → decision → Claude → enforce →
+#           clean → cache → return
+#
+# Usage: POST /v2/search  (same request body as /search)
+#        POST /search with header X-Pipeline: v2
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/v2/search")
+async def search_v2(req: SearchRequest) -> JSONResponse:
+    """
+    Pipeline v2 search endpoint — modular, deterministic, fast.
+
+    Architecture:
+      1. classify_fast()       → zero-AI intent (< 1ms)
+      2. check_cache()         → L1 + L2 PostgreSQL (< 200ms if hit)
+      3. extract_drugs()       → drug names + normalization
+      4. fetch_all_apis()      → async parallel (≤ 1.5s timeout each)
+      5. compute_verdict()     → deterministic backend (PRIMARY TRUTH)
+      6. generate_explanation() → Claude explanation only (verdict locked)
+      7. enforce_verdict()     → hard enforcement (Claude can't override)
+      8. clean_response()      → max 2 sentences, no fluff
+      9. cache_result()        → PostgreSQL 7-day TTL
+     10. return response
+
+    Performance targets:
+      - Cache hits: < 200ms
+      - Full pipeline: < 2 seconds
+      - Claude NEVER decides the verdict
+    """
+    from pipeline.orchestrator import run_pipeline
+
+    user_query = req.query.strip()
+    if not user_query:
+        raise HTTPException(status_code=400, detail="Query cannot be empty.")
+
+    try:
+        result = await run_pipeline(user_query)
+        return JSONResponse(content=result)
+    except Exception as exc:
+        logger.error("[v2/search] Pipeline failed: %s", exc, exc_info=True)
+        from pipeline.failsafe import build_failsafe_response
+        return JSONResponse(
+            status_code=500,
+            content=build_failsafe_response(user_query, str(exc)),
+        )
+
+
+@app.post("/v2/search/stream")
+async def search_v2_stream(req: SearchRequest) -> StreamingResponse:
+    """
+    SSE streaming variant of /v2/search.
+
+    Sends progress events during the pipeline stages so the UI stays
+    responsive during Railway cold-starts and API calls.
+    """
+    from pipeline.orchestrator import run_pipeline
+    from pipeline.classifier import is_emergency
+    from pipeline.cache import cache_get
+    from pipeline.drug_extractor import normalize_query
+
+    async def generate():
+        user_query = req.query.strip()
+        if not user_query:
+            yield _sse_v2({"type": "error", "message": "Query cannot be empty."})
+            return
+
+        # Emergency check
+        if is_emergency(user_query):
+            from pipeline.failsafe import build_emergency_response
+            result = build_emergency_response(user_query)
+            yield _sse_v2({"type": "done", "source": "emergency", "result": result["results"][0] if result["results"] else {}})
+            return
+
+        yield _sse_v2({"type": "status", "message": "Checking cache..."})
+
+        # Cache check
+        _, cleaned = normalize_query(user_query)
+        cached = cache_get(cleaned)
+        if cached:
+            yield _sse_v2({"type": "done", "source": "cache", "result": cached["results"][0] if cached.get("results") else {}})
+            return
+
+        yield _sse_v2({"type": "status", "message": "Analyzing your question..."})
+
+        try:
+            result = await run_pipeline(user_query)
+            source = result.get("source", "pipeline_v2")
+            first_result = result["results"][0] if result.get("results") else {}
+            yield _sse_v2({"type": "done", "source": source, "result": first_result})
+        except Exception as exc:
+            logger.error("[v2/stream] Pipeline failed: %s", exc, exc_info=True)
+            yield _sse_v2({"type": "error", "message": "Could not generate an answer. Please try again."})
+
+    def _sse_v2(payload: dict) -> str:
+        return f"data: {json.dumps(payload, default=str)}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
