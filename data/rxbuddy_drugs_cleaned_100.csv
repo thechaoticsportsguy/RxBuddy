@@ -1,0 +1,101 @@
+generic_name,common_brand_name,drug_class,mechanism_simple,side_effects_simple,common_use
+Lisinopril,Prinivil,ACE Inhibitor,This drug helps relax blood vessels so blood can flow more easily.,dizziness; dry cough; headache,High blood pressure
+Atorvastatin,Lipitor,Statin,"This drug blocks the liver from making as much cholesterol, which helps lower bad cholesterol in the blood.",muscle pain; upset stomach; diarrhea,High cholesterol
+Metformin,Glucophage,Biguanide,This drug helps the body use insulin better and lowers how much sugar the liver makes.,diarrhea; upset stomach; feeling sick to your stomach,Type 2 diabetes
+Levothyroxine,Synthroid,Thyroid Hormone,This drug replaces a thyroid hormone your body needs for normal energy and body functions.,feeling hot; trouble sleeping; fast heartbeat,Underactive thyroid
+Amlodipine,Norvasc,Calcium Channel Blocker,This drug opens up blood vessels so the heart does not have to work as hard.,swollen ankles; feeling dizzy; feeling tired,High blood pressure
+Metoprolol,Lopressor,Beta Blocker,This drug slows the heart and lowers how hard it has to pump.,feeling tired; feeling dizzy; cold hands,High blood pressure and heart problems
+Albuterol,Ventolin HFA,Bronchodilator,This drug opens the breathing tubes in the lungs so you can get more air.,shaking; fast heartbeat; headache,Asthma
+Omeprazole,Prilosec,Proton Pump Inhibitor,This drug lowers how much acid the stomach makes.,headache; stomach pain; diarrhea,Heartburn and acid reflux
+Losartan,Cozaar,Angiotensin II Receptor Blocker,"This drug blocks a chemical that makes blood vessels tighten, helping them stay relaxed.",feeling dizzy; stuffy nose; back pain,High blood pressure
+Gabapentin,Neurontin,Anticonvulsant,This drug calms overactive nerve signals in the brain and body.,feeling sleepy; feeling dizzy; swelling in the legs,Nerve pain and seizures
+Hydrochlorothiazide,Microzide,Diuretic,This drug helps the kidneys get rid of extra water and salt through pee.,peeing a lot; feeling dizzy; low potassium,High blood pressure and swelling
+Sertraline,Zoloft,SSRI Antidepressant,This drug helps keep more serotonin in the brain to improve mood and anxiety symptoms.,feeling sick to your stomach; diarrhea; trouble sleeping,Depression and anxiety
+Simvastatin,Zocor,Statin,This drug blocks the liver from making as much cholesterol.,muscle pain; upset stomach; constipation,High cholesterol
+Montelukast,Singulair,Leukotriene Receptor Antagonist,This drug blocks chemicals in the body that cause breathing tubes to swell up.,headache; stomach pain; cough,Asthma and allergies
+Escitalopram,Lexapro,SSRI Antidepressant,This drug helps keep more serotonin in the brain to improve mood and anxiety symptoms.,trouble sleeping; feeling sleepy; feeling sick to your stomach,Depression and anxiety
+Acetaminophen,Tylenol,Analgesic,This drug helps lower pain and fever by changing how the brain senses them.,upset stomach; headache; skin rash,Pain and fever
+Rosuvastatin,Crestor,Statin,This drug blocks the liver from making cholesterol and helps clear bad cholesterol from the blood.,muscle pain; headache; feeling weak,High cholesterol
+Ibuprofen,Advil,NSAID,This drug blocks chemicals that cause swelling and pain in the body.,stomach ache; heartburn; feeling dizzy,"Pain, fever, and swelling"
+Trazodone,Desyrel,Antidepressant,This drug changes brain chemicals to help with mood and can also make you sleepy.,feeling very sleepy; dry mouth; feeling dizzy,Depression and sleep problems
+Fluoxetine,Prozac,SSRI Antidepressant,This drug helps keep more serotonin in the brain to improve mood and anxiety symptoms.,trouble sleeping; loss of appetite; feeling nervous,Depression and anxiety
+Pantoprazole,Protonix,Proton Pump Inhibitor,This drug turns off the tiny acid pumps in the stomach.,headache; diarrhea; stomach pain,Heartburn and acid reflux
+Duloxetine,Cymbalta,SNRI Antidepressant,This drug helps balance two brain chemicals that affect mood and pain signals.,dry mouth; feeling tired; feeling sick to your stomach,Depression and nerve pain
+Fluticasone,Flonase,Corticosteroid,This drug calms down the immune system so the nose does not get puffy and runny.,nosebleeds; headache; sore throat,Allergies
+Meloxicam,Mobic,NSAID,This drug blocks chemicals in the body that cause pain and swelling.,upset stomach; heartburn; feeling dizzy,Arthritis and joint pain
+Amoxicillin,Amoxil,Antibiotic,This drug kills certain bacteria by stopping them from building a strong outer wall.,diarrhea; upset stomach; skin rash,Bacterial infections
+Clopidogrel,Plavix,Antiplatelet,This drug makes blood cells less sticky so they are less likely to form dangerous clumps.,bleeding easily; bruising easily; nosebleeds,Preventing heart attacks and strokes
+Prednisone,Deltasone,Corticosteroid,This drug calms the immune system and lowers swelling.,increased appetite; trouble sleeping; mood changes,Severe allergies and inflammation
+Citalopram,Celexa,SSRI Antidepressant,This drug helps brain chemicals stay balanced to improve how you feel.,dry mouth; sweating more; feeling sleepy,Depression
+Amphetamine and Dextroamphetamine,Adderall,Stimulant,This drug helps certain brain chemicals work better so it is easier to focus and stay alert.,loss of appetite; trouble sleeping; fast heartbeat,ADHD
+Pravastatin,Pravachol,Statin,This drug lowers the amount of cholesterol made by the liver.,muscle pain; stomach ache; feeling tired,High cholesterol
+Tramadol,Ultram,Opioid Analgesic,This drug changes how the brain feels pain signals.,feeling sleepy; feeling dizzy; constipation,Moderate to severe pain
+Azithromycin,Zithromax,Antibiotic,This drug stops bad bacteria from growing and making copies of themselves.,diarrhea; stomach cramps; feeling sick,Bacterial infections
+Bupropion,Wellbutrin,NDRI Antidepressant,This drug boosts energy chemicals in the brain to improve mood and focus.,dry mouth; trouble sleeping; shaking,Depression and quitting smoking
+Cyclobenzaprine,Flexeril,Muscle Relaxant,This drug works in the brain to help muscles relax.,feeling very sleepy; dry mouth; feeling dizzy,Muscle spasms
+Tamsulosin,Flomax,Alpha Blocker,This drug relaxes the muscles around the bladder so it is easier to pee.,dizziness; runny nose; feeling tired,Enlarged prostate
+Venlafaxine,Effexor,SNRI Antidepressant,This drug helps balance brain chemicals that affect mood and worry.,feeling sick to your stomach; dry mouth; feeling tired,Depression and anxiety
+Atenolol,Tenormin,Beta Blocker,This drug slows the heart and lowers how hard it has to work.,feeling tired; cold hands; feeling dizzy,High blood pressure
+Lorazepam,Ativan,Benzodiazepine,This drug slows down brain activity to make you feel very calm.,feeling sleepy; dizziness; feeling unsteady,Anxiety
+Apixaban,Eliquis,Anticoagulant,This drug blocks a clotting protein so the blood is less likely to form dangerous clots.,bleeding more than usual; bruising easily; nosebleeds,Preventing blood clots
+Cetirizine,Zyrtec,Antihistamine,This drug blocks the chemical that the body makes when it reacts to dust or pollen.,feeling sleepy; dry mouth; headache,Allergies
+Oxycodone,OxyContin,Opioid Analgesic,This drug tells the brain to ignore strong pain signals.,feeling sleepy; constipation; feeling sick,Severe pain
+Diclofenac,Voltaren,NSAID,This drug blocks chemicals in the body that cause pain and swelling.,upset stomach; heartburn; headache,Joint pain and arthritis
+Furosemide,Lasix,Diuretic,This drug helps the kidneys remove extra water and salt through pee.,peeing a lot; feeling thirsty; low potassium,Swelling and high blood pressure
+Spironolactone,Aldactone,Diuretic,This drug helps the body get rid of extra water while holding on to potassium.,peeing often; breast tenderness; feeling dizzy,Heart failure and high blood pressure
+Carvedilol,Coreg,Beta Blocker,This drug slows the heart and lowers the pressure in blood vessels so the heart can rest.,feeling tired; feeling dizzy; low blood pressure,Heart failure and high blood pressure
+Ondansetron,Zofran,Antiemetic,This drug blocks the signals in the brain and stomach that make you want to throw up.,headache; constipation; feeling tired,Nausea and vomiting
+Naproxen,Aleve,NSAID,This drug calms down swelling and blocks pain signals in the body.,stomach ache; heartburn; dizziness,Pain and inflammation
+Glipizide,Glucotrol,Sulfonylurea,This drug tells the pancreas to release more insulin to lower blood sugar.,low blood sugar; feeling shaky; weight gain,Type 2 diabetes
+Mirtazapine,Remeron,Antidepressant,This drug changes brain chemicals to help mood and sleep.,feeling very sleepy; increased appetite; weight gain,Depression
+Rivaroxaban,Xarelto,Anticoagulant,This drug blocks a clotting protein so the blood is less likely to form dangerous clots.,bleeding easily; bruising easily; upset stomach,Preventing blood clots
+Clonazepam,Klonopin,Benzodiazepine,This drug calms the brain and nerves down very quickly.,feeling sleepy; clumsiness; feeling dizzy,Seizures and panic attacks
+Methylphenidate,Ritalin,Stimulant,This drug helps certain brain chemicals work better so it is easier to focus and pay attention.,trouble sleeping; loss of appetite; feeling nervous,ADHD
+Alprazolam,Xanax,Benzodiazepine,This drug slows down the brain to help you feel relaxed and less scared.,feeling sleepy; feeling dizzy; memory problems,Anxiety and panic disorders
+Allopurinol,Zyloprim,Xanthine Oxidase Inhibitor,This drug lowers uric acid so fewer sharp crystals build up in the joints.,skin rash; upset stomach; diarrhea,Gout
+Lamotrigine,Lamictal,Anticonvulsant,This drug calms overactive electrical signals in the brain.,feeling dizzy; headache; skin rash,Seizures and bipolar disorder
+Levetiracetam,Keppra,Anticonvulsant,This drug helps calm nerve signals in the brain to prevent seizures.,feeling tired; feeling dizzy; mood changes,Seizures
+Clonidine,Catapres,Alpha Agonist,This drug tells the brain to send signals to relax the blood vessels.,dry mouth; feeling sleepy; dizziness,High blood pressure
+Famotidine,Pepcid,H2 Blocker,This drug blocks the signals that tell the stomach to make acid.,headache; dizziness; constipation,Heartburn
+Celecoxib,Celebrex,NSAID,This drug blocks a pain and swelling enzyme in the body.,stomach pain; headache; diarrhea,Arthritis
+Esomeprazole,Nexium,Proton Pump Inhibitor,This drug shuts down the tiny acid factories inside the stomach.,headache; diarrhea; stomach pain,Heartburn and acid reflux
+Doxycycline,Vibramycin,Antibiotic,This drug stops bacteria from making proteins they need to live.,upset stomach; diarrhea; sunburn more easily,Bacterial infections
+Ciprofloxacin,Cipro,Antibiotic,This drug damages the instructions bacteria use to grow and survive.,upset stomach; diarrhea; feeling dizzy,Bacterial infections
+Levofloxacin,Levaquin,Antibiotic,This drug damages the instructions bacteria use to grow and survive.,diarrhea; headache; trouble sleeping,Bacterial infections
+Amoxicillin and Clavulanate,Augmentin,Antibiotic,"This drug kills certain bacteria by stopping them from building a strong outer wall, and the second part helps it work against tougher bacteria.",diarrhea; upset stomach; skin rash,Bacterial infections
+Sulfamethoxazole and Trimethoprim,Bactrim,Antibiotic,This drug blocks bacteria from making a special vitamin they need to grow.,upset stomach; skin rash; sensitivity to sunlight,Bacterial infections
+Nitrofurantoin,Macrobid,Antibiotic,This drug goes into the urine and damages bacteria in the bladder.,upset stomach; headache; diarrhea,Urinary tract infections
+Fluconazole,Diflucan,Antifungal,This drug stops fungus from making the protective covering it needs to live.,headache; upset stomach; diarrhea,Fungal infections
+Valacyclovir,Valtrex,Antiviral,This drug stops bad viruses from copying themselves in the body.,headache; stomach pain; feeling tired,Viral infections
+Cephalexin,Keflex,Antibiotic,This drug kills certain bacteria by stopping them from building a strong outer wall.,diarrhea; upset stomach; skin rash,Bacterial infections
+Sitagliptin,Januvia,DPP-4 Inhibitor,This drug helps the body naturally make more insulin when blood sugar is high.,stuffy nose; sore throat; headache,Type 2 diabetes
+Empagliflozin,Jardiance,SGLT2 Inhibitor,This drug makes the kidneys push extra sugar out of the body through pee.,peeing more often; feeling thirsty; yeast infections,Type 2 diabetes
+Dapagliflozin,Farxiga,SGLT2 Inhibitor,This drug helps the kidneys remove extra sugar from the body through pee.,peeing a lot; feeling thirsty; yeast infections,Type 2 diabetes
+Dulaglutide,Trulicity,GLP-1 Agonist,This drug acts like a natural gut hormone to help the body release insulin and feel full.,feeling sick to your stomach; diarrhea; stomach pain,Type 2 diabetes
+Semaglutide,Ozempic,GLP-1 Agonist,This drug acts like a natural gut hormone to help the body release insulin and slow digestion.,feeling sick to your stomach; diarrhea; stomach pain,Type 2 diabetes
+Insulin Glargine,Lantus,Long-acting Insulin,"This drug gives the body a slow, steady supply of insulin all day long to control blood sugar.",low blood sugar; weight gain; redness where a shot is given,Diabetes
+Insulin Lispro,Humalog,Rapid-acting Insulin,This drug quickly helps move sugar from the blood into the muscles for energy.,low blood sugar; headache; weight gain,Diabetes
+Glimepiride,Amaryl,Sulfonylurea,This drug tells the pancreas to release more insulin to lower blood sugar.,low blood sugar; feeling shaky; feeling dizzy,Type 2 diabetes
+Amitriptyline,Elavil,Antidepressant,This drug changes brain chemicals to help mood and can also calm nerve pain.,feeling sleepy; dry mouth; constipation,Depression and nerve pain
+Topiramate,Topamax,Anticonvulsant,This drug calms overactive brain signals to help prevent seizures and migraines.,feeling tired; tingling in fingers; loss of appetite,Seizures and migraines
+Pregabalin,Lyrica,Anticonvulsant,This drug slows down pain signals traveling through damaged nerves.,feeling dizzy; feeling sleepy; swelling in the legs,Nerve pain and seizures
+Donepezil,Aricept,Cholinesterase Inhibitor,This drug helps a memory chemical stay in the brain longer.,feeling sick to your stomach; diarrhea; trouble sleeping,Alzheimer's disease
+Zolpidem,Ambien,Sedative,This drug turns down brain activity so you can fall asleep fast.,feeling sleepy the next day; dizziness; headache,Trouble sleeping
+Diazepam,Valium,Benzodiazepine,This drug makes the brain and muscles relax very deeply.,feeling sleepy; feeling weak; feeling dizzy,Anxiety and muscle spasms
+Warfarin,Coumadin,Anticoagulant,This drug blocks vitamin K so the blood takes longer to form clots.,bleeding easily; bruising easily; upset stomach,Preventing blood clots
+Loratadine,Claritin,Antihistamine,This drug stops allergy chemicals without making you feel too sleepy.,headache; feeling tired; dry mouth,Allergies
+Fexofenadine,Allegra,Antihistamine,This drug blocks the body's reaction to allergens like pollen and pet dander.,headache; back pain; cough,Allergies
+Diphenhydramine,Benadryl,Antihistamine,This drug blocks allergy signals but crosses into the brain to make you sleepy.,feeling very sleepy; dry mouth; feeling dizzy,Allergies and trouble sleeping
+Fluticasone and Salmeterol,Advair,Corticosteroid and Bronchodilator,This drug lowers swelling and keeps breathing tubes open at the same time.,sore throat; headache; thrush in the mouth,Asthma and COPD
+Budesonide,Pulmicort,Corticosteroid,This drug lowers swelling in the lungs to make breathing easier.,cough; sore throat; thrush in the mouth,Asthma
+Promethazine,Phenergan,Antihistamine and Antiemetic,This drug blocks brain signals that cause feeling sick and throwing up.,feeling very sleepy; dry mouth; feeling dizzy,Nausea and vomiting
+Docusate,Colace,Stool Softener,This drug helps water mix into stool so it is softer and easier to pass.,stomach cramps; diarrhea; throat irritation,Constipation
+Polyethylene Glycol,MiraLAX,Osmotic Laxative,This drug holds water in the gut to help food waste slide out easily.,bloating; gas; stomach cramps,Constipation
+Loperamide,Imodium,Antidiarrheal,This drug slows down the movement of the gut so it can absorb more water.,constipation; stomach cramps; feeling dizzy,Diarrhea
+Aspirin,Bayer,NSAID and Antiplatelet,This drug lowers pain and swelling and also makes blood cells less sticky.,upset stomach; heartburn; bleeding easily,Pain and preventing heart attacks
+Estradiol,Estrace,Estrogen Hormone,This drug replaces a hormone the body stops making during menopause.,headache; breast tenderness; upset stomach,Menopause symptoms
+Testosterone,AndroGel,Androgen Hormone,This drug replaces testosterone when the body does not make enough.,acne; swelling; mood changes,Low testosterone
+Alendronate,Fosamax,Bisphosphonate,"This drug slows down the cells that break down old bone, keeping bones strong.",stomach pain; heartburn; bone pain,Osteoporosis
+Finasteride,Proscar,5-alpha Reductase Inhibitor,This drug blocks a hormone that can make the prostate grow and cause hair loss.,lower sex drive; trouble getting an erection; less semen,Enlarged prostate and hair loss
+Lovastatin,Mevacor,Statin,This drug blocks the liver from making as much cholesterol.,muscle pain; upset stomach; constipation,High cholesterol
+Ezetimibe,Zetia,Cholesterol Absorption Inhibitor,This drug blocks some cholesterol from being absorbed in the gut.,diarrhea; joint pain; feeling tired,High cholesterol
