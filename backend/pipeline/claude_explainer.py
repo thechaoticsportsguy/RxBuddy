@@ -527,8 +527,10 @@ def _has_banned_phrases(items: list[str]) -> bool:
     return False
 
 
-def _build_fallback_side_effects(drug_names: list[str]) -> "Explanation":
-    """Build a fallback side-effects explanation using hardcoded per-drug data."""
+def _build_fallback_side_effects(
+    drug_names: list[str], fda_labels: dict | None = None
+) -> "Explanation":
+    """Build a fallback side-effects explanation using hardcoded per-drug data or OpenFDA."""
     drug = drug_names[0].lower() if drug_names else ""
     data = _DRUG_SE_FALLBACK.get(drug)
     drugs_str = " and ".join(drug_names) if drug_names else "this medication"
@@ -548,9 +550,32 @@ def _build_fallback_side_effects(drug_names: list[str]) -> "Explanation":
             from_claude=False,
         )
 
-    # Generic fallback — drug not in our table. Return empty arrays so
-    # the frontend shows the "consult a pharmacist" card instead of
-    # rendering fake generic bullets.
+    # ── OPENFDA FALLBACK ───────────────────────────────────────────────────────
+    if fda_labels and drug in fda_labels:
+        adverse_reactions = fda_labels[drug].get("adverse_reactions", "")
+        if adverse_reactions:
+            text = adverse_reactions.replace(";", ",")
+            parts = [p.strip().lower() for p in text.split(",") if 3 < len(p.strip()) < 50]
+            if parts:
+                common_se = parts[:5]
+                return Explanation(
+                    answer=f"Here are the known side effects of {drugs_str} based on FDA label data.",
+                    warning="Contact your healthcare provider if you experience severe or unusual symptoms.",
+                    details=[],
+                    action=[
+                        "Ask your pharmacist for the full side effects list",
+                        "Read the medication guide that comes with your prescription",
+                    ],
+                    article=f"{drugs_str.title()} is a prescription medication. Full mechanism details require clinical context.",
+                    common_side_effects=common_se,
+                    serious_side_effects=[],
+                    warning_signs=[],
+                    higher_risk_groups=[],
+                    what_to_do=[],
+                    from_claude=False,
+                )
+
+    # Generic fallback — drug not in our table and no FDA label available.
     return Explanation(
         answer=f"We don't have detailed side effect data for {drugs_str} yet. Please consult your pharmacist.",
         warning="Consult your pharmacist or prescriber about side effects.",
@@ -782,7 +807,7 @@ def _generate_side_effects_explanation(
     """
     if not api_key:
         logger.warning("[Claude-SE] No API key — using per-drug fallback")
-        return _build_fallback_side_effects(drug_names)
+        return _build_fallback_side_effects(drug_names, fda_labels)
 
     context = _build_side_effects_context(
         drug_names=drug_names,
@@ -853,7 +878,7 @@ def _generate_side_effects_explanation(
                     continue
                 # Max retries exhausted — fall through to fallback
                 logger.warning("[Claude-SE] All retries exhausted — using fallback")
-                return _build_fallback_side_effects(drug_names)
+                return _build_fallback_side_effects(drug_names, fda_labels)
 
             result = Explanation(
                 answer=short_answer or f"Here are the known side effects of {drugs_str}.",
@@ -871,7 +896,7 @@ def _generate_side_effects_explanation(
 
             # Guard: backfill from fallback table if empty
             if not result.common_side_effects:
-                fallback = _build_fallback_side_effects(drug_names)
+                fallback = _build_fallback_side_effects(drug_names, fda_labels)
                 result.common_side_effects = fallback.common_side_effects
                 if not result.serious_side_effects:
                     result.serious_side_effects = fallback.serious_side_effects
@@ -886,13 +911,13 @@ def _generate_side_effects_explanation(
                 logger.warning("[Claude-SE] JSON parse failed (attempt %d) — retrying", attempt + 1)
                 continue
             logger.warning("[Claude-SE] JSON parse failed after retries — using fallback")
-            return _build_fallback_side_effects(drug_names)
+            return _build_fallback_side_effects(drug_names, fda_labels)
         except Exception as exc:
             logger.warning("[Claude-SE] Failed: %s — using per-drug fallback", exc)
-            return _build_fallback_side_effects(drug_names)
+            return _build_fallback_side_effects(drug_names, fda_labels)
 
     # Should never reach here, but just in case
-    return _build_fallback_side_effects(drug_names)
+    return _build_fallback_side_effects(drug_names, fda_labels)
 
 
 def _build_fallback(

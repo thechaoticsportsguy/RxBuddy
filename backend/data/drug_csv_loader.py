@@ -7,7 +7,7 @@ from pathlib import Path
 
 logger = logging.getLogger("rxbuddy.drug_csv_loader")
 
-DRUG_CSV_RELATIVE_PATH = Path("data") / "rxbuddy_drugs_cleaned_100.csv"
+DRUG_CSV_RELATIVE_PATH = Path("backend") / "data" / "rxbuddy_drugs_2000.csv"
 DRUG_CSV_PATH = Path(__file__).resolve().parents[2] / DRUG_CSV_RELATIVE_PATH
 
 
