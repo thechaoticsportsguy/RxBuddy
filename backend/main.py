@@ -50,6 +50,7 @@ from answer_engine import (
     strip_off_topic_drugs,
 )
 import label_updater
+from data.drug_csv_loader import DRUG_CSV_RELATIVE_PATH, drug_lookup_size, load_drug_lookup
 from drug_catalog import find_drug, is_high_risk as catalog_is_high_risk, is_known_drug
 
 
@@ -1833,8 +1834,20 @@ async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSON
 
 @app.on_event("startup")
 def startup_event() -> None:
-    """Initialize spell checker and start keep-alive pinger on startup."""
+    """Initialize startup caches and start keep-alive pinger."""
     _init_spell_checker()
+    try:
+        load_drug_lookup()
+        logger.info(
+            "[DrugCsvLoader] Loaded %d drugs from %s",
+            drug_lookup_size(),
+            DRUG_CSV_RELATIVE_PATH.as_posix(),
+        )
+    except Exception:
+        logger.exception(
+            "[DrugCsvLoader] Failed to load CSV drug lookup from %s",
+            DRUG_CSV_RELATIVE_PATH.as_posix(),
+        )
     try:
         import keep_alive
         keep_alive.start()
