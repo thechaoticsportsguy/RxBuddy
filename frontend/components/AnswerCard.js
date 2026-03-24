@@ -378,17 +378,21 @@ function ConfidencePill({ confidence }) {
   );
 }
 
+
 // ── Main export ────────────────────────────────────────────────────────────────
 
 export default function AnswerCard({ result, query }) {
   if (!result) return null;
 
   const structured = result.structured || {};
-const commonSideEffects = sanitizeItems(structured.common_side_effects);
+  const commonSideEffects = sanitizeItems(structured.common_side_effects);
   const seriousSideEffects = sanitizeItems(structured.serious_side_effects);
   const warningSigns = sanitizeItems(structured.warning_signs);
   const higherRiskGroups = sanitizeItems(structured.higher_risk_groups);
   const whatToDo = sanitizeItems(structured.what_to_do);
+  const isDatasetSideEffects = structured?.intent === "side_effects" &&
+    (structured?.sources === "dataset" || structured?.source === "dataset");
+  const datasetMechanism = stripMarkdown(structured.mechanism || structured.article || "");
 
   // ── Side-effects render path — TRUE EARLY RETURN ────────────────────────────
   // Fires for ALL side_effects intent results, with or without populated arrays.
@@ -413,7 +417,42 @@ const commonSideEffects = sanitizeItems(structured.common_side_effects);
 
         <div className="bg-yellow-50 p-5 space-y-4">
 
-          {hasSections ? (
+          {isDatasetSideEffects ? (
+            <>
+              {commonSideEffects.length > 0 && (
+                <section aria-labelledby="se-dataset-common-heading">
+                  <h3
+                    id="se-dataset-common-heading"
+                    className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-600"
+                  >
+                    COMMON SIDE EFFECTS
+                  </h3>
+                  <ul className="space-y-1" role="list">
+                    {commonSideEffects.map((x, i) => (
+                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-yellow-400" aria-hidden="true" />
+                        {x}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
+              {datasetMechanism && (
+                <section aria-labelledby="se-dataset-mechanism-heading">
+                  <h3
+                    id="se-dataset-mechanism-heading"
+                    className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-600"
+                  >
+                    HOW IT WORKS
+                  </h3>
+                  <p className="text-sm leading-relaxed text-slate-700">
+                    {datasetMechanism}
+                  </p>
+                </section>
+              )}
+            </>
+          ) : hasSections ? (
             <>
               {commonSideEffects.length > 0 && (
                 <section aria-labelledby="se-common-heading">
