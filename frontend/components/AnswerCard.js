@@ -378,9 +378,7 @@ export default function AnswerCard({ result, query }) {
   if (!result) return null;
 
   const structured = result.structured || {};
-  console.log("STRUCTURED DATA:", structured);
-  console.log("RAW ANSWER:", result?.answer);
-  const commonSideEffects = sanitizeItems(structured.common_side_effects);
+const commonSideEffects = sanitizeItems(structured.common_side_effects);
   const seriousSideEffects = sanitizeItems(structured.serious_side_effects);
   const warningSigns = sanitizeItems(structured.warning_signs);
   const higherRiskGroups = sanitizeItems(structured.higher_risk_groups);
