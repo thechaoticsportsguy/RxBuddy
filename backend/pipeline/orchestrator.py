@@ -107,6 +107,13 @@ def _build_structured_answer(
         "details": explanation.details,
         "action": explanation.action,
         "article": explanation.article,
+        # ── Side-effects structured fields (populated when intent == "side_effects") ──
+        "common_side_effects": explanation.common_side_effects,
+        "serious_side_effects": explanation.serious_side_effects,
+        "warning_signs": explanation.warning_signs,
+        "higher_risk_groups": explanation.higher_risk_groups,
+        "what_to_do": explanation.what_to_do,
+        "drugs": drug_names,
         # Legacy fields (kept for frontend backward compat)
         "direct": explanation.answer,
         "do": explanation.action,

@@ -21,6 +21,23 @@ import re
 from enum import Enum
 
 
+# ── Regex patterns for typo-tolerant + causal side-effects detection ──────────
+# These fire BEFORE string matching so typos ("effetcs") and causal patterns
+# ("does metformin cause diarrhea") route correctly to SIDE_EFFECTS.
+
+_SE_TYPO_RE = re.compile(
+    r"\bside[\s\-]+eff?e[cft][cst]s?\b"   # effetcs, efects, effecst…
+    r"|\bside[\s\-]+aff?ects?\b",           # side affects / side affect
+    re.IGNORECASE,
+)
+
+_SE_CAUSAL_RE = re.compile(
+    r"\b(?:does|can|will|could|might|may)\b.{1,60}\bcauses?\b"
+    r"|\bis\b.{1,40}\ba\b.{0,20}\bside[\s\-]+effect\b",
+    re.IGNORECASE,
+)
+
+
 class Intent(str, Enum):
     """9-type intent taxonomy. String enum so it serialises to JSON cleanly."""
     INTERACTION         = "interaction"
@@ -129,8 +146,14 @@ def classify_fast(query: str, drug_count: int = 0) -> Intent:
     """
     q = query.lower()
 
-    # Side effects beats interaction when only 1 drug present
-    if drug_count <= 1 and any(kw in q for kw in _SIDE_EFFECTS_STRONG):
+    # Side effects beats interaction when only 1 drug present.
+    # Regex check covers typos ("side effetcs") and causal patterns
+    # ("does metformin cause diarrhea", "is cough a side effect of...").
+    if drug_count <= 1 and (
+        any(kw in q for kw in _SIDE_EFFECTS_STRONG)
+        or _SE_TYPO_RE.search(q)
+        or _SE_CAUSAL_RE.search(q)
+    ):
         return Intent.SIDE_EFFECTS
 
     # Interaction: strong keywords (any drug count) or weak + 2+ drugs

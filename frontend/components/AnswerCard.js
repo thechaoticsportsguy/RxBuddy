@@ -385,46 +385,155 @@ export default function AnswerCard({ result, query }) {
   const higherRiskGroups = sanitizeItems(structured.higher_risk_groups);
   const whatToDo = sanitizeItems(structured.what_to_do);
 
-  if (structured?.intent === "side_effects" && commonSideEffects.length > 0) {
-    console.log("SIDE EFFECTS RENDER HIT");
+  // ── Side-effects render path — TRUE EARLY RETURN ────────────────────────────
+  // Fires for ALL side_effects intent results, with or without populated arrays.
+  // The CAUTION banner always shows; arrays show if populated or a fallback message.
+  if (structured?.intent === "side_effects") {
+    const cautionConfig = VERDICT_CONFIG.CAUTION;
+    const hasSections = (
+      commonSideEffects.length > 0 ||
+      seriousSideEffects.length > 0 ||
+      warningSigns.length > 0 ||
+      whatToDo.length > 0
+    );
 
     return (
-      <div className="rounded-xl border border-yellow-300 bg-yellow-50 p-5 shadow-sm">
-        <h3 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-700">Common side effects</h3>
-        <ul className="mb-4 list-disc space-y-1 pl-5 text-sm text-slate-700">
-          {commonSideEffects.map((x, i) => (
-            <li key={i}>{x}</li>
-          ))}
-        </ul>
+      <article
+        className="rounded-xl border border-yellow-300 shadow-sm overflow-hidden"
+        aria-label="Side effects information — use with caution"
+        role="article"
+      >
+        {/* CAUTION verdict banner */}
+        <VerdictBanner config={cautionConfig} />
 
-        <h3 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-700">Serious but rare</h3>
-        <ul className="mb-4 list-disc space-y-1 pl-5 text-sm text-slate-700">
-          {seriousSideEffects.map((x, i) => (
-            <li key={i}>{x}</li>
-          ))}
-        </ul>
+        <div className="bg-yellow-50 p-5 space-y-4">
 
-        <h3 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-700">Get help if</h3>
-        <ul className="mb-4 list-disc space-y-1 pl-5 text-sm text-slate-700">
-          {warningSigns.map((x, i) => (
-            <li key={i}>{x}</li>
-          ))}
-        </ul>
+          {hasSections ? (
+            <>
+              {commonSideEffects.length > 0 && (
+                <section aria-labelledby="se-common-heading">
+                  <h3
+                    id="se-common-heading"
+                    className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-600"
+                  >
+                    Common side effects
+                  </h3>
+                  <ul className="space-y-1" role="list">
+                    {commonSideEffects.map((x, i) => (
+                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-yellow-400" aria-hidden="true" />
+                        {x}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
 
-        <h3 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-700">Higher risk</h3>
-        <ul className="mb-4 list-disc space-y-1 pl-5 text-sm text-slate-700">
-          {higherRiskGroups.map((x, i) => (
-            <li key={i}>{x}</li>
-          ))}
-        </ul>
+              {seriousSideEffects.length > 0 && (
+                <section aria-labelledby="se-serious-heading">
+                  <h3
+                    id="se-serious-heading"
+                    className="mb-2 text-xs font-bold uppercase tracking-wider text-orange-700"
+                  >
+                    Serious but rare
+                  </h3>
+                  <ul className="space-y-1" role="list">
+                    {seriousSideEffects.map((x, i) => (
+                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-orange-400" aria-hidden="true" />
+                        {x}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
 
-        <h3 className="mb-2 text-sm font-bold uppercase tracking-wider text-emerald-700">What to do</h3>
-        <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
-          {whatToDo.map((x, i) => (
-            <li key={i}>{x}</li>
-          ))}
-        </ul>
-      </div>
+              {warningSigns.length > 0 && (
+                <section aria-labelledby="se-warning-heading">
+                  <h3
+                    id="se-warning-heading"
+                    className="mb-2 text-xs font-bold uppercase tracking-wider text-red-700"
+                  >
+                    Get help right away if you have
+                  </h3>
+                  <ul className="space-y-1" role="list">
+                    {warningSigns.map((x, i) => (
+                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" aria-hidden="true" />
+                        {x}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
+              {higherRiskGroups.length > 0 && (
+                <section aria-labelledby="se-risk-heading">
+                  <h3
+                    id="se-risk-heading"
+                    className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-600"
+                  >
+                    Higher risk groups
+                  </h3>
+                  <ul className="space-y-1" role="list">
+                    {higherRiskGroups.map((x, i) => (
+                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-400" aria-hidden="true" />
+                        {x}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
+              {whatToDo.length > 0 && (
+                <section aria-labelledby="se-todo-heading">
+                  <h3
+                    id="se-todo-heading"
+                    className="mb-2 text-xs font-bold uppercase tracking-wider text-emerald-700"
+                  >
+                    What to do
+                  </h3>
+                  <ul className="space-y-1" role="list">
+                    {whatToDo.map((x, i) => (
+                      <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />
+                        {x}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+            </>
+          ) : (
+            /* Empty state — backend returned no side-effects arrays */
+            <div className="rounded-lg border border-yellow-200 bg-white p-4">
+              <p className="text-sm font-semibold text-slate-800">
+                {structured.answer || "Side effect information is available for this medication."}
+              </p>
+              <p className="mt-2 text-sm text-slate-600">
+                {structured.warning || "Consult your pharmacist or prescriber for a complete list of side effects."}
+              </p>
+            </div>
+          )}
+
+          {/* Footer */}
+          <div className="border-t border-yellow-200 pt-3">
+            <p className="text-xs text-slate-400 italic">
+              Data sourced from{" "}
+              <a href="https://dailymed.nlm.nih.gov" target="_blank" rel="noopener noreferrer" className="underline">
+                DailyMed
+              </a>{" "}
+              and{" "}
+              <a href="https://www.fda.gov/drugs" target="_blank" rel="noopener noreferrer" className="underline">
+                Drugs@FDA
+              </a>
+              . Not medical advice — always consult a licensed healthcare provider.
+            </p>
+          </div>
+
+        </div>
+      </article>
     );
   }
 

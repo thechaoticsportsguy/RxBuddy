@@ -378,6 +378,80 @@ def test_full_pipeline_no_network():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# SIDE-EFFECTS REGRESSION TESTS (7 failing cases from spec)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def test_se_reg_1_metformin():
+    """metformin side effects → SIDE_EFFECTS intent → CAUTION verdict"""
+    intent = classify_fast("metformin side effects", drug_count=1)
+    assert intent == Intent.SIDE_EFFECTS
+    decision = compute_verdict(intent, ["metformin"], _empty_api())
+    assert decision.verdict == CAUTION
+
+def test_se_reg_2_lisinopril():
+    """side effects of lisinopril → SIDE_EFFECTS → CAUTION"""
+    intent = classify_fast("side effects of lisinopril", drug_count=1)
+    assert intent == Intent.SIDE_EFFECTS
+    decision = compute_verdict(intent, ["lisinopril"], _empty_api())
+    assert decision.verdict == CAUTION
+
+def test_se_reg_3_methotrexate():
+    """side effects of methotrexate → SIDE_EFFECTS → CAUTION"""
+    intent = classify_fast("side effects of methotrexate", drug_count=1)
+    assert intent == Intent.SIDE_EFFECTS
+    decision = compute_verdict(intent, ["methotrexate"], _empty_api())
+    assert decision.verdict == CAUTION
+
+def test_se_reg_4_ozempic():
+    """ozempic side effects → SIDE_EFFECTS → CAUTION"""
+    intent = classify_fast("ozempic side effects", drug_count=1)
+    assert intent == Intent.SIDE_EFFECTS
+    decision = compute_verdict(intent, ["ozempic"], _empty_api())
+    assert decision.verdict == CAUTION
+
+def test_se_reg_5_causal_cause():
+    """does metformin cause diarrhea → SIDE_EFFECTS (causal regex)"""
+    assert classify_fast("does metformin cause diarrhea", drug_count=1) == Intent.SIDE_EFFECTS
+
+def test_se_reg_6_is_cough_side_effect():
+    """is cough a side effect of lisinopril → SIDE_EFFECTS"""
+    assert classify_fast("is cough a side effect of lisinopril", drug_count=1) == Intent.SIDE_EFFECTS
+
+def test_se_reg_7_typo_effetcs():
+    """side effetcs of ozempic (typo c/t swap) → SIDE_EFFECTS (typo regex)"""
+    assert classify_fast("side effetcs of ozempic", drug_count=1) == Intent.SIDE_EFFECTS
+
+def test_se_fallback_has_arrays():
+    """_build_fallback() for side_effects returns non-empty structured arrays"""
+    from pipeline.claude_explainer import _build_fallback
+    exp = _build_fallback("CAUTION", "All drugs have side effects.", ["metformin"], "side_effects")
+    # Must have the 5 side-effects arrays
+    assert len(exp.common_side_effects) > 0, "common_side_effects should not be empty"
+    assert len(exp.serious_side_effects) > 0, "serious_side_effects should not be empty"
+    assert len(exp.warning_signs) > 0, "warning_signs should not be empty"
+    assert len(exp.what_to_do) > 0, "what_to_do should not be empty"
+
+def test_se_fallback_generic_drug():
+    """Unknown drug falls back to generic side-effects message"""
+    from pipeline.claude_explainer import _build_fallback
+    exp = _build_fallback("CAUTION", "Side effects exist.", ["unknowndrug123"], "side_effects")
+    assert len(exp.common_side_effects) > 0
+    assert len(exp.what_to_do) > 0
+
+def test_se_no_interaction_language_in_caution():
+    """CAUTION side_effects verdict never shows AVOID/interaction language"""
+    from pipeline.claude_explainer import _build_fallback
+    from pipeline.verdict_enforcer import enforce_verdict
+    exp = _build_fallback("CAUTION", "reason", ["metformin"], "side_effects")
+    enforced = enforce_verdict("CAUTION", exp, ["metformin"], "side_effects")
+    # The answer should NOT contain interaction / avoid language
+    avoid_words = {"do not combine", "contraindicated", "dangerous combination"}
+    lower = enforced.answer.lower()
+    for word in avoid_words:
+        assert word not in lower, f"CAUTION side_effects answer contained '{word}'"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # RUN ALL TESTS
 # ══════════════════════════════════════════════════════════════════════════════
 

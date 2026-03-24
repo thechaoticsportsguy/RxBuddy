@@ -518,13 +518,11 @@ export default function ResultsPage() {
     return parseVerdictAnswer(first.answer, first.structured);
   }, [results]);
 
+  // For side_effects intent, always hide the "Detailed Explanation" collapsible
+  // because the AnswerCard already renders the structured side-effects sections.
   const shouldBypassDetailedExplanation = useMemo(() => {
     const structured = results?.[0]?.structured || {};
-    return (
-      structured.intent === "side_effects" &&
-      Array.isArray(structured.common_side_effects) &&
-      structured.common_side_effects.length > 0
-    );
+    return structured.intent === "side_effects";
   }, [results]);
 
   useEffect(() => { setHeaderQuery(q || ""); }, [q]);
@@ -547,7 +545,7 @@ export default function ResultsPage() {
 
       // ── Try streaming endpoint first ────────────────────────────────────
       try {
-        const res = await fetch(`${API_BASE}/search/stream`, {
+        const res = await fetch(`${API_BASE}/v2/search/stream`, {
           method: "POST",
           cache: "no-store",
           headers: { "Content-Type": "application/json" },
@@ -610,7 +608,7 @@ export default function ResultsPage() {
       if (cancelled) return;
       setStreamStatus("Searching...");
       try {
-        const res = await fetch(`${API_BASE}/search`, {
+        const res = await fetch(`${API_BASE}/v2/search`, {
           method: "POST",
           cache: "no-store",
           headers: { "Content-Type": "application/json" },
