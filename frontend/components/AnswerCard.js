@@ -104,6 +104,7 @@ function sanitizeItems(items) {
     .filter(Boolean);
 }
 
+
 // Patterns that indicate a corrupted / raw-internal DB answer — never render these
 const _CORRUPTED_PATTERNS = [
   /category\s+[3-6]/i,
@@ -128,25 +129,6 @@ function _isCorrupted(text) {
 function parseSections(result) {
   const s = result.structured || {};
   const raw = _isCorrupted(result.answer) ? "" : (result.answer || "");
-  const sideEffectSections = [
-    { title: "Common side effects", items: sanitizeItems(s.common_side_effects) },
-    { title: "Serious but rare", items: sanitizeItems(s.serious_side_effects) },
-    { title: "Get help if", items: sanitizeItems(s.warning_signs) },
-    { title: "Higher risk", items: sanitizeItems(s.higher_risk_groups) },
-    { title: "What to do", items: sanitizeItems(s.what_to_do) },
-  ];
-  const hasStructuredSideEffects = sideEffectSections.some((section) => section.items.length > 0);
-
-  if (s.intent === "side_effects" && hasStructuredSideEffects) {
-    return {
-      answer: "",
-      warning: "",
-      details: [],
-      action: [],
-      article: "",
-      sideEffectSections,
-    };
-  }
 
   // ── New-format fields ────────────────────────────────────────────────────────
   // Also accept short_answer (RxBuddyAnswer v2 field name)
@@ -161,7 +143,6 @@ function parseSections(result) {
                (Array.isArray(s.do)     && s.do.length      ? s.do      : [])
       ),
       article: stripMarkdown(s.article || s.why || ""),
-      sideEffectSections: [],
     };
   }
 
@@ -174,7 +155,6 @@ function parseSections(result) {
       details: details.slice(1),
       action:  sanitizeItems(s.do || []),
       article: stripMarkdown(s.why || ""),
-      sideEffectSections: [],
     };
   }
 
@@ -182,7 +162,7 @@ function parseSections(result) {
   if (!raw) {
     return {
       answer: "Answer unavailable. Please consult a pharmacist.",
-      warning: "", details: [], action: [], article: "", sideEffectSections: [],
+      warning: "", details: [], action: [], article: "",
     };
   }
   const lines = raw.split("\n");
@@ -214,7 +194,6 @@ function parseSections(result) {
     details: sanitizeItems(out.details),
     action: sanitizeItems(out.action),
     article: stripMarkdown(out.article),
-    sideEffectSections: [],
   };
 }
 
@@ -399,10 +378,59 @@ export default function AnswerCard({ result, query }) {
   if (!result) return null;
 
   const structured = result.structured || {};
-  const rawVerdict = structured.intent === "side_effects" ? "CAUTION" : (structured.verdict || "CONSULT_PHARMACIST");
-  const config = VERDICT_CONFIG[rawVerdict] || DEFAULT_VERDICT;
+  console.log("STRUCTURED:", structured);
+  const commonSideEffects = sanitizeItems(structured.common_side_effects);
+  const seriousSideEffects = sanitizeItems(structured.serious_side_effects);
+  const warningSigns = sanitizeItems(structured.warning_signs);
+  const higherRiskGroups = sanitizeItems(structured.higher_risk_groups);
+  const whatToDo = sanitizeItems(structured.what_to_do);
 
-  const { answer, warning, details, action, article, sideEffectSections } = parseSections(result);
+  if (structured?.intent === "side_effects" && commonSideEffects.length > 0) {
+    console.log("SIDE EFFECTS RENDER HIT");
+
+    return (
+      <div className="rounded-xl border border-yellow-300 bg-yellow-50 p-5 shadow-sm">
+        <h3 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-700">Common side effects</h3>
+        <ul className="mb-4 list-disc space-y-1 pl-5 text-sm text-slate-700">
+          {commonSideEffects.map((x, i) => (
+            <li key={i}>{x}</li>
+          ))}
+        </ul>
+
+        <h3 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-700">Serious but rare</h3>
+        <ul className="mb-4 list-disc space-y-1 pl-5 text-sm text-slate-700">
+          {seriousSideEffects.map((x, i) => (
+            <li key={i}>{x}</li>
+          ))}
+        </ul>
+
+        <h3 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-700">Get help if</h3>
+        <ul className="mb-4 list-disc space-y-1 pl-5 text-sm text-slate-700">
+          {warningSigns.map((x, i) => (
+            <li key={i}>{x}</li>
+          ))}
+        </ul>
+
+        <h3 className="mb-2 text-sm font-bold uppercase tracking-wider text-slate-700">Higher risk</h3>
+        <ul className="mb-4 list-disc space-y-1 pl-5 text-sm text-slate-700">
+          {higherRiskGroups.map((x, i) => (
+            <li key={i}>{x}</li>
+          ))}
+        </ul>
+
+        <h3 className="mb-2 text-sm font-bold uppercase tracking-wider text-emerald-700">What to do</h3>
+        <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
+          {whatToDo.map((x, i) => (
+            <li key={i}>{x}</li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  const rawVerdict = structured.verdict || "CONSULT_PHARMACIST";
+  const config = VERDICT_CONFIG[rawVerdict] || DEFAULT_VERDICT;
+  const { answer, warning, details, action, article } = parseSections(result);
   const citations  = structured.citations || [];
   const confidence = structured.confidence || "";
   const source     = structured.sources || "";
@@ -436,38 +464,24 @@ export default function AnswerCard({ result, query }) {
           {/* 2. Warning */}
           <WarningBox text={warning} verdict={rawVerdict} />
 
-          {sideEffectSections.length > 0 ? (
-            sideEffectSections.map((section) => (
-              <BulletList
-                key={section.title}
-                title={section.title}
-                items={section.items}
-                colorClass={section.title === "What to do" ? "text-emerald-700" : "text-slate-600"}
-                dotClass={section.title === "What to do" ? "bg-emerald-500" : "bg-slate-400"}
-              />
-            ))
-          ) : (
-            <>
-              {/* 3. Details */}
-              <BulletList
-                title="Key facts"
-                items={details}
-                colorClass="text-slate-600"
-                dotClass="bg-slate-400"
-              />
+          {/* 3. Details */}
+          <BulletList
+            title="Key facts"
+            items={details}
+            colorClass="text-slate-600"
+            dotClass="bg-slate-400"
+          />
 
-              {/* 4. What to do */}
-              <BulletList
-                title="What to do"
-                items={action}
-                colorClass="text-emerald-700"
-                dotClass="bg-emerald-500"
-              />
+          {/* 4. What to do */}
+          <BulletList
+            title="What to do"
+            items={action}
+            colorClass="text-emerald-700"
+            dotClass="bg-emerald-500"
+          />
 
-              {/* 5. Mini article */}
-              <MiniArticle text={article} />
-            </>
-          )}
+          {/* 5. Mini article */}
+          <MiniArticle text={article} />
 
           {/* Footer: confidence + AI badge + source */}
           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3">

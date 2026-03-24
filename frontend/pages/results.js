@@ -518,6 +518,15 @@ export default function ResultsPage() {
     return parseVerdictAnswer(first.answer, first.structured);
   }, [results]);
 
+  const shouldBypassDetailedExplanation = useMemo(() => {
+    const structured = results?.[0]?.structured || {};
+    return (
+      structured.intent === "side_effects" &&
+      Array.isArray(structured.common_side_effects) &&
+      structured.common_side_effects.length > 0
+    );
+  }, [results]);
+
   useEffect(() => { setHeaderQuery(q || ""); }, [q]);
 
   useEffect(() => {
@@ -540,6 +549,7 @@ export default function ResultsPage() {
       try {
         const res = await fetch(`${API_BASE}/search/stream`, {
           method: "POST",
+          cache: "no-store",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query: q, engine, top_k: 5 }),
           signal: controller.signal,
@@ -602,6 +612,7 @@ export default function ResultsPage() {
       try {
         const res = await fetch(`${API_BASE}/search`, {
           method: "POST",
+          cache: "no-store",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query: q, engine, top_k: 5 }),
           signal: controller.signal,
@@ -808,7 +819,7 @@ export default function ResultsPage() {
               </div>
 
               {/* Collapsible Full Answer - BUG 2 FIX: Better markdown rendering with prose styling */}
-              {(parsedAnswer?.full || results?.[0]?.answer) && (
+              {!shouldBypassDetailedExplanation && (parsedAnswer?.full || results?.[0]?.answer) && (
                 <div className="mb-4">
                   <button
                     onClick={() => setShowFullAnswer(!showFullAnswer)}
