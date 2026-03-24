@@ -763,6 +763,8 @@ export default function ResultsPage() {
                   <div className="flex items-center gap-2 shrink-0">
                     {source === "database" ? (
                       <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">Database</span>
+                    ) : source === "dataset" ? (
+                      <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">Dataset</span>
                     ) : (
                       <span className="rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-violet-700">AI Generated</span>
                     )}
