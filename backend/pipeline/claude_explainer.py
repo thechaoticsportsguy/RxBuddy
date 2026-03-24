@@ -599,6 +599,20 @@ def _generate_side_effects_explanation(
             from_claude=True,
         )
 
+        # Guard: Claude must never return empty common_side_effects for a side_effects query.
+        # If it did, backfill from the hardcoded per-drug table (or generic fallback).
+        if not result.common_side_effects:
+            fallback = _build_fallback_side_effects(drug_names)
+            result.common_side_effects = fallback.common_side_effects
+            if not result.serious_side_effects:
+                result.serious_side_effects = fallback.serious_side_effects
+            if not result.warning_signs:
+                result.warning_signs = fallback.warning_signs
+            if not result.higher_risk_groups:
+                result.higher_risk_groups = fallback.higher_risk_groups
+            if not result.what_to_do:
+                result.what_to_do = fallback.what_to_do
+
         logger.info("[Claude-SE] Side-effects explanation generated for %s", drug_names)
         return result
 
