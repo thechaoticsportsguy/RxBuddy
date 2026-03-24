@@ -378,7 +378,8 @@ export default function AnswerCard({ result, query }) {
   if (!result) return null;
 
   const structured = result.structured || {};
-  console.log("STRUCTURED:", structured);
+  console.log("STRUCTURED DATA:", structured);
+  console.log("RAW ANSWER:", result?.answer);
   const commonSideEffects = sanitizeItems(structured.common_side_effects);
   const seriousSideEffects = sanitizeItems(structured.serious_side_effects);
   const warningSigns = sanitizeItems(structured.warning_signs);
@@ -509,10 +510,10 @@ export default function AnswerCard({ result, query }) {
             /* Empty state — backend returned no side-effects arrays */
             <div className="rounded-lg border border-yellow-200 bg-white p-4">
               <p className="text-sm font-semibold text-slate-800">
-                {structured.answer || "Side effect information is available for this medication."}
+                {stripMarkdown(structured.answer) || "Side effect information is available for this medication."}
               </p>
               <p className="mt-2 text-sm text-slate-600">
-                {structured.warning || "Consult your pharmacist or prescriber for a complete list of side effects."}
+                {stripMarkdown(structured.warning) || "Consult your pharmacist or prescriber for a complete list of side effects."}
               </p>
             </div>
           )}
