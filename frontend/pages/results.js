@@ -635,9 +635,25 @@ export default function ResultsPage() {
       } catch (e) {
         clearTimeout(timeoutId);
         if (!cancelled) {
-          setError(e?.name === "AbortError"
-            ? "This is taking longer than usual. Please try your search again."
-            : (e?.message || "Could not load results."));
+          if (e?.name === "AbortError") {
+            setError("This is taking longer than usual. Please try your search again.");
+          } else {
+            console.error("Fetch failed:", e);
+            setResults([{
+              id: 0,
+              question: q,
+              answer: "We couldn't load results right now. Please try again in a moment.",
+              structured: {
+                verdict: "CAUTION",
+                intent: "side_effects",
+                answer: "We couldn't load results right now.",
+                common_side_effects: ["Temporary error loading data"],
+                serious_side_effects: [],
+                warning_signs: [],
+                what_to_do: ["Try again in a moment"],
+              },
+            }]);
+          }
         }
       } finally {
         if (!cancelled) {
