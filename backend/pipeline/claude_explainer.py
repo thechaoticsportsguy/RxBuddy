@@ -884,24 +884,27 @@ def generate_explanation(
         recalls=recalls or {},
     )
 
-    # If no API key, use fallback immediately
+    system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(
+        verdict=verdict,
+        drugs=", ".join(drug_names),
+        context=context,
+    )
+    user_message = f"Question: {query}\n\nExplain the {verdict} verdict for {', '.join(drug_names)}."
+
+    # ── Gemini first ───────────────────────────────────────────────────────────
+    gemini_result = _try_gemini_generic(system_prompt, user_message)
+    if gemini_result:
+        return gemini_result
+
+    # ── Claude fallback ────────────────────────────────────────────────────────
     if not api_key:
-        logger.warning("[Claude] No API key — using fallback explanation")
+        logger.warning("[Claude] No API key — using static fallback")
         return _build_fallback(verdict, reasoning, drug_names, intent)
 
     try:
         import anthropic
 
         client = anthropic.Anthropic(api_key=api_key, timeout=8.0)
-
-        system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(
-            verdict=verdict,
-            drugs=", ".join(drug_names),
-            context=context,
-        )
-
-        user_message = f"Question: {query}\n\nExplain the {verdict} verdict for {', '.join(drug_names)}."
-
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=400,
@@ -916,14 +919,11 @@ def generate_explanation(
         if not text:
             raise RuntimeError("Claude returned empty text.")
 
-        # Parse JSON response
         raw = text
-        # Strip markdown fences if present
         if raw.startswith("```"):
             raw = "\n".join(l for l in raw.splitlines() if not l.strip().startswith("```")).strip()
 
         parsed = json.loads(raw)
-
         result = Explanation(
             answer=str(parsed.get("explanation", ""))[:300],
             warning=str(parsed.get("warning", ""))[:200],
@@ -932,21 +932,11 @@ def generate_explanation(
             article=str(parsed.get("explanation", ""))[:300],
             from_claude=True,
         )
-
         logger.info("[Claude] Explanation generated (%d chars)", len(result.answer))
         return result
 
-    except json.JSONDecodeError:
-        logger.warning("[Claude] JSON parse failed — trying Gemini fallback")
-        gemini_result = _try_gemini_generic(system_prompt, user_message)
-        if gemini_result:
-            return gemini_result
-        return _build_fallback(verdict, reasoning, drug_names, intent)
     except Exception as exc:
-        logger.warning("[Claude] Failed: %s — trying Gemini fallback", exc)
-        gemini_result = _try_gemini_generic(system_prompt, user_message)
-        if gemini_result:
-            return gemini_result
+        logger.warning("[Claude] Failed: %s — using static fallback", exc)
         return _build_fallback(verdict, reasoning, drug_names, intent)
 
 
@@ -964,10 +954,6 @@ def _generate_side_effects_explanation(
     Uses a strict prompt that demands specific named effects.
     Validates response against banned generic phrases and retries if needed.
     """
-    if not api_key:
-        logger.warning("[Claude-SE] No API key — using per-drug fallback")
-        return _build_fallback_side_effects(drug_names, fda_labels)
-
     context = _build_side_effects_context(
         drug_names=drug_names,
         verdict=verdict,
@@ -977,33 +963,37 @@ def _generate_side_effects_explanation(
     )
 
     drugs_str = " and ".join(drug_names) if drug_names else "this medication"
-    max_retries = 2
+    system_prompt = _SIDE_EFFECTS_PROMPT.format(
+        drugs=", ".join(drug_names),
+        query=query,
+        context=context,
+    )
+    user_message = f"Question: {query}\n\nList the specific, named side effects of {', '.join(drug_names)}."
 
+    # ── Gemini first ───────────────────────────────────────────────────────────
+    gemini_result = _try_gemini_side_effects(system_prompt, user_message)
+    if gemini_result:
+        return gemini_result
+
+    # ── Claude fallback ────────────────────────────────────────────────────────
+    if not api_key:
+        logger.warning("[Claude-SE] No API key — using per-drug fallback")
+        return _build_fallback_side_effects(drug_names, fda_labels)
+
+    max_retries = 2
     for attempt in range(max_retries + 1):
         try:
             import anthropic
 
             client = anthropic.Anthropic(api_key=api_key, timeout=10.0)
-
-            # Use retry prompt on subsequent attempts
-            if attempt == 0:
-                system_prompt = _SIDE_EFFECTS_PROMPT.format(
-                    drugs=", ".join(drug_names),
-                    query=query,
-                    context=context,
-                )
-            else:
-                system_prompt = _SIDE_EFFECTS_RETRY_PROMPT.format(
-                    drugs=", ".join(drug_names),
-                    context=context,
-                )
-
-            user_message = f"Question: {query}\n\nList the specific, named side effects of {', '.join(drug_names)}."
-
+            retry_prompt = system_prompt if attempt == 0 else _SIDE_EFFECTS_RETRY_PROMPT.format(
+                drugs=", ".join(drug_names),
+                context=context,
+            )
             response = client.messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=600,
-                system=system_prompt,
+                system=retry_prompt,
                 messages=[{"role": "user", "content": user_message}],
             )
 
@@ -1014,32 +1004,21 @@ def _generate_side_effects_explanation(
             if not text:
                 raise RuntimeError("Claude returned empty text.")
 
-            # Strip markdown fences
             raw = text
             if raw.startswith("```"):
                 raw = "\n".join(l for l in raw.splitlines() if not l.strip().startswith("```")).strip()
 
             parsed = json.loads(raw)
-
             common = _filter_common_se(list(parsed.get("common_side_effects", []))[:6])
             serious = list(parsed.get("serious_side_effects", []))[:4]
             mechanism = str(parsed.get("mechanism_simple", ""))[:300]
             short_answer = str(parsed.get("short_answer", ""))[:300]
             when_to_get_help = list(parsed.get("when_to_get_help", parsed.get("warning_signs", [])))[:4]
 
-            # ── Validate: reject generic disclaimers ──────────────────────
             if len(common) < 3 or _has_banned_phrases(common) or _has_banned_phrases(serious):
                 if attempt < max_retries:
-                    logger.warning(
-                        "[Claude-SE] Attempt %d returned generic/empty — retrying",
-                        attempt + 1,
-                    )
+                    logger.warning("[Claude-SE] Attempt %d returned generic/empty — retrying", attempt + 1)
                     continue
-                # Max retries exhausted — try Gemini before static fallback
-                logger.warning("[Claude-SE] All retries exhausted — trying Gemini fallback")
-                gemini_result = _try_gemini_side_effects(system_prompt, user_message)
-                if gemini_result:
-                    return gemini_result
                 return _build_fallback_side_effects(drug_names, fda_labels)
 
             result = Explanation(
@@ -1056,7 +1035,6 @@ def _generate_side_effects_explanation(
                 from_claude=True,
             )
 
-            # Guard: backfill from fallback table if empty
             if not result.common_side_effects:
                 fallback = _build_fallback_side_effects(drug_names, fda_labels)
                 result.common_side_effects = fallback.common_side_effects
@@ -1068,23 +1046,15 @@ def _generate_side_effects_explanation(
             logger.info("[Claude-SE] Side-effects generated for %s (attempt %d)", drug_names, attempt + 1)
             return result
 
-        except (json.JSONDecodeError, KeyError) as exc:
+        except (json.JSONDecodeError, KeyError):
             if attempt < max_retries:
                 logger.warning("[Claude-SE] JSON parse failed (attempt %d) — retrying", attempt + 1)
                 continue
-            logger.warning("[Claude-SE] JSON parse failed after retries — trying Gemini fallback")
-            gemini_result = _try_gemini_side_effects(system_prompt, user_message)
-            if gemini_result:
-                return gemini_result
             return _build_fallback_side_effects(drug_names, fda_labels)
         except Exception as exc:
-            logger.warning("[Claude-SE] Failed: %s — trying Gemini fallback", exc)
-            gemini_result = _try_gemini_side_effects(system_prompt, user_message)
-            if gemini_result:
-                return gemini_result
+            logger.warning("[Claude-SE] Failed: %s — using static fallback", exc)
             return _build_fallback_side_effects(drug_names, fda_labels)
 
-    # Should never reach here, but just in case
     return _build_fallback_side_effects(drug_names, fda_labels)
 
 
