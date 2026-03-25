@@ -33,8 +33,149 @@ from pipeline.verdict_enforcer import enforce_verdict
 from pipeline.response_cleaner import clean_response
 from pipeline.cache import cache_get, cache_set
 from pipeline.failsafe import build_failsafe_response, build_emergency_response
+from pipeline.response_validator import validate_side_effect_response
 
 logger = logging.getLogger("rxbuddy.pipeline.orchestrator")
+
+
+def _build_structured_side_effects_answer(
+    decision: DecisionResult,
+    drug_names: list[str],
+    api_results: APIResults,
+    fetched_at: str,
+) -> dict:
+    """
+    Build a side-effects answer using ONLY structured FDA label data.
+
+    This function is the core of Phase 2: it NEVER uses AI generation.
+    Every side effect shown to the user is traceable to a real label section.
+
+    If no label data exists for the drug, it returns a clear "no data" message
+    instead of guessing.
+    """
+    primary_drug = drug_names[0] if drug_names else ""
+    fda_label = api_results.fda_labels.get(primary_drug)
+    raw_label = api_results.fda_raw_labels.get(primary_drug)
+    faers = api_results.adverse_events.get(primary_drug, [])
+    dm_setid = api_results.dailymed_setids.get(primary_drug)
+
+    # Parse the FDA label into structured, source-tagged side effects
+    se_data = parse_structured_side_effects(
+        drug_name=primary_drug,
+        fda_label=fda_label,
+        raw_label=raw_label,
+        faers_terms=faers,
+        dailymed_setid=dm_setid,
+    )
+
+    # Count how many real side effects we extracted
+    se_structured = se_data.get("side_effects_structured", {})
+    total_effects = (
+        len(se_structured.get("common", []))
+        + len(se_structured.get("serious", []))
+        + len(se_structured.get("boxed_warning", []))
+    )
+
+    # Build the answer text from structured data (NO AI)
+    drug_display = se_data.get("drug", {}).get("canonical_name", primary_drug.title())
+    brands = se_data.get("drug", {}).get("brand_names", [])
+    brand_str = f" ({', '.join(brands[:3])})" if brands else ""
+
+    if total_effects > 0:
+        answer = f"Here are the known side effects of {drug_display}{brand_str}, sourced from FDA drug labels."
+        retrieval = "LABEL_FOUND"
+    else:
+        answer = (
+            f"No reliable label data found for {drug_display}. "
+            "Consult your pharmacist for side effect information."
+        )
+        retrieval = "NO_LABEL_DATA"
+
+    # Extract flat lists for legacy backward compatibility
+    common_flat = [item["term"] for item in se_structured.get("common", []) if isinstance(item, dict)]
+    serious_flat = [item["term"] for item in se_structured.get("serious", []) if isinstance(item, dict)]
+    boxed_flat = [item["term"] for item in se_structured.get("boxed_warning", []) if isinstance(item, dict)]
+
+    # Build citations from FDA label metadata
+    citations = []
+    for drug, raw in api_results.fda_raw_labels.items():
+        openfda = raw.get("openfda", {}) if raw else {}
+        sid = (openfda.get("set_id") or [None])[0]
+        nda_num = (openfda.get("application_number") or [None])[0]
+        eff_time = str(raw.get("effective_time", "") or "")
+        rev_date = None
+        if len(eff_time) >= 8 and eff_time[:8].isdigit():
+            rev_date = f"{eff_time[:4]}-{eff_time[4:6]}-{eff_time[6:8]}"
+        citations.append({
+            "id": f"cit_{len(citations)}",
+            "source": "DailyMed",
+            "source_url": (
+                f"https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid={sid}"
+                if sid else "https://dailymed.nlm.nih.gov/dailymed/"
+            ),
+            "section": "adverse_reactions",
+            "section_label": "Adverse Reactions",
+            "drug_name": drug,
+            "set_id": sid,
+            "nda_number": nda_num,
+            "label_revision_date": rev_date,
+            "date_fetched": fetched_at,
+        })
+
+    sources = " | ".join(api_results.sources_used) if api_results.sources_used else "No sources available"
+
+    structured = {
+        "verdict": decision.verdict,
+        "answer": answer,
+        "short_answer": answer,
+        "warning": "Use with caution and monitor for adverse effects.",
+        "details": [],
+        "action": [
+            "Read the medication guide that comes with your prescription",
+            "Contact your healthcare provider if you experience severe symptoms",
+        ],
+        "article": se_data.get("mechanism_of_action", {}).get("summary", ""),
+        # Side-effects flat lists (legacy backward compat)
+        "common_side_effects": common_flat,
+        "serious_side_effects": serious_flat,
+        "warning_signs": boxed_flat[:3] + serious_flat[:2],
+        "higher_risk_groups": [],
+        "what_to_do": [
+            "Read the medication guide that comes with your prescription",
+            "Contact your healthcare provider if you experience severe symptoms",
+        ],
+        "mechanism": se_data.get("mechanism_of_action", {}).get("summary", ""),
+        # New structured side effects (per-item source-tagged)
+        "side_effects_structured": se_structured,
+        # Legacy tiered format
+        "side_effects_data": se_data.get("side_effects", {}),
+        "boxed_warnings": se_data.get("boxed_warnings", []),
+        "mechanism_of_action": se_data.get("mechanism_of_action", {}),
+        "structured_sources": se_data.get("sources", []),
+        "brand_names": se_data.get("brand_names", []),
+        "generic_name": se_data.get("generic_name", primary_drug),
+        "drug": se_data.get("drug", {}),
+        "label_info": se_data.get("label_info", {}),
+        "disclaimer": se_data.get("disclaimer", ""),
+        "drugs": drug_names,
+        # Legacy fields
+        "direct": answer,
+        "do": [],
+        "avoid": [],
+        "doctor": ["Use with caution and monitor for adverse effects."],
+        "raw": "",
+        "confidence": decision.confidence,
+        "sources": sources,
+        "interaction_summary": {"avoid_pairs": [], "caution_pairs": []},
+        "citations": citations,
+        "intent": "side_effects",
+        "retrieval_status": retrieval,
+    }
+
+    # Run the anti-hallucination validation layer
+    structured = validate_side_effect_response(structured)
+
+    return structured
 
 
 def _build_structured_answer(
@@ -235,7 +376,56 @@ async def run_pipeline(query: str) -> dict:
     logger.info("[Pipeline] Verdict=%s confidence=%s deterministic=%s",
                 verdict, decision.confidence, decision.is_deterministic)
 
-    # ── Step 6: Generate explanation via Claude ───────────────────────────
+    # ── SIDE EFFECTS: structured-data-only path (NO AI generation) ────────
+    # For side-effect queries, we NEVER use Claude/Gemini. All content comes
+    # directly from FDA label data, parsed and source-tagged.
+    if intent_str == "side_effects":
+        print(f"📋 [Pipeline] Side-effects intent — using structured label data ONLY (no AI)")
+        logger.info("[Pipeline] Side-effects — bypassing Claude, using structured data only")
+
+        structured = _build_structured_side_effects_answer(
+            decision=decision,
+            drug_names=drug_names,
+            api_results=api_results,
+            fetched_at=fetched_at,
+        )
+
+        answer_text = (
+            f"VERDICT: {verdict}\n"
+            f"ANSWER: {structured['answer']}\n"
+            f"WARNING: {structured['warning']}\n"
+            f"CONFIDENCE: {decision.confidence}\n"
+            f"SOURCES: {structured['sources']}"
+        )
+
+        response = {
+            "query": original_query,
+            "results": [{
+                "id": 0,
+                "question": original_query,
+                "category": "General",
+                "tags": [],
+                "score": 1.0,
+                "answer": answer_text,
+                "structured": structured,
+            }],
+            "did_you_mean": None,
+            "source": "pipeline_v2",
+            "saved_to_db": False,
+        }
+
+        # Cache and return
+        try:
+            cache_set(cleaned_query, response)
+        except Exception as exc:
+            logger.warning("[Pipeline] Cache set failed: %s", exc)
+
+        elapsed = (time.monotonic() - start_time) * 1000
+        logger.info("[Pipeline] DONE (side_effects, structured-only) verdict=%s (%.0fms)", verdict, elapsed)
+        print(f"✅ [Pipeline] Side-effects response built from label data in {elapsed:.0f}ms")
+        return response
+
+    # ── Steps 6-8: AI explanation path (all NON-side-effect intents) ──────
     # Skip Claude for deterministic verdicts (faster, no hallucination risk)
     if decision.is_deterministic:
         print(f"⚡ [Pipeline] Deterministic — skipping Claude")

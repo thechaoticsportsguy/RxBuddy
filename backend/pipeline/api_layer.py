@@ -345,11 +345,59 @@ def parse_structured_side_effects(
     dailymed_setid: str | None = None,
 ) -> dict:
     """
-    Parse raw FDA label data into a structured side effects object with
-    frequency tiers, boxed warnings, mechanism of action, and source URLs.
+    Parse raw FDA label data into a structured side effects object.
+
+    Each side effect entry is individually tagged with its source section,
+    label source, and frequency text (if available). This ensures every
+    item shown to the user is traceable to real FDA label data.
+
+    Returns a dict with:
+      - drug: canonical_name, brand_names, resolved_from
+      - side_effects_structured: { common: [...], serious: [...], boxed_warning: [...] }
+      - side_effects (legacy tiered format for backward compat)
+      - boxed_warnings (legacy list of strings)
+      - mechanism_of_action
+      - sources / label_info
     """
+    # ── Extract metadata from raw openFDA label ──────────────────────────────
+    openfda = (raw_label or {}).get("openfda", {}) if raw_label else {}
+    set_ids = openfda.get("set_id", [])
+    set_id = set_ids[0] if set_ids else None
+    app_nums = openfda.get("application_number", [])
+    nda = app_nums[0] if app_nums else None
+    pharm_moa = openfda.get("pharm_class_moa", [])
+    pharm_epc = openfda.get("pharm_class_epc", [])
+    brand_names = openfda.get("brand_name", [])
+    generic_names = openfda.get("generic_name", [])
+
+    # Label revision date
+    last_updated = ""
+    if raw_label:
+        eff_date = str(raw_label.get("effective_time", "") or "")
+        if eff_date and len(eff_date) >= 8 and eff_date[:8].isdigit():
+            last_updated = f"{eff_date[:4]}-{eff_date[4:6]}-{eff_date[6:8]}"
+
+    effective_setid = dailymed_setid or set_id
+    label_source = "dailymed" if effective_setid else "openfda"
+
+    # ── Build result skeleton ────────────────────────────────────────────────
     result: dict = {
         "drug_name": drug_name,
+        # New structured drug info block
+        "drug": {
+            "canonical_name": (generic_names[0] if generic_names else drug_name).title(),
+            "brand_names": [b.title() for b in brand_names[:5]],
+            "resolved_from": drug_name,
+        },
+        "generic_name": generic_names[0] if generic_names else drug_name,
+        "brand_names": [b.title() for b in brand_names[:5]],
+        # New per-item structured side effects (each item is a dict with source info)
+        "side_effects_structured": {
+            "common": [],
+            "serious": [],
+            "boxed_warning": [],
+        },
+        # Legacy tiered format (kept for frontend backward compatibility)
         "side_effects": {
             "very_common": {"label": "Very Common (>10%)", "items": []},
             "common":      {"label": "Common (1-10%)",    "items": []},
@@ -364,33 +412,26 @@ def parse_structured_side_effects(
             "detail": "",
         },
         "sources": [],
+        # New label_info block for source citation
+        "label_info": {
+            "source": label_source,
+            "revision_date": last_updated,
+            "source_url": (
+                f"https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid={effective_setid}"
+                if effective_setid
+                else "https://dailymed.nlm.nih.gov/dailymed/"
+            ),
+        },
+        "disclaimer": (
+            "This information is from FDA drug labels and is not medical advice. "
+            "For emergencies, call 911."
+        ),
     }
 
     if not fda_label and not raw_label:
         return result
 
-    # ── Extract metadata from raw openFDA label ──────────────────────────────
-    openfda = (raw_label or {}).get("openfda", {}) if raw_label else {}
-    set_ids = openfda.get("set_id", [])
-    set_id = set_ids[0] if set_ids else None
-    app_nums = openfda.get("application_number", [])
-    nda = app_nums[0] if app_nums else None
-    pharm_moa = openfda.get("pharm_class_moa", [])
-    pharm_epc = openfda.get("pharm_class_epc", [])
-    brand_names = openfda.get("brand_name", [])
-    generic_names = openfda.get("generic_name", [])
-
-    result["brand_names"] = brand_names[:5]
-    result["generic_name"] = generic_names[0] if generic_names else drug_name
-
-    # ── Build source URLs ────────────────────────────────────────────────────
-    effective_setid = dailymed_setid or set_id
-    last_updated = ""
-    if raw_label:
-        eff_date = raw_label.get("effective_time", "")
-        if eff_date and len(eff_date) >= 8:
-            last_updated = f"{eff_date[:4]}-{eff_date[4:6]}-{eff_date[6:8]}"
-
+    # ── Build source URLs (legacy format for frontend) ───────────────────────
     if effective_setid:
         result["sources"].append({
             "id": 1,
@@ -407,7 +448,6 @@ def parse_structured_side_effects(
             "section": "FDA Label",
             "last_updated": last_updated,
         })
-    # Generic openFDA source always included
     result["sources"].append({
         "id": len(result["sources"]) + 1,
         "name": "openFDA Drug Label API",
@@ -416,10 +456,21 @@ def parse_structured_side_effects(
         "last_updated": last_updated,
     })
 
-    # ── Boxed warnings ───────────────────────────────────────────────────────
-    boxed = (fda_label or {}).get("boxed_warning", "")
-    if boxed:
-        result["boxed_warnings"] = [s.strip() for s in boxed.split(".") if len(s.strip()) > 10][:3]
+    # ── Boxed warnings — highest severity ────────────────────────────────────
+    boxed_text = (fda_label or {}).get("boxed_warning", "")
+    if boxed_text:
+        boxed_sentences = [s.strip() for s in boxed_text.split(".") if len(s.strip()) > 10][:3]
+        result["boxed_warnings"] = boxed_sentences  # legacy
+        for sentence in boxed_sentences:
+            result["side_effects_structured"]["boxed_warning"].append({
+                "term": sentence,
+                "seriousness": "boxed_warning",
+                "frequency_text": None,
+                "source_section": "Boxed Warning",
+                "label_source": label_source,
+                "last_updated": last_updated,
+                "ai_generated": False,
+            })
 
     # ── Mechanism of action ──────────────────────────────────────────────────
     clin_pharm = (fda_label or {}).get("clinical_pharmacology", "")
@@ -432,7 +483,6 @@ def parse_structured_side_effects(
         result["mechanism_of_action"]["molecular_targets"] = [moa_class.replace(" [MoA]", "")]
 
     if clin_pharm:
-        # Take up to 2 sentences for summary, full text for detail
         sentences = [s.strip() + "." for s in clin_pharm.split(".") if len(s.strip()) > 15]
         result["mechanism_of_action"]["summary"] = " ".join(sentences[:2])[:300]
         result["mechanism_of_action"]["detail"] = " ".join(sentences[:5])[:800]
@@ -441,102 +491,247 @@ def parse_structured_side_effects(
         result["mechanism_of_action"]["summary"] = " ".join(sentences[:2])[:300]
         result["mechanism_of_action"]["detail"] = " ".join(sentences[:4])[:600]
 
-    # ── Parse adverse reactions into frequency tiers ──────────────────────────
+    # ── Parse adverse reactions into per-item entries ─────────────────────────
     adverse_text = (fda_label or {}).get("adverse_reactions", "")
     warnings_text = (fda_label or {}).get("warnings", "")
 
-    # Heuristic frequency parsing from FDA label text
-    _classify_effects_from_text(adverse_text, result["side_effects"])
+    # Parse adverse reactions text into structured entries with source tagging
+    _extract_tagged_effects(
+        text=adverse_text,
+        source_section="Adverse Reactions",
+        label_source=label_source,
+        last_updated=last_updated,
+        structured=result["side_effects_structured"],
+        legacy_tiers=result["side_effects"],
+    )
 
-    # Merge FAERS terms into common if we didn't get enough from label text
+    # Parse warnings text into serious effects with source tagging
+    if warnings_text:
+        _extract_serious_from_warnings_tagged(
+            text=warnings_text,
+            label_source=label_source,
+            last_updated=last_updated,
+            structured=result["side_effects_structured"],
+            legacy_serious=result["side_effects"]["serious"]["items"],
+        )
+
+    # ── Merge FAERS terms into common if label text didn't yield enough ──────
     if faers_terms:
         existing = set()
+        for cat in result["side_effects_structured"].values():
+            for item in cat:
+                if isinstance(item, dict) and "term" in item:
+                    existing.add(item["term"].lower())
+        # Also check legacy tiers
         for tier in result["side_effects"].values():
             existing.update(s.lower() for s in tier.get("items", []))
+
         for term in faers_terms:
             clean = term.strip().lower()
             if clean and clean not in existing and len(clean) > 2:
+                # FAERS terms are real data from FDA Adverse Event Reporting System
+                result["side_effects_structured"]["common"].append({
+                    "term": clean.title(),
+                    "seriousness": "common",
+                    "frequency_text": None,  # FAERS doesn't give per-label frequency
+                    "source_section": "FAERS Adverse Events",
+                    "label_source": "fda_faers",
+                    "last_updated": last_updated,
+                    "ai_generated": False,
+                })
                 result["side_effects"]["common"]["items"].append(clean.title())
                 existing.add(clean)
-                if len(result["side_effects"]["common"]["items"]) >= 12:
+                if len(result["side_effects_structured"]["common"]) >= 12:
                     break
 
-    # Extract serious effects from warnings section
-    if warnings_text:
-        _extract_serious_from_warnings(warnings_text, result["side_effects"]["serious"]["items"])
+    # Cap legacy tiers at 10 items each
+    for key in result["side_effects"]:
+        result["side_effects"][key]["items"] = result["side_effects"][key]["items"][:10]
 
     return result
 
 
-def _classify_effects_from_text(text: str, tiers: dict) -> None:
-    """Parse FDA adverse reactions text and classify into frequency tiers."""
+def _extract_tagged_effects(
+    text: str,
+    source_section: str,
+    label_source: str,
+    last_updated: str,
+    structured: dict,
+    legacy_tiers: dict,
+) -> None:
+    """
+    Parse FDA adverse reactions text into individually-tagged side effect entries.
+
+    Each extracted term gets tagged with its source_section, label_source,
+    frequency_text (if parseable), and seriousness classification.
+    """
     if not text:
         return
 
-    # Common frequency markers in FDA labels
     text_lower = text.lower()
 
-    # Extract individual effect terms from the text
-    # Split by common delimiters: commas, semicolons, bullet patterns
-    import re as _re
     # Remove HTML-like tags
-    clean = _re.sub(r"<[^>]+>", " ", text)
-    # Find terms that look like side effects (short phrases)
-    parts = _re.split(r"[,;•·\n]+", clean)
+    clean = re.sub(r"<[^>]+>", " ", text)
+    # Split by common delimiters found in FDA labels
+    parts = re.split(r"[,;•·\n]+", clean)
     effects = []
     for p in parts:
         t = p.strip()
-        # Remove leading dashes or bullets
-        t = _re.sub(r"^[-–—\*\d\.\)]+\s*", "", t).strip()
-        if 3 < len(t) < 60 and not t[0].isdigit():
-            # Skip lines that are headers or percentages
-            if any(skip in t.lower() for skip in ["adverse reaction", "table ", "the following", "section", "clinical trial", "placebo"]):
+        # Remove leading dashes, bullets, or numbering
+        t = re.sub(r"^[-–—\*\d\.\)]+\s*", "", t).strip()
+        if 3 < len(t) < 60 and t and not t[0].isdigit():
+            # Skip headers, table labels, and meta-text
+            if any(skip in t.lower() for skip in [
+                "adverse reaction", "table ", "the following",
+                "section", "clinical trial", "placebo",
+                "incidence", "reported", "patients",
+            ]):
                 continue
             effects.append(t)
 
-    # Classify by frequency keywords in surrounding text
+    # Keywords for classifying severity and frequency
     very_common_kw = ["most common", ">10%", "≥10%", "very common", "most frequently"]
     uncommon_kw = ["rare", "<1%", "uncommon", "infrequent", "isolated"]
-    serious_kw = ["fatal", "life-threatening", "death", "anaphylaxis", "stevens-johnson",
-                  "hepatic failure", "cardiac arrest", "renal failure", "hemorrhage"]
+    serious_kw = [
+        "fatal", "life-threatening", "death", "anaphylaxis", "stevens-johnson",
+        "hepatic failure", "cardiac arrest", "renal failure", "hemorrhage",
+    ]
 
+    seen = set()
     for effect in effects:
         eff_lower = effect.lower()
-        # Check if this effect matches serious keywords
+        if eff_lower in seen:
+            continue
+        seen.add(eff_lower)
+
+        # Determine frequency text from surrounding context
+        frequency_text = _extract_frequency_near(text_lower, eff_lower)
+
+        # Classify seriousness
         if any(kw in eff_lower for kw in serious_kw):
-            if effect not in tiers["serious"]["items"]:
-                tiers["serious"]["items"].append(effect)
+            seriousness = "serious"
+            tier_key = "serious"
         elif any(kw in text_lower[:text_lower.find(eff_lower) + 100] for kw in very_common_kw if eff_lower in text_lower):
-            if effect not in tiers["very_common"]["items"]:
-                tiers["very_common"]["items"].append(effect)
+            seriousness = "common"
+            tier_key = "very_common"
+            if not frequency_text:
+                frequency_text = "reported in >10% of patients"
         elif any(kw in text_lower[:text_lower.find(eff_lower) + 100] for kw in uncommon_kw if eff_lower in text_lower):
-            if effect not in tiers["uncommon"]["items"]:
-                tiers["uncommon"]["items"].append(effect)
+            seriousness = "common"
+            tier_key = "uncommon"
+            if not frequency_text:
+                frequency_text = "reported in <1% of patients"
         else:
-            if effect not in tiers["common"]["items"]:
-                tiers["common"]["items"].append(effect)
+            seriousness = "common"
+            tier_key = "common"
 
-    # Cap each tier
-    for key in tiers:
-        tiers[key]["items"] = tiers[key]["items"][:10]
+        # Add to new structured format (per-item source-tagged)
+        category = "serious" if seriousness == "serious" else "common"
+        structured[category].append({
+            "term": effect,
+            "seriousness": seriousness,
+            "frequency_text": frequency_text,
+            "source_section": source_section,
+            "label_source": label_source,
+            "last_updated": last_updated,
+            "ai_generated": False,
+        })
+
+        # Also add to legacy tiered format for backward compat
+        if effect not in legacy_tiers[tier_key]["items"]:
+            legacy_tiers[tier_key]["items"].append(effect)
+
+    # Cap structured entries
+    structured["common"] = structured["common"][:12]
+    structured["serious"] = structured["serious"][:8]
 
 
-def _extract_serious_from_warnings(text: str, serious_items: list) -> None:
-    """Extract serious/life-threatening effects from the warnings section."""
-    import re as _re
-    serious_kw = ["fatal", "death", "life-threatening", "anaphyla", "stevens-johnson",
-                  "hepatic failure", "renal failure", "hemorrhag", "cardiac",
-                  "suicidal", "stroke", "heart attack", "gi bleed", "perforation"]
-    sentences = _re.split(r"[.;]", text)
-    existing = set(s.lower() for s in serious_items)
+def _extract_frequency_near(text_lower: str, term_lower: str) -> str | None:
+    """
+    Try to find a frequency statement near the term in the label text.
+
+    Looks for patterns like "10%", "1 in 100", "commonly reported", etc.
+    Returns the frequency text if found, or None.
+    """
+    idx = text_lower.find(term_lower)
+    if idx == -1:
+        return None
+
+    # Check a window around the term (200 chars before and after)
+    start = max(0, idx - 200)
+    end = min(len(text_lower), idx + len(term_lower) + 200)
+    window = text_lower[start:end]
+
+    # Look for percentage patterns
+    pct_match = re.search(r"(\d+\.?\d*)\s*%", window)
+    if pct_match:
+        pct = float(pct_match.group(1))
+        if pct > 10:
+            return f"reported in >{int(pct)}% of patients"
+        elif pct > 0:
+            return f"reported in ~{pct_match.group(1)}% of patients"
+
+    # Look for frequency words
+    for kw, label in [
+        ("most common", "commonly reported"),
+        ("very common", "very commonly reported"),
+        ("common", "commonly reported"),
+        ("uncommon", "uncommonly reported"),
+        ("rare", "rarely reported"),
+        ("frequently", "frequently reported"),
+    ]:
+        if kw in window:
+            return label
+
+    return None
+
+
+def _extract_serious_from_warnings_tagged(
+    text: str,
+    label_source: str,
+    last_updated: str,
+    structured: dict,
+    legacy_serious: list,
+) -> None:
+    """
+    Extract serious/life-threatening effects from the warnings section.
+
+    Each extracted term is tagged with source_section = "Warnings and Precautions".
+    """
+    serious_kw = [
+        "fatal", "death", "life-threatening", "anaphyla", "stevens-johnson",
+        "hepatic failure", "renal failure", "hemorrhag", "cardiac",
+        "suicidal", "stroke", "heart attack", "gi bleed", "perforation",
+    ]
+    sentences = re.split(r"[.;]", text)
+    existing = set()
+    for item in structured.get("serious", []):
+        if isinstance(item, dict):
+            existing.add(item["term"].lower())
+    existing.update(s.lower() for s in legacy_serious)
+
     for sent in sentences:
         clean = sent.strip()
         if any(kw in clean.lower() for kw in serious_kw) and len(clean) > 10:
             short = clean[:100]
             if short.lower() not in existing:
-                serious_items.append(short)
+                # Add to new structured format
+                structured["serious"].append({
+                    "term": short,
+                    "seriousness": "serious",
+                    "frequency_text": None,
+                    "source_section": "Warnings and Precautions",
+                    "label_source": label_source,
+                    "last_updated": last_updated,
+                    "ai_generated": False,
+                })
+                # Add to legacy format
+                legacy_serious.append(short)
                 existing.add(short.lower())
-    serious_items[:] = serious_items[:6]
+
+    # Cap at 6 items
+    legacy_serious[:] = legacy_serious[:6]
+    structured["serious"] = structured["serious"][:8]
 
 
 # ── Main parallel fetch orchestrator ─────────────────────────────────────────

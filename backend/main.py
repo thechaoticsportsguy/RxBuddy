@@ -1868,6 +1868,66 @@ def startup_event() -> None:
         logger.warning("[KeepAlive] Could not start keep-alive pinger: %s", _ka_exc)
 
 
+# ── Input Validation + Rate Limiting ──────────────────────────────────────────
+# Simple in-memory rate limiter: max 30 requests per minute per IP.
+# Protects against abuse without requiring Redis or external dependencies.
+import time as _time
+import hashlib as _hashlib
+from collections import defaultdict as _defaultdict
+
+_rate_limit_store: dict[str, list[float]] = _defaultdict(list)
+_RATE_LIMIT_WINDOW = 60     # seconds
+_RATE_LIMIT_MAX = 30        # max requests per window per IP
+
+
+def _sanitize_query(query: str) -> str:
+    """
+    Sanitize user input: strip whitespace, limit length, remove control chars.
+    Returns cleaned query string or raises HTTPException if invalid.
+    """
+    if not query or not query.strip():
+        raise HTTPException(status_code=400, detail="Query cannot be empty.")
+
+    # Strip and limit length (500 chars is more than enough for a drug question)
+    cleaned = query.strip()[:500]
+
+    # Remove control characters (keep printable ASCII + common unicode)
+    cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", cleaned)
+
+    if not cleaned:
+        raise HTTPException(status_code=400, detail="Query contains no valid text.")
+
+    return cleaned
+
+
+def _check_rate_limit(client_ip: str) -> None:
+    """
+    Check if this IP has exceeded the rate limit.
+    Raises HTTPException 429 if too many requests.
+    """
+    now = _time.time()
+    # Clean old entries
+    _rate_limit_store[client_ip] = [
+        t for t in _rate_limit_store[client_ip]
+        if now - t < _RATE_LIMIT_WINDOW
+    ]
+    if len(_rate_limit_store[client_ip]) >= _RATE_LIMIT_MAX:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests. Please wait a minute before trying again.",
+        )
+    _rate_limit_store[client_ip].append(now)
+
+
+def _log_query_hash(query: str) -> None:
+    """
+    Log a hashed version of the query for analytics.
+    NEVER logs raw query text (could contain personal health info).
+    """
+    query_hash = _hashlib.sha256(query.lower().strip().encode()).hexdigest()[:12]
+    logger.info("[Analytics] query_hash=%s length=%d", query_hash, len(query))
+
+
 @app.get("/")
 def health_check() -> dict[str, str]:
     return {"status": "RxBuddy is live"}
@@ -4010,7 +4070,7 @@ def admin_refresh_label(drug: str) -> dict:
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.post("/v2/search")
-async def search_v2(req: SearchRequest) -> JSONResponse:
+async def search_v2(req: SearchRequest, request: Request) -> JSONResponse:
     """
     Pipeline v2 search endpoint — modular, deterministic, fast.
 
@@ -4020,22 +4080,25 @@ async def search_v2(req: SearchRequest) -> JSONResponse:
       3. extract_drugs()       → drug names + normalization
       4. fetch_all_apis()      → async parallel (≤ 1.5s timeout each)
       5. compute_verdict()     → deterministic backend (PRIMARY TRUTH)
-      6. generate_explanation() → Claude explanation only (verdict locked)
+      6. For side_effects: structured label data ONLY (no AI)
+         For other intents: Claude explanation (verdict locked)
       7. enforce_verdict()     → hard enforcement (Claude can't override)
       8. clean_response()      → max 2 sentences, no fluff
-      9. cache_result()        → PostgreSQL 7-day TTL
-     10. return response
+      9. validate_response()   → anti-hallucination check
+     10. cache_result()        → PostgreSQL 7-day TTL
 
     Performance targets:
       - Cache hits: < 200ms
       - Full pipeline: < 2 seconds
-      - Claude NEVER decides the verdict
+      - Side effects: ZERO AI generation
     """
     from pipeline.orchestrator import run_pipeline
 
-    user_query = req.query.strip()
-    if not user_query:
-        raise HTTPException(status_code=400, detail="Query cannot be empty.")
+    # Input validation + rate limiting
+    client_ip = request.client.host if request.client else "unknown"
+    _check_rate_limit(client_ip)
+    user_query = _sanitize_query(req.query)
+    _log_query_hash(user_query)
 
     print(f"🟢 [v2/search] ENDPOINT HIT — input: {user_query}")
 
@@ -4068,7 +4131,7 @@ async def search_v2(req: SearchRequest) -> JSONResponse:
 
 
 @app.post("/v2/search/stream")
-async def search_v2_stream(req: SearchRequest) -> StreamingResponse:
+async def search_v2_stream(req: SearchRequest, request: Request) -> StreamingResponse:
     """
     SSE streaming variant of /v2/search.
 
@@ -4080,12 +4143,17 @@ async def search_v2_stream(req: SearchRequest) -> StreamingResponse:
     from pipeline.cache import cache_get
     from pipeline.drug_extractor import normalize_query
 
+    # Input validation + rate limiting (before streaming starts)
+    client_ip = request.client.host if request.client else "unknown"
+    _check_rate_limit(client_ip)
+
     async def generate():
-        user_query = req.query.strip()
+        user_query = _sanitize_query(req.query)
         if not user_query:
             yield _sse_v2({"type": "error", "message": "Query cannot be empty."})
             return
 
+        _log_query_hash(user_query)
         print(f"🟢 [v2/stream] ENDPOINT HIT — input: {user_query}")
 
         dataset_result = _build_dataset_result(user_query)
