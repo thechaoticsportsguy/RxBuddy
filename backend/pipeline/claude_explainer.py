@@ -29,12 +29,8 @@ from dataclasses import dataclass, field
 
 try:
     import google.generativeai as _genai
-    _GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-    if _GEMINI_API_KEY:
-        _genai.configure(api_key=_GEMINI_API_KEY)
 except ImportError:
     _genai = None  # type: ignore
-    _GEMINI_API_KEY = None
 
 logger = logging.getLogger("rxbuddy.pipeline.claude_explainer")
 
@@ -152,6 +148,31 @@ def _build_side_effects_context(
 # ── Per-drug hardcoded side-effects (used when Claude is unavailable) ──────────
 
 _DRUG_SE_FALLBACK: dict[str, dict] = {
+    "acetaminophen": {
+        "common": [
+            "Nausea (usually mild, especially if taken on an empty stomach)",
+            "Stomach pain in some people",
+            "Headache (rare, usually from overuse)",
+        ],
+        "serious": [
+            "Liver damage — can occur from overdose or combining with alcohol",
+            "Severe skin reactions (rare): Stevens-Johnson syndrome, toxic epidermal necrolysis",
+            "Kidney damage with very long-term high-dose use",
+        ],
+        "warning_signs": [
+            "Nausea, vomiting, or stomach pain after taking it",
+            "Yellowing of skin or eyes (jaundice) — sign of liver damage",
+            "Dark urine or unusual fatigue",
+            "Skin rash, blistering, or peeling",
+        ],
+        "what_to_do": [
+            "Never exceed 4,000 mg (4 g) per day — check all products for hidden acetaminophen",
+            "Avoid alcohol while taking acetaminophen",
+            "Do not combine with other products containing acetaminophen (e.g. cold medicines, NyQuil)",
+            "Contact poison control immediately if you suspect an overdose: 1-800-222-1222",
+        ],
+        "mechanism": "Acetaminophen (Tylenol) relieves pain and fever by acting on the brain's pain and temperature centers. Unlike NSAIDs, it does not reduce inflammation significantly.",
+    },
     "metformin": {
         "common": [
             "Nausea or upset stomach (most common when starting)",
@@ -681,10 +702,12 @@ EVIDENCE:
 
 def _try_gemini_generic(system_prompt: str, user_message: str) -> Explanation | None:
     """Try Gemini as a fallback for the generic explanation flow. Returns None on failure."""
-    if not _genai or not _GEMINI_API_KEY:
+    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not _genai or not gemini_key:
         logger.warning("[Gemini] No Gemini key set — skipping Gemini fallback")
         return None
     try:
+        _genai.configure(api_key=gemini_key)
         model = _genai.GenerativeModel("gemini-1.5-flash")
         full_prompt = f"{system_prompt}\n\n{user_message}\n\nRespond with valid JSON only."
         response = model.generate_content(full_prompt)
@@ -711,10 +734,12 @@ def _try_gemini_generic(system_prompt: str, user_message: str) -> Explanation | 
 
 def _try_gemini_side_effects(system_prompt: str, user_message: str) -> Explanation | None:
     """Try Gemini as a fallback for the side-effects flow. Returns None on failure."""
-    if not _genai or not _GEMINI_API_KEY:
+    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not _genai or not gemini_key:
         logger.warning("[Gemini] No Gemini key set — skipping Gemini fallback")
         return None
     try:
+        _genai.configure(api_key=gemini_key)
         model = _genai.GenerativeModel("gemini-1.5-flash")
         full_prompt = f"{system_prompt}\n\n{user_message}\n\nRespond with valid JSON only."
         response = model.generate_content(full_prompt)
