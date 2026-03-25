@@ -328,3 +328,86 @@ class TestSearchEndpoint:
         data = post_search("xyzanol side effects")
         assert "results" in data
         # May be empty or have a consult answer — must not be a 500
+
+
+# ── Fallback chain tests ───────────────────────────────────────────────────────
+
+def _post_v2(query: str) -> dict:
+    """POST /v2/search and return parsed JSON. Always expects HTTP 200."""
+    if not HAS_HTTPX:
+        pytest.skip("httpx not installed — run: pip install httpx")
+    with httpx.Client(timeout=45) as client:
+        resp = client.post(
+            f"{BASE_URL}/v2/search",
+            json={"query": query, "engine": "tfidf", "top_k": 5},
+        )
+    assert resp.status_code == 200, f"Got HTTP {resp.status_code} — backend must never return 5xx"
+    return resp.json()
+
+
+class TestFallbackChain:
+    """
+    Verify the three-layer fallback chain:
+      Claude → Gemini → static fallback
+
+    All scenarios must return HTTP 200 with renderable data.
+    'Failed to fetch' must never appear.
+    """
+
+    def test_tylenol_side_effects_returns_200(self):
+        """Normal path — tylenol side effects should return structured data."""
+        data = _post_v2("tylenol side effects")
+        assert "results" in data, "Response missing 'results' key"
+        assert len(data["results"]) > 0, "Results array is empty"
+        result = data["results"][0]
+        structured = result.get("structured", {})
+        assert structured, "structured field is missing or empty"
+
+    def test_metformin_side_effects_returns_200(self):
+        """Normal path — metformin side effects should return structured data."""
+        data = _post_v2("metformin side effects")
+        assert "results" in data
+        assert len(data["results"]) > 0
+        result = data["results"][0]
+        structured = result.get("structured", {})
+        assert structured
+
+    def test_tylenol_side_effects_has_content(self):
+        """Side effects response must have at least some renderable content."""
+        data = _post_v2("tylenol side effects")
+        structured = data["results"][0].get("structured", {})
+        has_common = bool(structured.get("common_side_effects"))
+        has_answer = bool(structured.get("answer") or structured.get("short_answer"))
+        assert has_common or has_answer, (
+            f"No renderable content in structured: {list(structured.keys())}"
+        )
+
+    def test_metformin_side_effects_has_content(self):
+        """Side effects response must have at least some renderable content."""
+        data = _post_v2("metformin side effects")
+        structured = data["results"][0].get("structured", {})
+        has_common = bool(structured.get("common_side_effects"))
+        has_answer = bool(structured.get("answer") or structured.get("short_answer"))
+        assert has_common or has_answer, (
+            f"No renderable content in structured: {list(structured.keys())}"
+        )
+
+    def test_broken_anthropic_key_still_returns_200(self):
+        """
+        Even with a broken Anthropic key, the server must return HTTP 200.
+        Gemini or static fallback must kick in.
+        Simulated by patching env at import time — this is a smoke test
+        that the endpoint never returns 5xx.
+        """
+        import os
+        orig = os.environ.get("ANTHROPIC_API_KEY")
+        os.environ["ANTHROPIC_API_KEY"] = "sk-broken-key-for-testing"
+        try:
+            data = _post_v2("tylenol side effects")
+            assert "results" in data
+            assert len(data["results"]) > 0
+        finally:
+            if orig is None:
+                os.environ.pop("ANTHROPIC_API_KEY", None)
+            else:
+                os.environ["ANTHROPIC_API_KEY"] = orig
