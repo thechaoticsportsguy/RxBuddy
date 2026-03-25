@@ -564,8 +564,10 @@ def _build_fallback_side_effects(
     drug = drug_names[0].lower() if drug_names else ""
     data = _DRUG_SE_FALLBACK.get(drug)
     drugs_str = " and ".join(drug_names) if drug_names else "this medication"
+    print(f"⚠️ [Fallback-SE] Building fallback for: {drug} (has hardcoded={bool(data)})")
 
     if data:
+        print(f"✅ [Fallback-SE] Using hardcoded data for: {drug} ({len(data['common'])} common effects)")
         return Explanation(
             answer=f"Here are the known side effects of {drugs_str}.",
             warning="If you experience severe or unusual symptoms, contact your healthcare provider.",
@@ -811,6 +813,7 @@ def generate_explanation(
     Explanation dataclass with answer, warning, details, action, article.
     """
     api_key = _get_api_key()
+    print(f"\ud83e\udd16 [Claude] generate_explanation called: intent={intent} drugs={drug_names} has_api_key={bool(api_key)}")
 
     # ── Side-effects intent gets its own dedicated flow ────────────────────────
     if intent == "side_effects":

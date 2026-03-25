@@ -3090,6 +3090,7 @@ def _build_dataset_result(query: str) -> QuestionMatch | None:
     if not query_lower:
         return None
 
+    print(f"🔍 [Dataset] Checking CSV for query: {query_lower}")
     dataset_drug_name: str | None = None
     for candidate_drug_name in load_drug_lookup():
         if candidate_drug_name in query_lower:
@@ -3097,16 +3098,15 @@ def _build_dataset_result(query: str) -> QuestionMatch | None:
             break
 
     if not dataset_drug_name:
+        print(f"🔍 [Dataset] No CSV match for: {query_lower}")
         return None
 
     drug = get_drug_by_generic(dataset_drug_name)
     if not drug:
+        print(f"🔍 [Dataset] CSV row not found for drug: {dataset_drug_name}")
         return None
 
-    logger.info(
-        "[Dataset] Returning CSV dataset answer for '%s' without calling AI",
-        dataset_drug_name,
-    )
+    print(f"✅ [Dataset] Found CSV data for: {dataset_drug_name}")
     side_effects = str(drug.get("side_effects_simple", "")).strip()
     mechanism = str(drug.get("mechanism_simple", "")).strip()
 
@@ -4037,8 +4037,11 @@ async def search_v2(req: SearchRequest) -> JSONResponse:
     if not user_query:
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
+    print(f"🟢 [v2/search] ENDPOINT HIT — input: {user_query}")
+
     dataset_result = _build_dataset_result(user_query)
     if dataset_result:
+        print(f"✅ [v2/search] Returning dataset result")
         return JSONResponse(
             content=SearchResponse(
                 query=user_query,
@@ -4050,9 +4053,12 @@ async def search_v2(req: SearchRequest) -> JSONResponse:
         )
 
     try:
+        print(f"🤖 [v2/search] Running AI pipeline for: {user_query}")
         result = await run_pipeline(user_query)
+        print(f"✅ [v2/search] Pipeline returned: {list(result.keys()) if isinstance(result, dict) else type(result)}")
         return JSONResponse(content=result)
     except Exception as exc:
+        print(f"❌ [v2/search] Pipeline FAILED: {exc}")
         logger.error("[v2/search] Pipeline failed: %s", exc, exc_info=True)
         from pipeline.failsafe import build_failsafe_response
         return JSONResponse(
@@ -4080,8 +4086,11 @@ async def search_v2_stream(req: SearchRequest) -> StreamingResponse:
             yield _sse_v2({"type": "error", "message": "Query cannot be empty."})
             return
 
+        print(f"🟢 [v2/stream] ENDPOINT HIT — input: {user_query}")
+
         dataset_result = _build_dataset_result(user_query)
         if dataset_result:
+            print(f"✅ [v2/stream] Returning dataset result")
             yield _sse_v2({
                 "type": "done",
                 "source": "dataset",
@@ -4108,11 +4117,14 @@ async def search_v2_stream(req: SearchRequest) -> StreamingResponse:
         yield _sse_v2({"type": "status", "message": "Analyzing your question..."})
 
         try:
+            print(f"🤖 [v2/stream] Running AI pipeline for: {user_query}")
             result = await run_pipeline(user_query)
+            print(f"✅ [v2/stream] Pipeline returned: {list(result.keys()) if isinstance(result, dict) else type(result)}")
             source = result.get("source", "pipeline_v2")
             first_result = result["results"][0] if result.get("results") else {}
             yield _sse_v2({"type": "done", "source": source, "result": first_result})
         except Exception as exc:
+            print(f"❌ [v2/stream] Pipeline FAILED: {exc}")
             logger.error("[v2/stream] Pipeline failed: %s", exc, exc_info=True)
             from pipeline.failsafe import build_failsafe_response
             fallback = build_failsafe_response(user_query, str(exc))

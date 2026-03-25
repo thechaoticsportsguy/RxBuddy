@@ -8,7 +8,10 @@ from pathlib import Path
 logger = logging.getLogger("rxbuddy.drug_csv_loader")
 
 DRUG_CSV_RELATIVE_PATH = Path("backend") / "data" / "rxbuddy_drugs_2000.csv"
-DRUG_CSV_PATH = Path(__file__).resolve().parents[2] / DRUG_CSV_RELATIVE_PATH
+_FALLBACK_CSV_RELATIVE_PATH = Path("data") / "rxbuddy_drugs_cleaned_100.csv"
+_RESOLVED_2000 = Path(__file__).resolve().parents[2] / DRUG_CSV_RELATIVE_PATH
+_RESOLVED_100  = Path(__file__).resolve().parents[2] / _FALLBACK_CSV_RELATIVE_PATH
+DRUG_CSV_PATH = _RESOLVED_2000 if _RESOLVED_2000.exists() else _RESOLVED_100
 
 
 def _normalize_row(row: dict[str, str | None]) -> dict[str, str]:

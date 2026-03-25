@@ -146,6 +146,7 @@ async def run_pipeline(query: str) -> dict:
     """
     start_time = time.monotonic()
     logger.info("[Pipeline] START query=%.80s", query)
+    print(f"🟢 [Pipeline] START query: {query[:80]}")
 
     if not query or not query.strip():
         return build_failsafe_response(query, "Empty query")
@@ -184,6 +185,7 @@ async def run_pipeline(query: str) -> dict:
     intent_str = intent.value
     primary_drug = drug_names[0] if drug_names else ""
 
+    print(f"🔍 [Pipeline] Intent={intent_str} drugs={drug_names}")
     logger.info("[Pipeline] Intent=%s drugs=%s", intent_str, drug_names)
 
     # ── Step 4: Fetch all APIs in parallel ────────────────────────────────
@@ -206,17 +208,20 @@ async def run_pipeline(query: str) -> dict:
         return build_failsafe_response(query, f"Decision engine error: {exc}")
 
     verdict = decision.verdict
+    print(f"⚖️ [Pipeline] Verdict={verdict} confidence={decision.confidence}")
     logger.info("[Pipeline] Verdict=%s confidence=%s deterministic=%s",
                 verdict, decision.confidence, decision.is_deterministic)
 
     # ── Step 6: Generate explanation via Claude ───────────────────────────
     # Skip Claude for deterministic verdicts (faster, no hallucination risk)
     if decision.is_deterministic:
+        print(f"⚡ [Pipeline] Deterministic — skipping Claude")
         from pipeline.claude_explainer import _build_fallback
         explanation = _build_fallback(verdict, decision.reasoning, drug_names, intent_str)
         logger.info("[Pipeline] Deterministic — skipped Claude")
     else:
         try:
+            print(f"🤖 [Pipeline] Calling Claude/Gemini for explanation...")
             explanation = generate_explanation(
                 intent=intent_str,
                 drug_names=drug_names,
@@ -228,7 +233,9 @@ async def run_pipeline(query: str) -> dict:
                 recalls=api_results.recalls,
                 query=original_query,
             )
+            print(f"✅ [Pipeline] Explanation generated: common_se={len(explanation.common_side_effects)} answer={explanation.answer[:50]}")
         except Exception as exc:
+            print(f"❌ [Pipeline] Claude/Gemini FAILED: {exc}")
             logger.error("[Pipeline] Claude failed: %s — using fallback", exc)
             from pipeline.claude_explainer import _build_fallback
             explanation = _build_fallback(verdict, decision.reasoning, drug_names, intent_str)
