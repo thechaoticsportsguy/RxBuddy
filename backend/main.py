@@ -4056,7 +4056,7 @@ async def search_v2(req: SearchRequest) -> JSONResponse:
         logger.error("[v2/search] Pipeline failed: %s", exc, exc_info=True)
         from pipeline.failsafe import build_failsafe_response
         return JSONResponse(
-            status_code=500,
+            status_code=200,
             content=build_failsafe_response(user_query, str(exc)),
         )
 
@@ -4114,7 +4114,10 @@ async def search_v2_stream(req: SearchRequest) -> StreamingResponse:
             yield _sse_v2({"type": "done", "source": source, "result": first_result})
         except Exception as exc:
             logger.error("[v2/stream] Pipeline failed: %s", exc, exc_info=True)
-            yield _sse_v2({"type": "error", "message": "Could not generate an answer. Please try again."})
+            from pipeline.failsafe import build_failsafe_response
+            fallback = build_failsafe_response(user_query, str(exc))
+            first_result = fallback["results"][0] if fallback.get("results") else {}
+            yield _sse_v2({"type": "done", "source": "failsafe", "result": first_result})
 
     def _sse_v2(payload: dict) -> str:
         return f"data: {json.dumps(payload, default=str)}\n\n"
