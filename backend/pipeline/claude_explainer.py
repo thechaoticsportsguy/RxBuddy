@@ -28,7 +28,7 @@ import os
 from dataclasses import dataclass, field
 
 try:
-    import google.generativeai as _genai
+    from google import genai as _genai
 except ImportError:
     _genai = None  # type: ignore
 
@@ -129,11 +129,16 @@ def _build_side_effects_context(
 
     for drug, fda in fda_labels.items():
         drug_parts = [f"\n--- FDA LABEL: {drug.upper()} ---"]
-        for section in ("adverse_reactions", "boxed_warning", "warnings",
-                        "precautions", "patient_counseling_information"):
-            text = fda.get(section, "")
-            if text:
-                drug_parts.append(f"{section.upper()}: {text[:600]}")
+        # ONLY include ADVERSE REACTIONS for common_side_effects context.
+        # Warnings/boxed warnings are kept separate so Claude cannot confuse them
+        # with common effects.
+        adverse = fda.get("adverse_reactions", "")
+        if adverse:
+            drug_parts.append(f"ADVERSE_REACTIONS: {adverse[:800]}")
+        # Boxed warning provided as reference only — explicitly NOT for common_side_effects
+        boxed = fda.get("boxed_warning", "")
+        if boxed:
+            drug_parts.append(f"[REFERENCE ONLY - DO NOT USE FOR common_side_effects] BOXED_WARNING: {boxed[:300]}")
         if len(drug_parts) > 1:
             parts.append("\n".join(drug_parts))
 
@@ -750,10 +755,9 @@ def _try_gemini_generic(system_prompt: str, user_message: str) -> Explanation | 
         logger.warning("[Gemini] No Gemini key set — skipping Gemini fallback")
         return None
     try:
-        _genai.configure(api_key=gemini_key)
-        model = _genai.GenerativeModel("gemini-1.5-flash")
+        client = _genai.Client(api_key=gemini_key)
         full_prompt = f"{system_prompt}\n\n{user_message}\n\nRespond with valid JSON only."
-        response = model.generate_content(full_prompt)
+        response = client.models.generate_content(model="gemini-2.0-flash", contents=full_prompt)
         if not response or not hasattr(response, "text") or not response.text:
             raise RuntimeError("Gemini returned empty response")
         raw = response.text.strip()
@@ -782,10 +786,9 @@ def _try_gemini_side_effects(system_prompt: str, user_message: str) -> Explanati
         logger.warning("[Gemini] No Gemini key set — skipping Gemini fallback")
         return None
     try:
-        _genai.configure(api_key=gemini_key)
-        model = _genai.GenerativeModel("gemini-1.5-flash")
+        client = _genai.Client(api_key=gemini_key)
         full_prompt = f"{system_prompt}\n\n{user_message}\n\nRespond with valid JSON only."
-        response = model.generate_content(full_prompt)
+        response = client.models.generate_content(model="gemini-2.0-flash", contents=full_prompt)
         if not response or not hasattr(response, "text") or not response.text:
             raise RuntimeError("Gemini returned empty response")
         raw = response.text.strip()

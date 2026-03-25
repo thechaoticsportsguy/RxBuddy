@@ -11,6 +11,6 @@ sentence-transformers
 streamlit
 plotly
 anthropic
-google-generativeai
+google-genai
 pyspellchecker
 aiohttp
