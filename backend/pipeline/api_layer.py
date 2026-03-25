@@ -40,6 +40,7 @@ OPENFDA_ENFORCE_URL    = "https://api.fda.gov/drug/enforcement.json"
 RXNORM_RXCUI_URL       = "https://rxnav.nlm.nih.gov/REST/rxcui.json"
 RXNAV_INTERACT_URL     = "https://rxnav.nlm.nih.gov/REST/interaction/list.json"
 MEDLINEPLUS_URL        = "https://connect.medlineplus.gov/application"
+DAILYMED_SPL_URL       = "https://dailymed.nlm.nih.gov/dailymed/services/v2/spls.json"
 
 API_TIMEOUT = 1.5   # seconds — hard timeout per request
 HEADERS     = {"User-Agent": "RxBuddy/2.0"}
@@ -63,6 +64,8 @@ class APIResults:
     rxnav_interactions: list[dict]      = field(default_factory=list)
     # RxCUI lookups
     rxcuis: dict[str, str]              = field(default_factory=dict)
+    # DailyMed SET IDs
+    dailymed_setids: dict[str, str]     = field(default_factory=dict)
     # Which sources returned data
     sources_used: list[str]             = field(default_factory=list)
     # Errors encountered (logged, not raised)
@@ -318,6 +321,224 @@ async def fetch_recalls(drug_name: str) -> list[dict]:
     ]
 
 
+
+async def fetch_dailymed_setid(drug_name: str) -> str | None:
+    """Look up the DailyMed SET ID for a drug to build source URLs."""
+    if not drug_name:
+        return None
+    data = await _async_get(DAILYMED_SPL_URL, params={
+        "drug_name": drug_name, "page": "1", "pagesize": "1"
+    })
+    if not data:
+        return None
+    results = data.get("data", [])
+    if results:
+        return results[0].get("setid")
+    return None
+
+
+def parse_structured_side_effects(
+    drug_name: str,
+    fda_label: dict | None,
+    raw_label: dict | None,
+    faers_terms: list[str] | None = None,
+    dailymed_setid: str | None = None,
+) -> dict:
+    """
+    Parse raw FDA label data into a structured side effects object with
+    frequency tiers, boxed warnings, mechanism of action, and source URLs.
+    """
+    result: dict = {
+        "drug_name": drug_name,
+        "side_effects": {
+            "very_common": {"label": "Very Common (>10%)", "items": []},
+            "common":      {"label": "Common (1-10%)",    "items": []},
+            "uncommon":    {"label": "Uncommon (<1%)",     "items": []},
+            "serious":     {"label": "Serious — Seek Immediate Medical Attention", "items": [], "urgent": True},
+        },
+        "boxed_warnings": [],
+        "mechanism_of_action": {
+            "summary": "",
+            "pharmacologic_class": "",
+            "molecular_targets": [],
+            "detail": "",
+        },
+        "sources": [],
+    }
+
+    if not fda_label and not raw_label:
+        return result
+
+    # ── Extract metadata from raw openFDA label ──────────────────────────────
+    openfda = (raw_label or {}).get("openfda", {}) if raw_label else {}
+    set_ids = openfda.get("set_id", [])
+    set_id = set_ids[0] if set_ids else None
+    app_nums = openfda.get("application_number", [])
+    nda = app_nums[0] if app_nums else None
+    pharm_moa = openfda.get("pharm_class_moa", [])
+    pharm_epc = openfda.get("pharm_class_epc", [])
+    brand_names = openfda.get("brand_name", [])
+    generic_names = openfda.get("generic_name", [])
+
+    result["brand_names"] = brand_names[:5]
+    result["generic_name"] = generic_names[0] if generic_names else drug_name
+
+    # ── Build source URLs ────────────────────────────────────────────────────
+    effective_setid = dailymed_setid or set_id
+    last_updated = ""
+    if raw_label:
+        eff_date = raw_label.get("effective_time", "")
+        if eff_date and len(eff_date) >= 8:
+            last_updated = f"{eff_date[:4]}-{eff_date[4:6]}-{eff_date[6:8]}"
+
+    if effective_setid:
+        result["sources"].append({
+            "id": 1,
+            "name": f"DailyMed — {drug_name.title()} label",
+            "url": f"https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid={effective_setid}",
+            "section": "ADVERSE REACTIONS",
+            "last_updated": last_updated,
+        })
+    if nda:
+        result["sources"].append({
+            "id": 2,
+            "name": "Drugs@FDA Application",
+            "url": f"https://www.accessdata.fda.gov/scripts/cder/daf/index.cfm?event=overview.process&ApplNo={nda}",
+            "section": "FDA Label",
+            "last_updated": last_updated,
+        })
+    # Generic openFDA source always included
+    result["sources"].append({
+        "id": len(result["sources"]) + 1,
+        "name": "openFDA Drug Label API",
+        "url": f'https://api.fda.gov/drug/label.json?search=openfda.generic_name:"{drug_name}"&limit=1',
+        "section": "adverse_reactions",
+        "last_updated": last_updated,
+    })
+
+    # ── Boxed warnings ───────────────────────────────────────────────────────
+    boxed = (fda_label or {}).get("boxed_warning", "")
+    if boxed:
+        result["boxed_warnings"] = [s.strip() for s in boxed.split(".") if len(s.strip()) > 10][:3]
+
+    # ── Mechanism of action ──────────────────────────────────────────────────
+    clin_pharm = (fda_label or {}).get("clinical_pharmacology", "")
+    description = (fda_label or {}).get("description", "")
+    moa_class = pharm_moa[0] if pharm_moa else ""
+    epc_class = pharm_epc[0] if pharm_epc else ""
+
+    result["mechanism_of_action"]["pharmacologic_class"] = epc_class or moa_class
+    if moa_class:
+        result["mechanism_of_action"]["molecular_targets"] = [moa_class.replace(" [MoA]", "")]
+
+    if clin_pharm:
+        # Take up to 2 sentences for summary, full text for detail
+        sentences = [s.strip() + "." for s in clin_pharm.split(".") if len(s.strip()) > 15]
+        result["mechanism_of_action"]["summary"] = " ".join(sentences[:2])[:300]
+        result["mechanism_of_action"]["detail"] = " ".join(sentences[:5])[:800]
+    elif description:
+        sentences = [s.strip() + "." for s in description.split(".") if len(s.strip()) > 15]
+        result["mechanism_of_action"]["summary"] = " ".join(sentences[:2])[:300]
+        result["mechanism_of_action"]["detail"] = " ".join(sentences[:4])[:600]
+
+    # ── Parse adverse reactions into frequency tiers ──────────────────────────
+    adverse_text = (fda_label or {}).get("adverse_reactions", "")
+    warnings_text = (fda_label or {}).get("warnings", "")
+
+    # Heuristic frequency parsing from FDA label text
+    _classify_effects_from_text(adverse_text, result["side_effects"])
+
+    # Merge FAERS terms into common if we didn't get enough from label text
+    if faers_terms:
+        existing = set()
+        for tier in result["side_effects"].values():
+            existing.update(s.lower() for s in tier.get("items", []))
+        for term in faers_terms:
+            clean = term.strip().lower()
+            if clean and clean not in existing and len(clean) > 2:
+                result["side_effects"]["common"]["items"].append(clean.title())
+                existing.add(clean)
+                if len(result["side_effects"]["common"]["items"]) >= 12:
+                    break
+
+    # Extract serious effects from warnings section
+    if warnings_text:
+        _extract_serious_from_warnings(warnings_text, result["side_effects"]["serious"]["items"])
+
+    return result
+
+
+def _classify_effects_from_text(text: str, tiers: dict) -> None:
+    """Parse FDA adverse reactions text and classify into frequency tiers."""
+    if not text:
+        return
+
+    # Common frequency markers in FDA labels
+    text_lower = text.lower()
+
+    # Extract individual effect terms from the text
+    # Split by common delimiters: commas, semicolons, bullet patterns
+    import re as _re
+    # Remove HTML-like tags
+    clean = _re.sub(r"<[^>]+>", " ", text)
+    # Find terms that look like side effects (short phrases)
+    parts = _re.split(r"[,;•·\n]+", clean)
+    effects = []
+    for p in parts:
+        t = p.strip()
+        # Remove leading dashes or bullets
+        t = _re.sub(r"^[-–—\*\d\.\)]+\s*", "", t).strip()
+        if 3 < len(t) < 60 and not t[0].isdigit():
+            # Skip lines that are headers or percentages
+            if any(skip in t.lower() for skip in ["adverse reaction", "table ", "the following", "section", "clinical trial", "placebo"]):
+                continue
+            effects.append(t)
+
+    # Classify by frequency keywords in surrounding text
+    very_common_kw = ["most common", ">10%", "≥10%", "very common", "most frequently"]
+    uncommon_kw = ["rare", "<1%", "uncommon", "infrequent", "isolated"]
+    serious_kw = ["fatal", "life-threatening", "death", "anaphylaxis", "stevens-johnson",
+                  "hepatic failure", "cardiac arrest", "renal failure", "hemorrhage"]
+
+    for effect in effects:
+        eff_lower = effect.lower()
+        # Check if this effect matches serious keywords
+        if any(kw in eff_lower for kw in serious_kw):
+            if effect not in tiers["serious"]["items"]:
+                tiers["serious"]["items"].append(effect)
+        elif any(kw in text_lower[:text_lower.find(eff_lower) + 100] for kw in very_common_kw if eff_lower in text_lower):
+            if effect not in tiers["very_common"]["items"]:
+                tiers["very_common"]["items"].append(effect)
+        elif any(kw in text_lower[:text_lower.find(eff_lower) + 100] for kw in uncommon_kw if eff_lower in text_lower):
+            if effect not in tiers["uncommon"]["items"]:
+                tiers["uncommon"]["items"].append(effect)
+        else:
+            if effect not in tiers["common"]["items"]:
+                tiers["common"]["items"].append(effect)
+
+    # Cap each tier
+    for key in tiers:
+        tiers[key]["items"] = tiers[key]["items"][:10]
+
+
+def _extract_serious_from_warnings(text: str, serious_items: list) -> None:
+    """Extract serious/life-threatening effects from the warnings section."""
+    import re as _re
+    serious_kw = ["fatal", "death", "life-threatening", "anaphyla", "stevens-johnson",
+                  "hepatic failure", "renal failure", "hemorrhag", "cardiac",
+                  "suicidal", "stroke", "heart attack", "gi bleed", "perforation"]
+    sentences = _re.split(r"[.;]", text)
+    existing = set(s.lower() for s in serious_items)
+    for sent in sentences:
+        clean = sent.strip()
+        if any(kw in clean.lower() for kw in serious_kw) and len(clean) > 10:
+            short = clean[:100]
+            if short.lower() not in existing:
+                serious_items.append(short)
+                existing.add(short.lower())
+    serious_items[:] = serious_items[:6]
+
+
 # ── Main parallel fetch orchestrator ─────────────────────────────────────────
 
 async def fetch_all(
@@ -360,6 +581,9 @@ async def fetch_all(
 
     # Recalls for primary drug
     tasks["recalls"] = fetch_recalls(primary_drug)
+
+    # DailyMed SET ID for primary drug (for source URL building)
+    tasks["dailymed"] = fetch_dailymed_setid(primary_drug)
 
     # RxNav interactions (only for interaction intent with 2+ drugs)
     if intent == "interaction" and len(drug_names) >= 2:
@@ -411,6 +635,13 @@ async def fetch_all(
     if rec and not isinstance(rec, Exception) and rec:
         results.recalls[primary_drug] = rec
         results.sources_used.append("FDA Enforcement")
+
+    # DailyMed SET ID
+    dm = fetched.get("dailymed")
+    if dm and not isinstance(dm, Exception):
+        results.dailymed_setids[primary_drug] = dm
+        if "DailyMed" not in results.sources_used:
+            results.sources_used.append("DailyMed")
 
     # RxCUIs + interactions
     rxcui_0 = fetched.get("rxcui_0")

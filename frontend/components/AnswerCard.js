@@ -12,6 +12,7 @@
  */
 
 import Head from "next/head";
+import { useState } from "react";
 
 // ── Verdict config ─────────────────────────────────────────────────────────────
 
@@ -389,6 +390,133 @@ function filterBanned(items) {
   });
 }
 
+// ── TierSection — collapsible side-effect frequency tier ────────────────────
+
+function TierSection({ tier, defaultExpanded, sources }) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  const headingId = `tier-${tier.label.replace(/\s+/g, "-").toLowerCase()}`;
+
+  return (
+    <section
+      aria-labelledby={headingId}
+      className={`rounded-lg border ${tier.borderColor} ${tier.bgColor} overflow-hidden`}
+    >
+      <button
+        type="button"
+        className="w-full flex items-center justify-between px-4 py-2.5 text-left"
+        onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
+        aria-controls={`${headingId}-content`}
+      >
+        <h3 id={headingId} className={`text-xs font-bold uppercase tracking-wider ${tier.color} flex items-center gap-2`}>
+          <span aria-hidden="true">{tier.icon}</span>
+          {tier.label}
+          <span className="text-xs font-normal text-slate-400">({tier.items.length})</span>
+        </h3>
+        <span className="text-slate-400 text-sm" aria-hidden="true">
+          {expanded ? "▲" : "▼"}
+        </span>
+      </button>
+
+      {expanded && (
+        <div id={`${headingId}-content`} className="px-4 pb-3">
+          <ul className="space-y-1" role="list">
+            {tier.items.map((item, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${tier.dotColor}`} aria-hidden="true" />
+                {item}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ── MechanismSection — expandable mechanism of action ────────────────────────
+
+function MechanismSection({ summary, detail, pharmacologicClass, targets, sources }) {
+  const [showDetail, setShowDetail] = useState(false);
+
+  return (
+    <section aria-labelledby="moa-heading" className="rounded-lg border border-blue-200 bg-blue-50 overflow-hidden">
+      <div className="px-4 py-2.5">
+        <h3 id="moa-heading" className="text-xs font-bold uppercase tracking-wider text-blue-700 mb-1.5">
+          How It Works
+        </h3>
+        <p className="text-sm leading-relaxed text-slate-700">{summary}</p>
+
+        {(pharmacologicClass || targets.length > 0) && (
+          <div className="flex flex-wrap gap-2 mt-2">
+            {pharmacologicClass && (
+              <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-700 border border-blue-200">
+                {pharmacologicClass}
+              </span>
+            )}
+            {targets.map((t, i) => (
+              <span key={i} className="rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-700 border border-indigo-200">
+                Target: {t}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {detail && detail !== summary && (
+          <button
+            type="button"
+            className="mt-2 text-xs font-medium text-blue-600 hover:text-blue-800 transition-colors"
+            onClick={() => setShowDetail(!showDetail)}
+          >
+            {showDetail ? "Show less ▲" : "Show full detail ▼"}
+          </button>
+        )}
+
+        {showDetail && detail && (
+          <p className="mt-2 text-sm text-slate-600 leading-relaxed border-t border-blue-200 pt-2">
+            {detail}
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ── SourceCitations — numbered inline citations with real URLs ────────────────
+
+function SourceCitations({ sources }) {
+  if (!sources?.length) return null;
+  return (
+    <section aria-labelledby="sources-heading" className="border-t border-yellow-200 pt-3">
+      <h3 id="sources-heading" className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">
+        Sources
+      </h3>
+      <ol className="space-y-1.5" role="list">
+        {sources.map((src) => (
+          <li key={src.id} className="flex items-start gap-2 text-xs text-slate-500">
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 font-bold text-[10px]">
+              {src.id}
+            </span>
+            <div>
+              <a
+                href={src.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-emerald-600 hover:underline font-medium"
+                title={`${src.name} — ${src.section}${src.last_updated ? ` (updated ${src.last_updated})` : ""}`}
+              >
+                {src.name}
+              </a>
+              {src.section && <span className="text-slate-400"> — {src.section}</span>}
+              {src.last_updated && <span className="text-slate-400"> (updated {src.last_updated})</span>}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
 // ── Main export ────────────────────────────────────────────────────────────────
 
 export default function AnswerCard({ result, query }) {
@@ -407,11 +535,67 @@ export default function AnswerCard({ result, query }) {
     const warnSigns = filterBanned(sanitizeItems(structured.warning_signs || structured.when_to_get_help));
     const mechText = stripMarkdown(structured.mechanism || structured.mechanism_simple || structured.article || "");
     const studies = Array.isArray(structured.pubmed_studies) ? structured.pubmed_studies : [];
-    const hasData = commonSE.length > 0;
+
+    // ── New tiered data from structured parsing ─────────────────────────────
+    const seData = structured.side_effects_data || {};
+    const boxedWarnings = Array.isArray(structured.boxed_warnings) ? structured.boxed_warnings : [];
+    const moaObj = structured.mechanism_of_action || {};
+    const structuredSources = Array.isArray(structured.structured_sources) ? structured.structured_sources : [];
+    const brandNames = Array.isArray(structured.brand_names) ? structured.brand_names : [];
+    const genericName = structured.generic_name || "";
+
+    // Build tiers — prefer structured tiers, fall back to flat lists
+    const tiers = {
+      serious: {
+        label: seData?.serious?.label || "Serious — Seek Immediate Medical Attention",
+        items: filterBanned(sanitizeItems(seData?.serious?.items || seriousSE)),
+        urgent: true,
+        color: "text-red-700",
+        dotColor: "bg-red-500",
+        bgColor: "bg-red-50",
+        borderColor: "border-red-200",
+        icon: "🔴",
+      },
+      very_common: {
+        label: seData?.very_common?.label || "Very Common (>10%)",
+        items: filterBanned(sanitizeItems(seData?.very_common?.items || [])),
+        color: "text-orange-700",
+        dotColor: "bg-orange-400",
+        bgColor: "bg-orange-50",
+        borderColor: "border-orange-200",
+        icon: "🟠",
+      },
+      common: {
+        label: seData?.common?.label || "Common (1-10%)",
+        items: filterBanned(sanitizeItems(seData?.common?.items || commonSE)),
+        color: "text-yellow-700",
+        dotColor: "bg-yellow-400",
+        bgColor: "bg-yellow-50",
+        borderColor: "border-yellow-200",
+        icon: "🟡",
+      },
+      uncommon: {
+        label: seData?.uncommon?.label || "Uncommon / Rare (<1%)",
+        items: filterBanned(sanitizeItems(seData?.uncommon?.items || [])),
+        color: "text-slate-600",
+        dotColor: "bg-slate-400",
+        bgColor: "bg-slate-50",
+        borderColor: "border-slate-200",
+        icon: "⚪",
+      },
+    };
+
+    const hasAnyData = Object.values(tiers).some(t => t.items.length > 0);
     const cautionCfg = VERDICT_CONFIG.CAUTION;
 
+    // Mechanism display — prefer structured, fall back to flat
+    const moaSummary = moaObj.summary || mechText || "";
+    const moaDetail = moaObj.detail || "";
+    const moaClass = moaObj.pharmacologic_class || "";
+    const moaTargets = Array.isArray(moaObj.molecular_targets) ? moaObj.molecular_targets : [];
+
     // Empty state — no real side effects data
-    if (!hasData) {
+    if (!hasAnyData) {
       return (
         <article className="rounded-xl border border-yellow-300 shadow-sm overflow-hidden" aria-label="Side effects information" role="article">
           <VerdictBanner config={cautionCfg} />
@@ -429,46 +613,61 @@ export default function AnswerCard({ result, query }) {
       );
     }
 
-    // ── Unified side effects card — identical for dataset AND AI ──────────────
+    // ── Full tiered side effects card ──────────────────────────────────────────
     return (
       <article className="rounded-xl border border-yellow-300 shadow-sm overflow-hidden" aria-label="Side effects information — use with caution" role="article">
         <VerdictBanner config={cautionCfg} />
-        <div className="bg-yellow-50 p-5 space-y-4">
 
-          {/* COMMON SIDE EFFECTS */}
-          <section aria-labelledby="se-common-heading">
-            <h3 id="se-common-heading" className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-600">COMMON SIDE EFFECTS</h3>
-            <ul className="space-y-1" role="list">
-              {commonSE.map((x, i) => (
-                <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-yellow-400" aria-hidden="true" />
-                  {x}
-                </li>
-              ))}
-            </ul>
-          </section>
+        {/* Brand-to-generic resolution header */}
+        {(brandNames.length > 0 || genericName) && (
+          <div className="bg-yellow-100 px-5 py-2 border-b border-yellow-200">
+            <p className="text-xs text-slate-600">
+              Showing results for <strong className="text-slate-800">{genericName || structured.drug || ""}</strong>
+              {brandNames.length > 0 && (
+                <span className="text-slate-500"> ({brandNames.join(", ")})</span>
+              )}
+            </p>
+          </div>
+        )}
 
-          {/* SERIOUS BUT RARE */}
-          {seriousSE.length > 0 && (
-            <section aria-labelledby="se-serious-heading">
-              <h3 id="se-serious-heading" className="mb-2 text-xs font-bold uppercase tracking-wider text-orange-700">SERIOUS BUT RARE</h3>
-              <ul className="space-y-1" role="list">
-                {seriousSE.map((x, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-orange-400" aria-hidden="true" />
-                    {x}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+        {/* BOXED WARNING BANNER */}
+        {boxedWarnings.length > 0 && (
+          <div className="mx-5 mt-4 rounded-lg border-2 border-black bg-white p-4" role="alert" aria-live="assertive">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-lg" aria-hidden="true">⚠️</span>
+              <h3 className="text-sm font-black uppercase tracking-wider text-black">FDA Boxed Warning</h3>
+            </div>
+            {boxedWarnings.map((w, i) => (
+              <p key={i} className="text-sm text-slate-800 leading-relaxed mt-1">{w}.</p>
+            ))}
+          </div>
+        )}
 
-          {/* HOW IT WORKS */}
-          {mechText && (
-            <section aria-labelledby="se-mechanism-heading">
-              <h3 id="se-mechanism-heading" className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-600">HOW IT WORKS</h3>
-              <p className="text-sm leading-relaxed text-slate-700">{mechText}</p>
-            </section>
+        <div className="bg-yellow-50 p-5 space-y-3">
+
+          {/* TIERED SIDE EFFECTS */}
+          {Object.entries(tiers).map(([key, tier]) => {
+            if (tier.items.length === 0) return null;
+            const defaultExpanded = key === "serious" || key === "very_common" || key === "common";
+            return (
+              <TierSection
+                key={key}
+                tier={tier}
+                defaultExpanded={defaultExpanded}
+                sources={structuredSources}
+              />
+            );
+          })}
+
+          {/* MECHANISM OF ACTION */}
+          {moaSummary && (
+            <MechanismSection
+              summary={moaSummary}
+              detail={moaDetail}
+              pharmacologicClass={moaClass}
+              targets={moaTargets}
+              sources={structuredSources}
+            />
           )}
 
           {/* WHEN TO GET HELP */}
@@ -507,14 +706,28 @@ export default function AnswerCard({ result, query }) {
             </section>
           )}
 
-          {/* Footer */}
+          {/* INLINE CITATIONS / SOURCES */}
+          {structuredSources.length > 0 ? (
+            <SourceCitations sources={structuredSources} />
+          ) : (
+            <div className="border-t border-yellow-200 pt-3">
+              <p className="text-xs text-slate-400 italic">
+                Data sourced from{" "}
+                <a href="https://dailymed.nlm.nih.gov" target="_blank" rel="noopener noreferrer" className="underline">DailyMed</a>{" "}
+                and{" "}
+                <a href="https://www.fda.gov/drugs" target="_blank" rel="noopener noreferrer" className="underline">Drugs@FDA</a>
+                . Not medical advice — always consult a licensed healthcare provider.
+              </p>
+            </div>
+          )}
+
+          {/* MEDICAL DISCLAIMER + MEDWATCH */}
           <div className="border-t border-yellow-200 pt-3">
             <p className="text-xs text-slate-400 italic">
-              Data sourced from{" "}
-              <a href="https://dailymed.nlm.nih.gov" target="_blank" rel="noopener noreferrer" className="underline">DailyMed</a>{" "}
-              and{" "}
-              <a href="https://www.fda.gov/drugs" target="_blank" rel="noopener noreferrer" className="underline">Drugs@FDA</a>
-              . Not medical advice — always consult a licensed healthcare provider.
+              This information is for educational purposes only and is not a substitute for professional medical advice. Always consult your doctor or pharmacist.{" "}
+              <a href="https://www.fda.gov/safety/medwatch-fda-safety-information-and-adverse-event-reporting-program" target="_blank" rel="noopener noreferrer" className="underline text-slate-500">
+                Report side effects to FDA MedWatch
+              </a>.
             </p>
           </div>
         </div>

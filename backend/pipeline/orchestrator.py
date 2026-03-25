@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 
 from pipeline.classifier import Intent, classify_fast, is_emergency
 from pipeline.drug_extractor import extract_drug_names, normalize_drug_names, normalize_query
-from pipeline.api_layer import fetch_all, APIResults
+from pipeline.api_layer import fetch_all, APIResults, parse_structured_side_effects
 from pipeline.decision_engine import compute_verdict, DecisionResult, EMERGENCY
 from pipeline.claude_explainer import generate_explanation, Explanation
 from pipeline.verdict_enforcer import enforce_verdict
@@ -99,6 +99,22 @@ def _build_structured_answer(
     # Build source string
     sources = " | ".join(api_results.sources_used) if api_results.sources_used else "Pharmacist consultation recommended"
 
+    # ── Structured side effects (tiered) for side_effects intent ──────────────
+    primary_drug = drug_names[0] if drug_names else ""
+    se_data = {}
+    if intent == "side_effects" and primary_drug:
+        fda_label = api_results.fda_labels.get(primary_drug)
+        raw_label = api_results.fda_raw_labels.get(primary_drug)
+        faers = api_results.adverse_events.get(primary_drug, [])
+        dm_setid = api_results.dailymed_setids.get(primary_drug)
+        se_data = parse_structured_side_effects(
+            drug_name=primary_drug,
+            fda_label=fda_label,
+            raw_label=raw_label,
+            faers_terms=faers,
+            dailymed_setid=dm_setid,
+        )
+
     return {
         "verdict": verdict,
         "answer": explanation.answer,
@@ -107,13 +123,20 @@ def _build_structured_answer(
         "details": explanation.details,
         "action": explanation.action,
         "article": explanation.article,
-        # ── Side-effects structured fields (populated when intent == "side_effects") ──
+        # ── Side-effects structured fields (flat — backward compat) ──
         "common_side_effects": explanation.common_side_effects,
         "serious_side_effects": explanation.serious_side_effects,
         "warning_signs": explanation.warning_signs,
         "higher_risk_groups": explanation.higher_risk_groups,
         "what_to_do": explanation.what_to_do,
         "mechanism": explanation.article if intent == "side_effects" else "",
+        # ── NEW: Tiered side effects, boxed warnings, mechanism, sources ──
+        "side_effects_data": se_data.get("side_effects", {}) if se_data else {},
+        "boxed_warnings": se_data.get("boxed_warnings", []) if se_data else [],
+        "mechanism_of_action": se_data.get("mechanism_of_action", {}) if se_data else {},
+        "structured_sources": se_data.get("sources", []) if se_data else [],
+        "brand_names": se_data.get("brand_names", []) if se_data else [],
+        "generic_name": se_data.get("generic_name", primary_drug) if se_data else primary_drug,
         "drugs": drug_names,
         # Legacy fields (kept for frontend backward compat)
         "direct": explanation.answer,
