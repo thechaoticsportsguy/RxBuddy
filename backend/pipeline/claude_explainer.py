@@ -538,6 +538,7 @@ for _alias, _generic in [
 # ── Banned generic phrases — these must never appear in side-effects bullets ───
 
 _BANNED_SE_PHRASES = [
+    # Generic disclaimers (trigger retry)
     "side effects vary",
     "consult your pharmacist for a complete list",
     "consult your pharmacist or prescriber for a complete list",
@@ -545,6 +546,25 @@ _BANNED_SE_PHRASES = [
     "contact your provider if you experience unusual symptoms",
     "read the patient information leaflet",
 ]
+
+# Items that must never appear in common_side_effects — they are fatal outcomes,
+# regulatory labels, or rare serious events misclassified from the warnings section.
+_COMMON_SE_BLOCKLIST = frozenset([
+    "death", "overdose", "addiction", "dependence", "abuse", "drug dependence",
+    "opioid addiction", "drug abuse", "substance abuse",
+    "cardiac arrest", "respiratory arrest", "circulatory depression",
+    "respiratory depression", "respiratory failure",
+    "cardiac failure", "congestive heart failure", "cardiac failure congestive",
+    "atrial fibrillation", "cardiac arrhythmia", "cardiac arrhythmias",
+    "hypertrophic cardiomyopathy", "cardiac enlargement",
+    "circulatory collapse", "pulmonary edema", "fat embolism",
+    "anaphylaxis", "anaphylactic shock",
+    "acute kidney injury", "chronic kidney disease", "renal failure",
+    "liver failure", "hepatic failure",
+    "off-label use", "off label use", "drug ineffective",
+    "sedation", "coma",
+    "pain", "asthenia",  # too vague / lifted from outcome tables
+])
 
 
 def _has_banned_phrases(items: list[str]) -> bool:
@@ -555,6 +575,18 @@ def _has_banned_phrases(items: list[str]) -> bool:
             if phrase in lower:
                 return True
     return False
+
+
+def _filter_common_se(items: list[str]) -> list[str]:
+    """Remove fatal outcomes, regulatory labels and rare serious events from common_side_effects."""
+    result = []
+    for item in items:
+        lower = item.strip().lower()
+        if any(blocked in lower for blocked in _COMMON_SE_BLOCKLIST):
+            logger.debug("[SE-Filter] Removed misclassified item from common: %r", item)
+            continue
+        result.append(item)
+    return result
 
 
 def _build_fallback_side_effects(
@@ -641,8 +673,17 @@ Do NOT mention other drugs.
 
 You MUST return real, specific, named side effects from FDA label data.
 
+CRITICAL RULES for common_side_effects:
+- ONLY include effects from the ADVERSE REACTIONS section of the label.
+- NEVER include items from WARNINGS, BOXED WARNING, or PRECAUTIONS in common_side_effects.
+- NEVER list any of the following as common: death, overdose, addiction, dependence, abuse,
+  cardiac arrest, respiratory arrest, respiratory depression, circulatory depression,
+  cardiac failure, atrial fibrillation, anaphylaxis, acute kidney injury, chronic kidney disease,
+  pulmonary edema, fat embolism, coma, "off-label use", "drug ineffective".
+  These belong in serious_side_effects only if clinically relevant, or must be omitted.
+
 For {drugs}, list:
-- common_side_effects: the 4-6 most frequently reported side effects
+- common_side_effects: 4-6 effects that occur in 1-10% of patients from the ADVERSE REACTIONS table
   (e.g. "nausea", "headache", "dizziness", "dry mouth")
 - serious_side_effects: 2-4 serious or rare but important side effects
   (e.g. "liver damage", "severe allergic reaction", "QT prolongation")
@@ -751,7 +792,7 @@ def _try_gemini_side_effects(system_prompt: str, user_message: str) -> Explanati
         if raw.startswith("```"):
             raw = "\n".join(l for l in raw.splitlines() if not l.strip().startswith("```")).strip()
         parsed = json.loads(raw)
-        common = list(parsed.get("common_side_effects", []))[:6]
+        common = _filter_common_se(list(parsed.get("common_side_effects", []))[:6])
         serious = list(parsed.get("serious_side_effects", []))[:4]
         mechanism = str(parsed.get("mechanism_simple", ""))[:300]
         short_answer = str(parsed.get("short_answer", ""))[:300]
@@ -977,7 +1018,7 @@ def _generate_side_effects_explanation(
 
             parsed = json.loads(raw)
 
-            common = list(parsed.get("common_side_effects", []))[:6]
+            common = _filter_common_se(list(parsed.get("common_side_effects", []))[:6])
             serious = list(parsed.get("serious_side_effects", []))[:4]
             mechanism = str(parsed.get("mechanism_simple", ""))[:300]
             short_answer = str(parsed.get("short_answer", ""))[:300]
