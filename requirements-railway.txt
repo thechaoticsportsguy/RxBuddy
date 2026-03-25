@@ -10,4 +10,5 @@ uvicorn[standard]
 streamlit
 plotly
 anthropic
+google-generativeai
 pyspellchecker

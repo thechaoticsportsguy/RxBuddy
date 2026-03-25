@@ -27,6 +27,15 @@ import logging
 import os
 from dataclasses import dataclass, field
 
+try:
+    import google.generativeai as _genai
+    _GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+    if _GEMINI_API_KEY:
+        _genai.configure(api_key=_GEMINI_API_KEY)
+except ImportError:
+    _genai = None  # type: ignore
+    _GEMINI_API_KEY = None
+
 logger = logging.getLogger("rxbuddy.pipeline.claude_explainer")
 
 
@@ -670,6 +679,78 @@ EVIDENCE:
 {context}"""
 
 
+def _try_gemini_generic(system_prompt: str, user_message: str) -> Explanation | None:
+    """Try Gemini as a fallback for the generic explanation flow. Returns None on failure."""
+    if not _genai or not _GEMINI_API_KEY:
+        logger.warning("[Gemini] No Gemini key set — skipping Gemini fallback")
+        return None
+    try:
+        model = _genai.GenerativeModel("gemini-1.5-flash")
+        full_prompt = f"{system_prompt}\n\n{user_message}\n\nRespond with valid JSON only."
+        response = model.generate_content(full_prompt)
+        if not response or not hasattr(response, "text") or not response.text:
+            raise RuntimeError("Gemini returned empty response")
+        raw = response.text.strip()
+        if raw.startswith("```"):
+            raw = "\n".join(l for l in raw.splitlines() if not l.strip().startswith("```")).strip()
+        parsed = json.loads(raw)
+        result = Explanation(
+            answer=str(parsed.get("explanation", ""))[:300],
+            warning=str(parsed.get("warning", ""))[:200],
+            details=list(parsed.get("key_points", []))[:3],
+            action=list(parsed.get("action", []))[:3],
+            article=str(parsed.get("explanation", ""))[:300],
+            from_claude=False,
+        )
+        logger.info("[Gemini] Generic explanation generated (%d chars)", len(result.answer))
+        return result
+    except Exception as exc:
+        logger.warning("[Gemini] Generic fallback failed: %s", exc)
+        return None
+
+
+def _try_gemini_side_effects(system_prompt: str, user_message: str) -> Explanation | None:
+    """Try Gemini as a fallback for the side-effects flow. Returns None on failure."""
+    if not _genai or not _GEMINI_API_KEY:
+        logger.warning("[Gemini] No Gemini key set — skipping Gemini fallback")
+        return None
+    try:
+        model = _genai.GenerativeModel("gemini-1.5-flash")
+        full_prompt = f"{system_prompt}\n\n{user_message}\n\nRespond with valid JSON only."
+        response = model.generate_content(full_prompt)
+        if not response or not hasattr(response, "text") or not response.text:
+            raise RuntimeError("Gemini returned empty response")
+        raw = response.text.strip()
+        if raw.startswith("```"):
+            raw = "\n".join(l for l in raw.splitlines() if not l.strip().startswith("```")).strip()
+        parsed = json.loads(raw)
+        common = list(parsed.get("common_side_effects", []))[:6]
+        serious = list(parsed.get("serious_side_effects", []))[:4]
+        mechanism = str(parsed.get("mechanism_simple", ""))[:300]
+        short_answer = str(parsed.get("short_answer", ""))[:300]
+        when_to_get_help = list(parsed.get("when_to_get_help", parsed.get("warning_signs", [])))[:4]
+        if not common:
+            raise RuntimeError("Gemini returned no side effects")
+        result = Explanation(
+            answer=short_answer or "Here are the known side effects.",
+            warning="Contact your healthcare provider if you experience severe or unusual symptoms.",
+            details=[],
+            action=[],
+            article=mechanism,
+            common_side_effects=common,
+            serious_side_effects=serious,
+            warning_signs=when_to_get_help,
+            higher_risk_groups=[],
+            what_to_do=[],
+            from_claude=False,
+        )
+        logger.info("[Gemini] Side-effects generated (%d common effects)", len(common))
+        return result
+    except Exception as exc:
+        logger.warning("[Gemini] Side-effects fallback failed: %s", exc)
+        return None
+
+
 def generate_explanation(
     intent: str,
     drug_names: list[str],
@@ -784,10 +865,16 @@ def generate_explanation(
         return result
 
     except json.JSONDecodeError:
-        logger.warning("[Claude] JSON parse failed — using fallback")
+        logger.warning("[Claude] JSON parse failed — trying Gemini fallback")
+        gemini_result = _try_gemini_generic(system_prompt, user_message)
+        if gemini_result:
+            return gemini_result
         return _build_fallback(verdict, reasoning, drug_names, intent)
     except Exception as exc:
-        logger.warning("[Claude] Failed: %s — using fallback", exc)
+        logger.warning("[Claude] Failed: %s — trying Gemini fallback", exc)
+        gemini_result = _try_gemini_generic(system_prompt, user_message)
+        if gemini_result:
+            return gemini_result
         return _build_fallback(verdict, reasoning, drug_names, intent)
 
 
@@ -876,8 +963,11 @@ def _generate_side_effects_explanation(
                         attempt + 1,
                     )
                     continue
-                # Max retries exhausted — fall through to fallback
-                logger.warning("[Claude-SE] All retries exhausted — using fallback")
+                # Max retries exhausted — try Gemini before static fallback
+                logger.warning("[Claude-SE] All retries exhausted — trying Gemini fallback")
+                gemini_result = _try_gemini_side_effects(system_prompt, user_message)
+                if gemini_result:
+                    return gemini_result
                 return _build_fallback_side_effects(drug_names, fda_labels)
 
             result = Explanation(
@@ -910,10 +1000,16 @@ def _generate_side_effects_explanation(
             if attempt < max_retries:
                 logger.warning("[Claude-SE] JSON parse failed (attempt %d) — retrying", attempt + 1)
                 continue
-            logger.warning("[Claude-SE] JSON parse failed after retries — using fallback")
+            logger.warning("[Claude-SE] JSON parse failed after retries — trying Gemini fallback")
+            gemini_result = _try_gemini_side_effects(system_prompt, user_message)
+            if gemini_result:
+                return gemini_result
             return _build_fallback_side_effects(drug_names, fda_labels)
         except Exception as exc:
-            logger.warning("[Claude-SE] Failed: %s — using per-drug fallback", exc)
+            logger.warning("[Claude-SE] Failed: %s — trying Gemini fallback", exc)
+            gemini_result = _try_gemini_side_effects(system_prompt, user_message)
+            if gemini_result:
+                return gemini_result
             return _build_fallback_side_effects(drug_names, fda_labels)
 
     # Should never reach here, but just in case
