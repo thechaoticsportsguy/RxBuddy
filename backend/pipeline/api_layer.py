@@ -45,6 +45,28 @@ DAILYMED_SPL_URL       = "https://dailymed.nlm.nih.gov/dailymed/services/v2/spls
 API_TIMEOUT = 1.5   # seconds — hard timeout per request
 HEADERS     = {"User-Agent": "RxBuddy/2.0"}
 
+# ── FAERS blocklist — terms that must never appear in the "common" bucket ──────
+# FAERS is a voluntary adverse-event reporting database biased toward serious /
+# fatal events.  These terms are fine in the "serious" tier but would be
+# dangerously misleading if listed as common (1-10%) side effects.
+_FAERS_COMMON_BLOCKLIST = frozenset([
+    "death", "died", "fatal", "fatality",
+    "cardiac arrest", "respiratory arrest", "cardiorespiratory arrest",
+    "respiratory failure", "respiratory depression",
+    "cardiac failure", "heart failure", "congestive heart failure",
+    "circulatory collapse", "circulatory depression",
+    "anaphylaxis", "anaphylactic shock", "anaphylactic reaction",
+    "overdose", "intentional overdose", "accidental overdose",
+    "addiction", "dependence", "drug dependence", "drug abuse",
+    "substance abuse", "opioid addiction",
+    "coma", "loss of consciousness",
+    "acute kidney injury", "renal failure", "hepatic failure", "liver failure",
+    "stroke", "cerebrovascular accident",
+    "pulmonary embolism", "pulmonary oedema",
+    "stevens-johnson", "toxic epidermal necrolysis",
+    "off-label use", "drug ineffective",
+])
+
 
 # ── Result container ──────────────────────────────────────────────────────────
 @dataclass
@@ -448,18 +470,25 @@ def parse_structured_side_effects(
     # Heuristic frequency parsing from FDA label text
     _classify_effects_from_text(adverse_text, result["side_effects"])
 
-    # Merge FAERS terms into common if we didn't get enough from label text
+    # Merge FAERS terms into common if we didn't get enough from label text.
+    # FAERS is an adverse-event reporting database biased toward serious/fatal events,
+    # so we filter out any term that matches the serious-event blocklist before
+    # adding it to the "common" bucket.
     if faers_terms:
         existing = set()
         for tier in result["side_effects"].values():
             existing.update(s.lower() for s in tier.get("items", []))
         for term in faers_terms:
             clean = term.strip().lower()
-            if clean and clean not in existing and len(clean) > 2:
-                result["side_effects"]["common"]["items"].append(clean.title())
-                existing.add(clean)
-                if len(result["side_effects"]["common"]["items"]) >= 12:
-                    break
+            if not clean or clean in existing or len(clean) <= 2:
+                continue
+            # Skip serious/fatal FAERS terms — they don't belong in "common"
+            if any(blocked in clean for blocked in _FAERS_COMMON_BLOCKLIST):
+                continue
+            result["side_effects"]["common"]["items"].append(clean.title())
+            existing.add(clean)
+            if len(result["side_effects"]["common"]["items"]) >= 12:
+                break
 
     # Extract serious effects from warnings section
     if warnings_text:
@@ -513,6 +542,10 @@ def _classify_effects_from_text(text: str, tiers: dict) -> None:
             if effect not in tiers["uncommon"]["items"]:
                 tiers["uncommon"]["items"].append(effect)
         else:
+            # Don't add blocklisted terms to the common bucket even if
+            # they appear in the adverse_reactions section
+            if any(blocked in eff_lower for blocked in _FAERS_COMMON_BLOCKLIST):
+                continue
             if effect not in tiers["common"]["items"]:
                 tiers["common"]["items"].append(effect)
 

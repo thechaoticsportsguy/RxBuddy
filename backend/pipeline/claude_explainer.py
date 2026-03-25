@@ -142,10 +142,9 @@ def _build_side_effects_context(
         if len(drug_parts) > 1:
             parts.append("\n".join(drug_parts))
 
-    for drug, events in adverse_events.items():
-        if events:
-            parts.append(f"\n--- FAERS TOP REACTIONS ({drug.upper()}) ---")
-            parts.append(", ".join(events[:15]))
+    # NOTE: FAERS adverse-event terms are intentionally excluded here.
+    # FAERS is biased toward serious/fatal reports and feeding those terms
+    # to the AI causes it to list death/cardiac arrest as "common" side effects.
 
     return "\n".join(parts)
 
