@@ -1714,6 +1714,31 @@ def _generate_ai_answer(question: str) -> "tuple[str, list[dict], str, str]":
         raise
 
 
+# ---------- 2) In-memory rate limiter for parse endpoint ----------
+import time as _time
+_PARSE_RATE_STORE: dict[str, list[float]] = {}
+
+def _check_parse_rate_limit(drug_name: str, max_per_hour: int = 2) -> None:
+    """
+    Allow max_per_hour parse calls per drug name per hour.
+    Raises HTTPException 429 if exceeded.
+    Simple in-memory store — resets on process restart.
+    """
+    key = drug_name.strip().lower()
+    now = _time.time()
+    window = 3600.0  # 1 hour
+    timestamps = [t for t in _PARSE_RATE_STORE.get(key, []) if now - t < window]
+    if len(timestamps) >= max_per_hour:
+        retry_after = int(window - (now - timestamps[0]))
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit: max {max_per_hour} parses per drug per hour. "
+                   f"Retry in {retry_after}s.",
+        )
+    timestamps.append(now)
+    _PARSE_RATE_STORE[key] = timestamps
+
+
 # ---------- 2) Connect to PostgreSQL with SQLAlchemy ----------
 engine = create_engine(_database_url(), future=True, pool_pre_ping=True)
 metadata = MetaData()
@@ -4079,6 +4104,8 @@ async def parse_drug_label(drug_name: str) -> JSONResponse:
     name = drug_name.strip().lower()
     if not name:
         raise HTTPException(status_code=400, detail="drug_name cannot be empty")
+
+    _check_parse_rate_limit(name)
 
     generic = BRAND_TO_GENERIC.get(name, name)
 
