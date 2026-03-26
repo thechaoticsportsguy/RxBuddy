@@ -4008,6 +4008,135 @@ def admin_refresh_label(drug: str) -> dict:
 # Usage: POST /v2/search  (same request body as /search)
 #        POST /search with header X-Pipeline: v2
 # ══════════════════════════════════════════════════════════════════════════════
+# Drug side-effects endpoints — structured, DB-backed, Gemini-parsed
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/drugs/{drug_name}/side-effects")
+async def drug_side_effects(drug_name: str) -> JSONResponse:
+    """
+    Return structured side effects for a drug.
+
+    Priority:
+      1. DB cache (pre-parsed, fast)
+      2. Live FDA label fetch + Gemini parse + store to DB
+      3. Fallback: raw parse_structured_side_effects() (no DB storage)
+
+    Response shape matches what AnswerCard.js expects for side_effects_data.
+    """
+    from pipeline.side_effects_store import get_or_fetch_side_effects
+    from pipeline.api_layer import fetch_fda_label, fetch_dailymed_setid, parse_structured_side_effects
+    import asyncio
+
+    name = drug_name.strip().lower()
+    if not name:
+        raise HTTPException(status_code=400, detail="drug_name cannot be empty")
+
+    # Resolve brand name → generic
+    generic = BRAND_TO_GENERIC.get(name, name)
+
+    # Fetch FDA label + DailyMed SET ID concurrently
+    (fda_label, raw_label), setid = await asyncio.gather(
+        fetch_fda_label(generic),
+        fetch_dailymed_setid(generic),
+    )
+
+    # Try DB cache → Gemini parse → raw heuristic parse
+    result = await get_or_fetch_side_effects(generic, fda_label, raw_label, setid)
+
+    if not result:
+        # Raw heuristic fallback (no DB storage)
+        result = parse_structured_side_effects(
+            drug_name=generic,
+            fda_label=fda_label,
+            raw_label=raw_label,
+            dailymed_setid=setid,
+        )
+        result["_from_heuristic"] = True
+
+    return JSONResponse(content={
+        "drug": generic,
+        "requested_name": drug_name,
+        "data": result,
+        "disclaimer": (
+            "This information is from FDA drug labels and is not medical advice. "
+            "For emergencies, call 911. Consult your doctor or pharmacist for clinical decisions."
+        ),
+    })
+
+
+@app.post("/api/drugs/{drug_name}/parse-label")
+async def parse_drug_label(drug_name: str) -> JSONResponse:
+    """
+    Force-fetch the FDA label for a drug, parse it with Gemini, and store in DB.
+
+    Use this to pre-populate the DB for commonly queried drugs.
+    Safe to call multiple times — results are upserted.
+    """
+    from pipeline.side_effects_store import parse_label_with_gemini, store_to_db
+    from pipeline.api_layer import fetch_fda_label, fetch_dailymed_setid
+    import asyncio
+
+    name = drug_name.strip().lower()
+    if not name:
+        raise HTTPException(status_code=400, detail="drug_name cannot be empty")
+
+    generic = BRAND_TO_GENERIC.get(name, name)
+
+    (fda_label, raw_label), setid = await asyncio.gather(
+        fetch_fda_label(generic),
+        fetch_dailymed_setid(generic),
+    )
+
+    if not fda_label:
+        return JSONResponse(
+            status_code=200,
+            content={"status": "no_label", "drug": generic,
+                     "message": f"No FDA label found for '{generic}'"},
+        )
+
+    parsed = parse_label_with_gemini(generic, fda_label)
+    if not parsed:
+        return JSONResponse(
+            status_code=200,
+            content={"status": "parse_failed", "drug": generic,
+                     "message": "Gemini parse failed — check GEMINI_API_KEY"},
+        )
+
+    # Enrich with raw label metadata
+    if raw_label:
+        openfda = raw_label.get("openfda", {})
+        parsed["brand_names"] = list(openfda.get("brand_name", []))[:5]
+        parsed["generic_name"] = (openfda.get("generic_name") or [generic])[0]
+        eff_date = raw_label.get("effective_time", "")
+        label_date = (
+            f"{eff_date[:4]}-{eff_date[4:6]}-{eff_date[6:8]}"
+            if eff_date and len(eff_date) >= 8 else ""
+        )
+        if setid:
+            parsed["sources"] = [{
+                "id": 1,
+                "name": f"DailyMed — {generic.title()} label",
+                "url": f"https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid={setid}",
+                "section": "ADVERSE REACTIONS",
+                "last_updated": label_date,
+            }]
+
+    ok = store_to_db(generic, parsed)
+    total = sum(
+        len(t.get("items", [])) for t in parsed.get("side_effects", {}).values()
+    )
+
+    return JSONResponse(content={
+        "status": "ok" if ok else "stored_failed",
+        "drug": generic,
+        "brand_names": parsed.get("brand_names", []),
+        "side_effects_count": total,
+        "boxed_warnings_count": len(parsed.get("boxed_warnings", [])),
+        "stored_to_db": ok,
+    })
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 
 @app.post("/v2/search")
 async def search_v2(req: SearchRequest) -> JSONResponse:

@@ -100,6 +100,7 @@ def _build_structured_answer(
     sources = " | ".join(api_results.sources_used) if api_results.sources_used else "Pharmacist consultation recommended"
 
     # ── Structured side effects (tiered) for side_effects intent ──────────────
+    # Priority: DB cache (pre-parsed) → Gemini parse + store → heuristic regex parse
     primary_drug = drug_names[0] if drug_names else ""
     se_data = {}
     if intent == "side_effects" and primary_drug:
@@ -107,13 +108,29 @@ def _build_structured_answer(
         raw_label = api_results.fda_raw_labels.get(primary_drug)
         faers = api_results.adverse_events.get(primary_drug, [])
         dm_setid = api_results.dailymed_setids.get(primary_drug)
-        se_data = parse_structured_side_effects(
-            drug_name=primary_drug,
-            fda_label=fda_label,
-            raw_label=raw_label,
-            faers_terms=faers,
-            dailymed_setid=dm_setid,
-        )
+
+        # Try DB cache / Gemini parse first
+        try:
+            from pipeline.side_effects_store import get_or_fetch_side_effects
+            se_data = await get_or_fetch_side_effects(
+                drug_name=primary_drug,
+                fda_label=fda_label,
+                raw_label=raw_label,
+                dailymed_setid=dm_setid,
+            ) or {}
+        except Exception as _se_exc:
+            logger.warning("[Pipeline] SEStore failed: %s — falling back to heuristic", _se_exc)
+            se_data = {}
+
+        # Fall back to heuristic regex parser if store returned nothing
+        if not se_data:
+            se_data = parse_structured_side_effects(
+                drug_name=primary_drug,
+                fda_label=fda_label,
+                raw_label=raw_label,
+                faers_terms=faers,
+                dailymed_setid=dm_setid,
+            )
 
     return {
         "verdict": verdict,
