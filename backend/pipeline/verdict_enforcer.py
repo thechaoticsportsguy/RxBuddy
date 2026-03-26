@@ -154,6 +154,46 @@ def _strip_off_topic_drugs(text: str, allowed_drugs: list[str]) -> str:
     return " ".join(cleaned) if cleaned else text
 
 
+def enforce_verdict_for_red_flags(
+    current_verdict: str,
+    se_data: dict,
+) -> str:
+    """
+    If any side effect in the parsed side_effects_data has red_flag=True,
+    upgrade the verdict to CONSULT_PHARMACIST.
+
+    This runs AFTER the main verdict_enforcer so it can only upgrade,
+    never downgrade, an existing verdict.
+    """
+    if not se_data:
+        return current_verdict
+
+    # Already at max-severity verdict — nothing to do
+    if current_verdict in ("AVOID", "EMERGENCY"):
+        return current_verdict
+
+    # Check every tier for red-flagged effects
+    side_effects = se_data.get("side_effects", {})
+    for tier_data in side_effects.values():
+        for item in tier_data.get("items", []):
+            if isinstance(item, dict) and item.get("red_flag"):
+                if current_verdict in ("SAFE", "CAUTION"):
+                    logger.info(
+                        "[VerdictEnforcer] Red flag detected (%s) — upgrading %s → CONSULT_PHARMACIST",
+                        item.get("display_name", "unknown"),
+                        current_verdict,
+                    )
+                    return "CONSULT_PHARMACIST"
+
+    # Also check has_red_flag shortcut
+    if se_data.get("has_red_flag") and current_verdict in ("SAFE", "CAUTION"):
+        logger.info("[VerdictEnforcer] has_red_flag=True — upgrading %s → CONSULT_PHARMACIST",
+                    current_verdict)
+        return "CONSULT_PHARMACIST"
+
+    return current_verdict
+
+
 def _rewrite_for_verdict(verdict: str, drug_names: list[str], intent: str) -> str:
     """Generate a safe fallback answer that matches the verdict."""
     drugs = " and ".join(drug_names) if drug_names else "these medications"

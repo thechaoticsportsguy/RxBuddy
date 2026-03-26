@@ -2,22 +2,33 @@
 Side Effects Store — PostgreSQL-backed persistent drug side effect data.
 
 Architecture:
-  - drug_se_meta table: per-drug metadata (brand names, MOA, sources)
-  - drug_side_effects table: individual side effect rows with rich fields
-  - Gemini parses FDA label text into structured rows on first lookup
-  - Subsequent lookups hit the DB (< 10ms) instead of re-fetching + re-parsing
-  - Falls back gracefully if DB or Gemini is unavailable
+  - drug_se_meta:     one row per drug (metadata, MOA, sources)
+  - drug_side_effects: one row per (drug, effect) with rich clinical fields
 
-Data extracted per side effect:
-  display_name, frequency (very_common/common/uncommon/serious),
-  frequency_percent, severity, patient_description, onset_days,
-  resolution_days, management, red_flag, red_flag_reason, evidence_tier
+Per-effect fields:
+  display_name, frequency_category, frequency_percent, confidence_score,
+  severity, patient_description, onset_days, resolution_days, management,
+  red_flag, red_flag_reason, evidence_tier, source_section, source_quote
+
+Confidence scoring:
+  1.0  — exact percentage stated in FDA label  ("30% of patients")
+  0.75 — strong frequency qualifier ("most common", "frequently")
+  0.5  — weak qualifier ("may cause", "can cause", inferred tier)
+  0.25 — missing or highly uncertain
+
+Frequency categories (normalized):
+  very_common  > 10%
+  common       1–10%
+  uncommon     0.1–1%
+  rare         < 0.1%
+  serious      life-threatening (regardless of frequency)
 """
 from __future__ import annotations
 
 import json
 import logging
 import os
+import time
 from typing import Any
 
 logger = logging.getLogger("rxbuddy.pipeline.se_store")
@@ -31,25 +42,21 @@ def _database_url() -> str | None:
 
 
 def _get_engine():
-    """Return a SQLAlchemy engine, or None if DATABASE_URL is not set."""
     try:
         from sqlalchemy import create_engine
         url = _database_url()
-        if not url:
-            return None
-        return create_engine(url, future=True, pool_pre_ping=True)
+        return create_engine(url, future=True, pool_pre_ping=True) if url else None
     except Exception as exc:
         logger.warning("[SEStore] Could not create engine: %s", exc)
         return None
 
 
 # ---------------------------------------------------------------------------
-# Table creation — runs once per process
+# Table creation / migration — runs once per process
 # ---------------------------------------------------------------------------
 
 _TABLES_CREATED = False
 
-# drug_se_meta: one row per drug (metadata + MOA)
 _CREATE_SE_META_TABLE = """
 CREATE TABLE IF NOT EXISTS drug_se_meta (
     drug_generic_name   VARCHAR(255) PRIMARY KEY,
@@ -63,18 +70,19 @@ CREATE TABLE IF NOT EXISTS drug_se_meta (
     dailymed_url        TEXT,
     fda_url             TEXT,
     label_date          VARCHAR(20),
+    overall_confidence  FLOAT DEFAULT 0.5,
     parsed_at           TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 """
 
-# drug_side_effects: one row per (drug, side_effect) with rich clinical fields
 _CREATE_SE_TABLE = """
 CREATE TABLE IF NOT EXISTS drug_side_effects (
     id                  SERIAL PRIMARY KEY,
     drug_generic_name   VARCHAR(255) NOT NULL,
     display_name        VARCHAR(500) NOT NULL,
-    frequency           VARCHAR(20),
+    frequency_category  VARCHAR(20),
     frequency_percent   FLOAT,
+    confidence_score    FLOAT DEFAULT 0.5,
     severity            VARCHAR(20),
     patient_description TEXT,
     onset_days          INT,
@@ -83,13 +91,19 @@ CREATE TABLE IF NOT EXISTS drug_side_effects (
     red_flag            BOOLEAN DEFAULT FALSE,
     red_flag_reason     TEXT,
     evidence_tier       VARCHAR(20) DEFAULT 'label',
+    source_section      VARCHAR(100),
+    source_quote        TEXT,
     updated_at          TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(drug_generic_name, display_name)
 );
 """
 
-# ALTER statements to add columns that may be missing on older deployments
-_MIGRATE_SE_TABLE = [
+# Columns added in upgrades — safe to run on existing tables
+_MIGRATIONS = [
+    "ALTER TABLE drug_side_effects ADD COLUMN IF NOT EXISTS confidence_score FLOAT DEFAULT 0.5;",
+    "ALTER TABLE drug_side_effects ADD COLUMN IF NOT EXISTS source_section VARCHAR(100);",
+    "ALTER TABLE drug_side_effects ADD COLUMN IF NOT EXISTS source_quote TEXT;",
+    "ALTER TABLE drug_side_effects ADD COLUMN IF NOT EXISTS frequency_category VARCHAR(20);",
     "ALTER TABLE drug_side_effects ADD COLUMN IF NOT EXISTS onset_days INT;",
     "ALTER TABLE drug_side_effects ADD COLUMN IF NOT EXISTS resolution_days INT;",
     "ALTER TABLE drug_side_effects ADD COLUMN IF NOT EXISTS patient_description TEXT;",
@@ -97,11 +111,11 @@ _MIGRATE_SE_TABLE = [
     "ALTER TABLE drug_side_effects ADD COLUMN IF NOT EXISTS red_flag BOOLEAN DEFAULT FALSE;",
     "ALTER TABLE drug_side_effects ADD COLUMN IF NOT EXISTS red_flag_reason TEXT;",
     "ALTER TABLE drug_side_effects ADD COLUMN IF NOT EXISTS frequency_percent FLOAT;",
+    "ALTER TABLE drug_se_meta ADD COLUMN IF NOT EXISTS overall_confidence FLOAT DEFAULT 0.5;",
 ]
 
 
 def ensure_tables() -> bool:
-    """Create / migrate tables. Returns True on success."""
     global _TABLES_CREATED
     if _TABLES_CREATED:
         return True
@@ -113,11 +127,11 @@ def ensure_tables() -> bool:
         with engine.begin() as conn:
             conn.execute(text(_CREATE_SE_META_TABLE))
             conn.execute(text(_CREATE_SE_TABLE))
-            for stmt in _MIGRATE_SE_TABLE:
+            for stmt in _MIGRATIONS:
                 try:
                     conn.execute(text(stmt))
                 except Exception:
-                    pass  # column may already exist on a fresh table
+                    pass
         _TABLES_CREATED = True
         logger.info("[SEStore] Tables ready")
         return True
@@ -127,14 +141,223 @@ def ensure_tables() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# DB read helpers
+# Normalization helpers
+# ---------------------------------------------------------------------------
+
+# Canonical deduplication map: lower-case variant → canonical display name
+_SYNONYM_MAP: dict[str, str] = {
+    "feeling sick": "Nausea",
+    "sick feeling": "Nausea",
+    "nauseous": "Nausea",
+    "head pain": "Headache",
+    "headpain": "Headache",
+    "cephalalgia": "Headache",
+    "stomach upset": "Upset Stomach",
+    "stomach ache": "Stomach Pain",
+    "abdominal pain": "Stomach Pain",
+    "belly pain": "Stomach Pain",
+    "loose stools": "Diarrhea",
+    "loose bowels": "Diarrhea",
+    "bowel disorder": "Diarrhea",
+    "throwing up": "Vomiting",
+    "feeling tired": "Fatigue",
+    "tiredness": "Fatigue",
+    "exhaustion": "Fatigue",
+    "feeling dizzy": "Dizziness",
+    "light-headedness": "Dizziness",
+    "lightheadedness": "Dizziness",
+    "vertigo": "Dizziness",
+    "dry skin": "Skin Dryness",
+    "itching": "Itching (Pruritus)",
+    "pruritus": "Itching (Pruritus)",
+    "rash": "Skin Rash",
+    "skin rash": "Skin Rash",
+    "skin reaction": "Skin Rash",
+    "runny nose": "Runny Nose (Rhinorrhea)",
+    "rhinorrhea": "Runny Nose (Rhinorrhea)",
+    "insomnia": "Trouble Sleeping",
+    "sleep disorder": "Trouble Sleeping",
+    "difficulty sleeping": "Trouble Sleeping",
+    "anxiety": "Anxiety",
+    "nervousness": "Anxiety",
+    "back ache": "Back Pain",
+    "backache": "Back Pain",
+    "muscular pain": "Muscle Pain (Myalgia)",
+    "myalgia": "Muscle Pain (Myalgia)",
+    "muscle ache": "Muscle Pain (Myalgia)",
+    "muscle cramps": "Muscle Cramps",
+    "cramps": "Muscle Cramps",
+    "hot flash": "Hot Flashes",
+    "hot flushes": "Hot Flashes",
+    "flushing": "Flushing",
+    "increased sweating": "Sweating",
+    "diaphoresis": "Sweating",
+    "weight gain": "Weight Gain",
+    "weight increase": "Weight Gain",
+    "weight loss": "Weight Loss",
+    "weight decrease": "Weight Loss",
+    "blurred vision": "Blurred Vision",
+    "vision blurred": "Blurred Vision",
+    "palpitations": "Heart Palpitations",
+    "rapid heartbeat": "Heart Palpitations",
+    "tachycardia": "Fast Heart Rate",
+    "edema": "Swelling (Edema)",
+    "swelling": "Swelling (Edema)",
+    "peripheral edema": "Leg Swelling",
+    "constipation": "Constipation",
+    "flatulence": "Gas (Flatulence)",
+    "gas": "Gas (Flatulence)",
+    "bloating": "Bloating",
+    "abdominal bloating": "Bloating",
+    "dry mouth": "Dry Mouth",
+    "xerostomia": "Dry Mouth",
+    "loss of appetite": "Loss of Appetite",
+    "decreased appetite": "Loss of Appetite",
+    "anorexia": "Loss of Appetite",
+    "decreased libido": "Decreased Sex Drive",
+    "reduced libido": "Decreased Sex Drive",
+    "sexual dysfunction": "Sexual Dysfunction",
+    "urinary tract infection": "Urinary Tract Infection (UTI)",
+    "uti": "Urinary Tract Infection (UTI)",
+    "upper respiratory infection": "Upper Respiratory Infection",
+    "uri": "Upper Respiratory Infection",
+}
+
+
+def _normalize_display_name(name: str) -> str:
+    """Map synonyms to canonical names and title-case the result."""
+    clean = name.strip().lower()
+    return _SYNONYM_MAP.get(clean, name.strip().title())
+
+
+def _normalize_frequency(
+    freq_category: str | None,
+    freq_percent: float | None,
+) -> tuple[str, float | None, float]:
+    """
+    Normalize frequency to a canonical category + confidence score.
+
+    Returns (category, percent, confidence_score).
+    """
+    # If we have an exact percent, derive category from it
+    if freq_percent is not None:
+        try:
+            pct = float(freq_percent)
+        except (TypeError, ValueError):
+            pct = None
+        if pct is not None:
+            if pct > 10:
+                cat = "very_common"
+            elif pct >= 1:
+                cat = "common"
+            elif pct >= 0.1:
+                cat = "uncommon"
+            else:
+                cat = "rare"
+            return cat, pct, 1.0  # high confidence — exact number
+
+    # No exact percent — use declared category + infer confidence
+    cat_map = {
+        "very_common": ("very_common", 0.75),
+        "common":      ("common",      0.5),
+        "uncommon":    ("uncommon",    0.5),
+        "rare":        ("rare",        0.5),
+        "serious":     ("serious",     0.75),  # severity, not freq
+    }
+    if freq_category and freq_category.lower() in cat_map:
+        cat, conf = cat_map[freq_category.lower()]
+        return cat, freq_percent, conf
+
+    return "common", freq_percent, 0.25  # unknown — low confidence
+
+
+def _deduplicate_effects(effects: list[dict]) -> list[dict]:
+    """
+    Remove semantic duplicates. Keeps the highest-confidence version.
+    Uses _SYNONYM_MAP normalization + exact canonical-name dedup.
+    """
+    seen: dict[str, dict] = {}  # canonical_name → best effect dict
+    for effect in effects:
+        canonical = _normalize_display_name(effect.get("display_name", ""))
+        if not canonical:
+            continue
+        existing = seen.get(canonical)
+        if existing is None:
+            seen[canonical] = {**effect, "display_name": canonical}
+        else:
+            # Keep whichever has higher confidence
+            new_conf = effect.get("confidence_score", 0.25)
+            old_conf = existing.get("confidence_score", 0.25)
+            if new_conf > old_conf:
+                seen[canonical] = {**effect, "display_name": canonical}
+    return list(seen.values())
+
+
+def _validate_effect_schema(effect: dict) -> dict:
+    """
+    Enforce strict schema on a single effect dict.
+    Fills in defaults for missing fields; returns the cleaned dict.
+    """
+    freq_cat_raw = str(effect.get("frequency_category") or effect.get("frequency") or "")
+    freq_pct_raw = effect.get("frequency_percent")
+    freq_cat, freq_pct, conf = _normalize_frequency(freq_cat_raw, freq_pct_raw)
+
+    # Allow Gemini-provided confidence to upgrade, never downgrade
+    gemini_conf = effect.get("confidence_score")
+    if isinstance(gemini_conf, (int, float)) and 0 <= gemini_conf <= 1:
+        conf = max(conf, float(gemini_conf))
+
+    mgmt = str(effect.get("management") or "monitor").lower()
+    if mgmt not in ("monitor", "manage_at_home", "contact_doctor"):
+        mgmt = "contact_doctor" if effect.get("red_flag") else "monitor"
+
+    sev = str(effect.get("severity") or "mild").lower()
+    if sev not in ("mild", "moderate", "severe"):
+        sev = "severe" if freq_cat == "serious" else "mild"
+
+    # Sanitize source_quote — max 25 words
+    sq = str(effect.get("source_quote") or "")
+    if sq:
+        words = sq.split()
+        sq = " ".join(words[:25]) + ("..." if len(words) > 25 else "")
+
+    return {
+        "display_name":       _normalize_display_name(str(effect.get("display_name") or "")),
+        "frequency_category": freq_cat,
+        "frequency_percent":  freq_pct,
+        "confidence_score":   round(conf, 2),
+        "severity":           sev,
+        "patient_description": str(effect.get("patient_description") or "")[:1000],
+        "onset_days":         _safe_int(effect.get("onset_days")),
+        "resolution_days":    _safe_int(effect.get("resolution_days")),
+        "management":         mgmt,
+        "red_flag":           bool(effect.get("red_flag", False)),
+        "red_flag_reason":    str(effect.get("red_flag_reason") or "")[:500] or None,
+        "evidence_tier":      str(effect.get("evidence_tier") or "label"),
+        "source_section":     str(effect.get("source_section") or "Adverse Reactions")[:100],
+        "source_quote":       sq or None,
+    }
+
+
+def _safe_int(val: Any) -> int | None:
+    try:
+        return int(val) if val is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _overall_confidence(effects: list[dict]) -> float:
+    """Average confidence across all effects; 0.5 baseline if no effects."""
+    scores = [e.get("confidence_score", 0.5) for e in effects if e]
+    return round(sum(scores) / len(scores), 2) if scores else 0.5
+
+
+# ---------------------------------------------------------------------------
+# DB read
 # ---------------------------------------------------------------------------
 
 def get_from_db(drug_name: str) -> dict | None:
-    """
-    Return structured side effects from the DB cache, or None if not found.
-    Result shape is compatible with what AnswerCard.js expects.
-    """
+    """Return structured side effects from DB, or None if not found."""
     if not drug_name:
         return None
     ensure_tables()
@@ -147,80 +370,87 @@ def get_from_db(drug_name: str) -> dict | None:
     try:
         with engine.connect() as conn:
             meta = conn.execute(
-                text("SELECT * FROM drug_se_meta WHERE drug_generic_name = :name"),
-                {"name": key},
+                text("SELECT * FROM drug_se_meta WHERE drug_generic_name = :n"),
+                {"n": key},
             ).mappings().first()
             if not meta:
                 return None
 
             rows = conn.execute(
-                text("SELECT * FROM drug_side_effects WHERE drug_generic_name = :name ORDER BY id"),
-                {"name": key},
+                text("SELECT * FROM drug_side_effects WHERE drug_generic_name = :n ORDER BY id"),
+                {"n": key},
             ).mappings().all()
 
-        # Build tiers — items are rich dicts now (display_name + extra fields)
+        # Group into frequency tiers
         tiers: dict[str, Any] = {
             "very_common": {"label": "Very Common (>10%)",  "items": []},
-            "common":      {"label": "Common (1-10%)",       "items": []},
-            "uncommon":    {"label": "Uncommon (<1%)",        "items": []},
-            "serious":     {"label": "Serious — Seek Immediate Medical Attention",
+            "common":      {"label": "Common (1–10%)",       "items": []},
+            "uncommon":    {"label": "Uncommon (0.1–1%)",    "items": []},
+            "rare":        {"label": "Rare (<0.1%)",          "items": []},
+            "serious":     {"label": "Serious — Seek Medical Attention",
                             "items": [], "urgent": True},
         }
+        all_effects = []
         for row in rows:
-            freq = row["frequency"] or "common"
+            freq = row["frequency_category"] or "common"
             if freq not in tiers:
                 freq = "common"
-            # Build a rich item dict; AnswerCard only needs the string name
-            # but the new API endpoint returns the full object
             rich = {
-                "display_name":       row["display_name"] or "",
-                "frequency":          freq,
-                "frequency_percent":  row["frequency_percent"],
-                "severity":           row["severity"] or "mild",
+                "display_name":        row["display_name"],
+                "frequency_category":  freq,
+                "frequency_percent":   row["frequency_percent"],
+                "confidence_score":    row["confidence_score"] or 0.5,
+                "severity":            row["severity"] or "mild",
                 "patient_description": row["patient_description"] or "",
-                "onset_days":         row["onset_days"],
-                "resolution_days":    row["resolution_days"],
-                "management":         row["management"] or "monitor",
-                "red_flag":           bool(row["red_flag"]),
-                "red_flag_reason":    row["red_flag_reason"] or "",
-                "evidence_tier":      row["evidence_tier"] or "label",
-                "data_source":        "FDA Label (DailyMed)",
+                "onset_days":          row["onset_days"],
+                "resolution_days":     row["resolution_days"],
+                "management":          row["management"] or "monitor",
+                "red_flag":            bool(row["red_flag"]),
+                "red_flag_reason":     row["red_flag_reason"] or "",
+                "evidence_tier":       row["evidence_tier"] or "label",
+                "source_section":      row["source_section"] or "Adverse Reactions",
+                "source_quote":        row["source_quote"] or "",
+                "data_source":         "FDA Label (DailyMed)",
             }
             tiers[freq]["items"].append(rich)
+            all_effects.append(rich)
 
-        # Build sources list
         sources = []
         if meta["dailymed_url"]:
             sources.append({
-                "id": 1,
-                "name": f"DailyMed — {key.title()} label",
-                "url": meta["dailymed_url"],
-                "section": "ADVERSE REACTIONS",
+                "id": 1, "name": f"DailyMed — {key.title()} label",
+                "url": meta["dailymed_url"], "section": "ADVERSE REACTIONS",
                 "last_updated": meta["label_date"] or "",
             })
         if meta["fda_url"]:
             sources.append({
-                "id": 2,
-                "name": "openFDA Drug Label API",
-                "url": meta["fda_url"],
-                "section": "adverse_reactions",
+                "id": 2, "name": "openFDA Drug Label API",
+                "url": meta["fda_url"], "section": "adverse_reactions",
                 "last_updated": meta["label_date"] or "",
             })
 
+        has_red_flag = any(e["red_flag"] for e in all_effects)
+
+        logger.info("[SEStore] DB hit for %s — %d effects, conf=%.2f, red_flag=%s",
+                    key, len(all_effects), meta.get("overall_confidence", 0.5), has_red_flag)
+
         return {
-            "drug_name":   key,
-            "generic_name": meta["generic_name_label"] or key,
-            "brand_names":  list(meta["brand_names"] or []),
-            "side_effects": tiers,
-            "boxed_warnings": list(meta["boxed_warnings"] or []),
+            "drug":             key,
+            "generic_name":     meta["generic_name_label"] or key,
+            "brand_names":      list(meta["brand_names"] or []),
+            "side_effects":     tiers,
+            "boxed_warnings":   list(meta["boxed_warnings"] or []),
             "mechanism_of_action": {
                 "summary":             meta["moa_summary"] or "",
                 "detail":              meta["moa_detail"] or "",
                 "pharmacologic_class": meta["pharmacologic_class"] or "",
                 "molecular_targets":   list(meta["molecular_targets"] or []),
             },
-            "sources":    sources,
-            "_from_db":   True,
+            "sources":          sources,
+            "overall_confidence": meta.get("overall_confidence") or 0.5,
+            "overall_verdict":  "CONSULT_PHARMACIST" if has_red_flag else "CAUTION",
+            "has_red_flag":     has_red_flag,
+            "_from_db":         True,
         }
 
     except Exception as exc:
@@ -229,14 +459,13 @@ def get_from_db(drug_name: str) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
-# DB write helpers
+# DB write
 # ---------------------------------------------------------------------------
 
 def store_to_db(drug_name: str, parsed: dict) -> bool:
     """
-    Upsert parsed side effects into DB. Handles both the new rich-object format
-    (items are dicts) and the old plain-string format (items are strings).
-    Returns True on success.
+    Upsert parsed side effects into DB.
+    Accepts both rich-dict items and plain-string items.
     """
     if not drug_name or not parsed:
         return False
@@ -247,121 +476,119 @@ def store_to_db(drug_name: str, parsed: dict) -> bool:
 
     from sqlalchemy import text
     key = drug_name.strip().lower()
-
-    brand_names = parsed.get("brand_names", [])
-    generic_name_label = parsed.get("generic_name", key)
-    boxed_warnings = parsed.get("boxed_warnings", [])
     moa = parsed.get("mechanism_of_action", {})
     sources = parsed.get("sources", [])
-    dailymed_url = next(
-        (s["url"] for s in sources if "dailymed" in s.get("url", "").lower()), None
-    )
-    fda_url = next(
-        (s["url"] for s in sources if "api.fda.gov" in s.get("url", "").lower()), None
-    )
+    dailymed_url = next((s["url"] for s in sources if "dailymed" in s.get("url","").lower()), None)
+    fda_url = next((s["url"] for s in sources if "api.fda.gov" in s.get("url","").lower()), None)
     label_date = sources[0].get("last_updated", "") if sources else ""
+
+    # Flatten all effects for overall confidence calculation
+    all_effects_flat: list[dict] = []
 
     try:
         with engine.begin() as conn:
-            # Upsert meta row
             conn.execute(text("""
                 INSERT INTO drug_se_meta
                     (drug_generic_name, brand_names, generic_name_label,
                      boxed_warnings, moa_summary, moa_detail,
                      pharmacologic_class, molecular_targets,
-                     dailymed_url, fda_url, label_date, parsed_at)
+                     dailymed_url, fda_url, label_date, overall_confidence, parsed_at)
                 VALUES
-                    (:name, :brands, :generic_label,
-                     :boxed, :moa_sum, :moa_det,
-                     :pharm_class, :targets,
-                     :dm_url, :fda_url, :ldate, NOW())
+                    (:n, :brands, :glabel,
+                     :boxed, :msum, :mdet,
+                     :pclass, :targets,
+                     :dmurl, :furl, :ldate, :oconf, NOW())
                 ON CONFLICT (drug_generic_name) DO UPDATE SET
-                    brand_names         = EXCLUDED.brand_names,
-                    generic_name_label  = EXCLUDED.generic_name_label,
-                    boxed_warnings      = EXCLUDED.boxed_warnings,
-                    moa_summary         = EXCLUDED.moa_summary,
-                    moa_detail          = EXCLUDED.moa_detail,
-                    pharmacologic_class = EXCLUDED.pharmacologic_class,
-                    molecular_targets   = EXCLUDED.molecular_targets,
-                    dailymed_url        = EXCLUDED.dailymed_url,
-                    fda_url             = EXCLUDED.fda_url,
-                    label_date          = EXCLUDED.label_date,
-                    parsed_at           = NOW()
+                    brand_names=EXCLUDED.brand_names, generic_name_label=EXCLUDED.generic_name_label,
+                    boxed_warnings=EXCLUDED.boxed_warnings, moa_summary=EXCLUDED.moa_summary,
+                    moa_detail=EXCLUDED.moa_detail, pharmacologic_class=EXCLUDED.pharmacologic_class,
+                    molecular_targets=EXCLUDED.molecular_targets, dailymed_url=EXCLUDED.dailymed_url,
+                    fda_url=EXCLUDED.fda_url, label_date=EXCLUDED.label_date,
+                    overall_confidence=EXCLUDED.overall_confidence, parsed_at=NOW()
             """), {
-                "name": key, "brands": brand_names,
-                "generic_label": generic_name_label, "boxed": boxed_warnings,
-                "moa_sum": moa.get("summary", ""), "moa_det": moa.get("detail", ""),
-                "pharm_class": moa.get("pharmacologic_class", ""),
+                "n": key,
+                "brands": parsed.get("brand_names", []),
+                "glabel": parsed.get("generic_name", key),
+                "boxed":  parsed.get("boxed_warnings", []),
+                "msum":   moa.get("summary", ""),
+                "mdet":   moa.get("detail", ""),
+                "pclass": moa.get("pharmacologic_class", ""),
                 "targets": moa.get("molecular_targets", []),
-                "dm_url": dailymed_url, "fda_url": fda_url, "ldate": label_date,
+                "dmurl":  dailymed_url,
+                "furl":   fda_url,
+                "ldate":  label_date,
+                "oconf":  0.5,  # will update below after computing
             })
 
-            # Upsert each side effect row
             side_effects = parsed.get("side_effects", {})
             count = 0
             for freq_key, tier in side_effects.items():
                 for item in tier.get("items", []):
                     if not item:
                         continue
-
-                    # Item may be a rich dict (new format) or a plain string (old format)
-                    if isinstance(item, dict):
-                        display  = str(item.get("display_name", "")).strip()[:500]
-                        freq_pct = item.get("frequency_percent")
-                        severity = item.get("severity") or (
-                            "severe" if freq_key == "serious" else "mild"
-                        )
-                        desc     = str(item.get("patient_description", ""))[:1000]
-                        onset    = item.get("onset_days")
-                        res      = item.get("resolution_days")
-                        mgmt     = str(item.get("management", "monitor"))[:100]
-                        red_flag = bool(item.get("red_flag", False))
-                        red_why  = str(item.get("red_flag_reason", ""))[:500] or None
-                    else:
-                        display  = str(item).strip()[:500]
-                        freq_pct = None
-                        severity = "severe" if freq_key == "serious" else "mild"
-                        desc     = ""
-                        onset    = None
-                        res      = None
-                        mgmt     = "contact_doctor" if freq_key == "serious" else "monitor"
-                        red_flag = freq_key == "serious"
-                        red_why  = None
-
-                    if not display:
-                        continue
+                    # Validate + normalize the item
+                    if isinstance(item, str):
+                        item = {"display_name": item, "frequency_category": freq_key}
+                    item["frequency_category"] = freq_key
+                    clean = _validate_effect_schema(item)
+                    all_effects_flat.append(clean)
 
                     conn.execute(text("""
                         INSERT INTO drug_side_effects
-                            (drug_generic_name, display_name, frequency,
-                             frequency_percent, severity, patient_description,
-                             onset_days, resolution_days, management,
-                             red_flag, red_flag_reason, evidence_tier, updated_at)
+                            (drug_generic_name, display_name, frequency_category,
+                             frequency_percent, confidence_score, severity,
+                             patient_description, onset_days, resolution_days,
+                             management, red_flag, red_flag_reason,
+                             evidence_tier, source_section, source_quote, updated_at)
                         VALUES
-                            (:name, :disp, :freq,
-                             :fpct, :sev, :desc,
-                             :onset, :res, :mgmt,
-                             :rflag, :rwhy, 'label', NOW())
+                            (:n, :dn, :fcat,
+                             :fpct, :conf, :sev,
+                             :desc, :onset, :res,
+                             :mgmt, :rflag, :rwhy,
+                             :etier, :ssec, :squote, NOW())
                         ON CONFLICT (drug_generic_name, display_name) DO UPDATE SET
-                            frequency         = EXCLUDED.frequency,
-                            frequency_percent = EXCLUDED.frequency_percent,
-                            severity          = EXCLUDED.severity,
-                            patient_description = EXCLUDED.patient_description,
-                            onset_days        = EXCLUDED.onset_days,
-                            resolution_days   = EXCLUDED.resolution_days,
-                            management        = EXCLUDED.management,
-                            red_flag          = EXCLUDED.red_flag,
-                            red_flag_reason   = EXCLUDED.red_flag_reason,
-                            updated_at        = NOW()
+                            frequency_category=EXCLUDED.frequency_category,
+                            frequency_percent=EXCLUDED.frequency_percent,
+                            confidence_score=EXCLUDED.confidence_score,
+                            severity=EXCLUDED.severity,
+                            patient_description=EXCLUDED.patient_description,
+                            onset_days=EXCLUDED.onset_days,
+                            resolution_days=EXCLUDED.resolution_days,
+                            management=EXCLUDED.management,
+                            red_flag=EXCLUDED.red_flag,
+                            red_flag_reason=EXCLUDED.red_flag_reason,
+                            evidence_tier=EXCLUDED.evidence_tier,
+                            source_section=EXCLUDED.source_section,
+                            source_quote=EXCLUDED.source_quote,
+                            updated_at=NOW()
                     """), {
-                        "name": key, "disp": display, "freq": freq_key,
-                        "fpct": freq_pct, "sev": severity, "desc": desc,
-                        "onset": onset, "res": res, "mgmt": mgmt,
-                        "rflag": red_flag, "rwhy": red_why,
+                        "n":      key,
+                        "dn":     clean["display_name"][:500],
+                        "fcat":   clean["frequency_category"],
+                        "fpct":   clean["frequency_percent"],
+                        "conf":   clean["confidence_score"],
+                        "sev":    clean["severity"],
+                        "desc":   clean["patient_description"],
+                        "onset":  clean["onset_days"],
+                        "res":    clean["resolution_days"],
+                        "mgmt":   clean["management"],
+                        "rflag":  clean["red_flag"],
+                        "rwhy":   clean["red_flag_reason"],
+                        "etier":  clean["evidence_tier"],
+                        "ssec":   clean["source_section"],
+                        "squote": clean["source_quote"],
                     })
                     count += 1
 
-        logger.info("[SEStore] Stored %d side effects for %s", count, key)
+            # Update overall confidence now that we have all effects
+            overall_conf = _overall_confidence(all_effects_flat)
+            conn.execute(
+                text("UPDATE drug_se_meta SET overall_confidence=:c WHERE drug_generic_name=:n"),
+                {"c": overall_conf, "n": key},
+            )
+
+        logger.info("[SEStore] Stored %d effects for %s, overall_confidence=%.2f",
+                    count, key, overall_conf)
         return True
 
     except Exception as exc:
@@ -370,7 +597,7 @@ def store_to_db(drug_name: str, parsed: dict) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Gemini-powered FDA label parser (upgraded prompt)
+# Gemini parser — production-grade prompt
 # ---------------------------------------------------------------------------
 
 def _build_gemini_prompt(drug_name: str, label_text: str) -> str:
@@ -378,55 +605,58 @@ def _build_gemini_prompt(drug_name: str, label_text: str) -> str:
 
 Extract ALL side effects from this label for "{drug_name}".
 
-For EACH side effect return a JSON object with these fields:
-1. display_name        — patient-friendly name (e.g. "Diarrhea", not "Bowel disorder")
-2. frequency           — "very_common" (>25%), "common" (10-25%), "uncommon" (1-10%), "serious" (<1% but important)
-3. frequency_percent   — exact number if stated (e.g. "30% of patients" → 30), or null
-4. severity            — "mild" (goes away on own), "moderate" (needs management), "severe" (seek help immediately)
-5. patient_description — 1-2 plain-English sentences: what it feels like
-6. onset_days          — days after starting when it typically appears ("within 3 days" → 3), or null
-7. resolution_days     — days until it goes away ("usually within 1 week" → 7), or null
-8. management          — "monitor", "manage_at_home", or "contact_doctor"
-9. red_flag            — true only if life-threatening or requires immediate medical attention
-10. red_flag_reason    — why it is urgent (null if red_flag=false)
+Return a JSON array. Each element MUST have exactly these fields:
 
-CRITICAL RULES:
-- Do NOT invent side effects not in the label
-- NEVER put death, overdose, addiction, cardiac arrest, respiratory failure in common or very_common
-  (those belong in serious only)
-- If a percentage is mentioned, always include it in frequency_percent
-- If timing is vague or not stated, use null
-- Be conservative with red_flag (only for truly life-threatening cases)
+{{
+  "display_name":        "Patient-friendly name (e.g. Diarrhea, not Bowel disorder)",
+  "frequency_category":  "very_common|common|uncommon|rare|serious",
+  "frequency_percent":   30.0,        // exact number if stated, else null
+  "confidence_score":    0.95,        // 1.0=exact%, 0.75=strong qualifier, 0.5=inferred, 0.25=guessed
+  "severity":            "mild|moderate|severe",
+  "patient_description": "1-2 plain English sentences describing what it feels like",
+  "onset_days":          3,           // days after starting — integer, or null
+  "resolution_days":     7,           // days until resolved — integer, or null
+  "management":          "monitor|manage_at_home|contact_doctor",
+  "red_flag":            false,       // true ONLY if life-threatening or requires emergency care
+  "red_flag_reason":     null,        // why urgent — string, or null if red_flag=false
+  "evidence_tier":       "label",     // always "label" for FDA data
+  "source_section":      "Adverse Reactions",  // exact section name from label
+  "source_quote":        "exact quote from label (max 20 words)"
+}}
 
-Return ONLY a valid JSON array — no markdown, no explanations:
+FREQUENCY RULES (apply strictly):
+  very_common  = >10% OR "most common" OR "frequently reported"
+  common       = 1-10% OR "common" OR listed without qualifier in adverse reactions
+  uncommon     = 0.1-1% OR "uncommon" OR "infrequent" OR "rare" (< 1%)
+  rare         = <0.1% OR "very rare" OR "isolated reports"
+  serious      = life-threatening, regardless of frequency (cardiac arrest, liver failure, etc.)
 
-[
-  {{
-    "display_name": "Diarrhea",
-    "frequency": "very_common",
-    "frequency_percent": 30,
-    "severity": "mild",
-    "patient_description": "Loose stools, usually in the first 2 weeks. Often improves with diet adjustments.",
-    "onset_days": 1,
-    "resolution_days": 7,
-    "management": "manage_at_home",
-    "red_flag": false,
-    "red_flag_reason": null
-  }}
-]
+CONFIDENCE RULES:
+  1.0  = exact % stated: "occurred in 30% of patients"
+  0.75 = strong qualifier: "most common", "frequently", "commonly observed"
+  0.5  = listed without qualifier in adverse reactions section
+  0.25 = inferred, guessed, or from unrelated context
 
-FDA LABEL TEXT FOR {drug_name.upper()}:
+CRITICAL:
+- Do NOT invent effects not in the label
+- NEVER put death, overdose, addiction, cardiac arrest, respiratory failure in common/very_common
+- If % is stated, always set frequency_percent and confidence_score=1.0
+- Return ONLY the JSON array, no markdown, no explanations
+
+FDA LABEL — {drug_name.upper()}:
 {label_text}"""
 
 
 def parse_label_with_gemini(drug_name: str, fda_label: dict) -> dict | None:
     """
-    Use Gemini to parse an FDA label dict into rich structured side effects.
-    Returns a dict in the standard shape, or None if Gemini is unavailable.
+    Parse an FDA label into rich structured side effects using Gemini.
+    Returns standard dict or None if Gemini is unavailable.
+
+    Logs: Gemini latency, parse success/failure, fallback usage.
     """
     gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not gemini_key:
-        logger.warning("[SEStore] No GEMINI_API_KEY — skipping Gemini parse")
+        logger.warning("[SEStore] GEMINI_API_KEY not set — skipping Gemini parse for %s", drug_name)
         return None
 
     try:
@@ -434,89 +664,102 @@ def parse_label_with_gemini(drug_name: str, fda_label: dict) -> dict | None:
         genai.configure(api_key=gemini_key)
         model = genai.GenerativeModel("gemini-2.0-flash")
     except Exception as exc:
-        logger.warning("[SEStore] Gemini import/configure failed: %s", exc)
+        logger.error("[SEStore] Gemini init failed: %s", exc)
         return None
 
-    # Build label context — only sections relevant to side effects
+    # Build label context
     section_texts = []
-    for section in ("adverse_reactions", "warnings", "boxed_warning",
-                    "warnings_and_precautions", "clinical_pharmacology", "description"):
-        text = (fda_label or {}).get(section, "")
-        if text:
-            section_texts.append(f"=== {section.upper()} ===\n{text[:1200]}")
+    for sec in ("adverse_reactions", "warnings", "boxed_warning",
+                "warnings_and_precautions", "clinical_pharmacology", "description"):
+        txt = (fda_label or {}).get(sec, "")
+        if txt:
+            section_texts.append(f"=== {sec.upper()} ===\n{txt[:1200]}")
 
     if not section_texts:
-        logger.warning("[SEStore] No FDA label sections for %s — skipping parse", drug_name)
+        logger.warning("[SEStore] No label sections for %s — cannot parse", drug_name)
         return None
 
     prompt = _build_gemini_prompt(drug_name, "\n\n".join(section_texts))
 
+    t0 = time.time()
     try:
         resp = model.generate_content(
             prompt,
             generation_config={"temperature": 0.1, "max_output_tokens": 2000},
         )
+        latency_ms = int((time.time() - t0) * 1000)
         raw = (resp.text or "").strip()
-
-        # Strip markdown fences if present
-        if "```json" in raw:
-            raw = raw.split("```json", 1)[1].split("```")[0].strip()
-        elif raw.startswith("```"):
-            raw = "\n".join(
-                line for line in raw.splitlines()
-                if not line.strip().startswith("```")
-            ).strip()
-
-        effects_list = json.loads(raw)
-
-        # Validate — must be a non-empty list of dicts
-        if not isinstance(effects_list, list) or not effects_list:
-            logger.warning("[SEStore] Gemini returned empty/non-list for %s", drug_name)
-            return None
-
+        logger.info("[SEStore] Gemini responded in %dms for %s (%d chars)",
+                    latency_ms, drug_name, len(raw))
     except Exception as exc:
-        logger.warning("[SEStore] Gemini parse failed for %s: %s", drug_name, exc)
+        latency_ms = int((time.time() - t0) * 1000)
+        logger.error("[SEStore] Gemini call failed for %s after %dms: %s",
+                     drug_name, latency_ms, exc)
         return None
 
-    # Group by frequency tier
+    # Strip markdown fences
+    if "```json" in raw:
+        raw = raw.split("```json", 1)[1].split("```")[0].strip()
+    elif raw.startswith("```"):
+        raw = "\n".join(l for l in raw.splitlines() if not l.strip().startswith("```")).strip()
+
+    try:
+        effects_list = json.loads(raw)
+        if not isinstance(effects_list, list):
+            raise ValueError("Response is not a JSON array")
+        if not effects_list:
+            raise ValueError("Response array is empty")
+    except Exception as exc:
+        logger.error("[SEStore] Gemini JSON parse failed for %s: %s — raw: %.200s",
+                     drug_name, exc, raw)
+        return None
+
+    # Validate, normalize, and deduplicate
+    validated = []
+    for item in effects_list:
+        if isinstance(item, dict) and item.get("display_name"):
+            validated.append(_validate_effect_schema(item))
+    validated = _deduplicate_effects(validated)
+
+    if not validated:
+        logger.warning("[SEStore] Gemini returned no valid effects for %s after validation", drug_name)
+        return None
+
+    # Group into tiers
     tiers: dict[str, Any] = {
         "very_common": {"label": "Very Common (>10%)",  "items": []},
-        "common":      {"label": "Common (1-10%)",       "items": []},
-        "uncommon":    {"label": "Uncommon (<1%)",        "items": []},
-        "serious":     {"label": "Serious — Seek Immediate Medical Attention",
+        "common":      {"label": "Common (1–10%)",       "items": []},
+        "uncommon":    {"label": "Uncommon (0.1–1%)",    "items": []},
+        "rare":        {"label": "Rare (<0.1%)",          "items": []},
+        "serious":     {"label": "Serious — Seek Medical Attention",
                         "items": [], "urgent": True},
     }
-
-    boxed_warnings = []
-    for effect in effects_list:
-        if not isinstance(effect, dict):
-            continue
-        freq = effect.get("frequency", "common")
-        if freq not in tiers:
-            freq = "common"
-        # Cap per tier at 10 items
-        if len(tiers[freq]["items"]) < 10:
+    for effect in validated:
+        freq = effect["frequency_category"]
+        if freq in tiers and len(tiers[freq]["items"]) < 10:
             tiers[freq]["items"].append(effect)
 
-    # Also pull boxed warnings from FDA label directly (more reliable than AI)
+    # Boxed warnings direct from label (more reliable than AI)
     bw_text = (fda_label or {}).get("boxed_warning", "")
-    if bw_text:
-        boxed_warnings = [s.strip() for s in bw_text.split(".") if len(s.strip()) > 10][:3]
+    boxed_warnings = [s.strip() for s in bw_text.split(".") if len(s.strip()) > 10][:3] if bw_text else []
 
-    # MOA from clinical_pharmacology or description
-    moa_text = (fda_label or {}).get("clinical_pharmacology", "") or (fda_label or {}).get("description", "")
-    sentences = [s.strip() + "." for s in moa_text.split(".") if len(s.strip()) > 15]
-    moa_summary = " ".join(sentences[:2])[:300]
-    moa_detail  = " ".join(sentences[:5])[:800]
+    # MOA from label sections
+    moa_raw = (fda_label or {}).get("clinical_pharmacology", "") or (fda_label or {}).get("description", "")
+    sents = [s.strip() + "." for s in moa_raw.split(".") if len(s.strip()) > 15]
+    moa_summary = " ".join(sents[:2])[:300]
+    moa_detail  = " ".join(sents[:5])[:800]
 
+    overall_conf = _overall_confidence(validated)
     total = sum(len(t["items"]) for t in tiers.values())
-    logger.info("[SEStore] Gemini extracted %d side effects for %s", total, drug_name)
+
+    logger.info("[SEStore] Gemini parse OK for %s — %d effects, conf=%.2f, latency=%dms",
+                drug_name, total, overall_conf, latency_ms)
 
     return {
-        "drug_name":    drug_name,
-        "generic_name": drug_name,
-        "brand_names":  [],
-        "side_effects": tiers,
+        "drug":           drug_name,
+        "generic_name":   drug_name,
+        "brand_names":    [],
+        "side_effects":   tiers,
         "boxed_warnings": boxed_warnings,
         "mechanism_of_action": {
             "summary":             moa_summary,
@@ -524,13 +767,16 @@ def parse_label_with_gemini(drug_name: str, fda_label: dict) -> dict | None:
             "pharmacologic_class": "",
             "molecular_targets":   [],
         },
-        "sources":      [],
-        "_from_gemini": True,
+        "sources":          [],
+        "overall_confidence": overall_conf,
+        "overall_verdict":  "CONSULT_PHARMACIST" if any(e["red_flag"] for e in validated) else "CAUTION",
+        "has_red_flag":     any(e["red_flag"] for e in validated),
+        "_from_gemini":     True,
     }
 
 
 # ---------------------------------------------------------------------------
-# Main entry point used by orchestrator + API endpoints
+# Main entry point
 # ---------------------------------------------------------------------------
 
 async def get_or_fetch_side_effects(
@@ -543,43 +789,51 @@ async def get_or_fetch_side_effects(
     Return structured side effects for a drug.
 
     Priority:
-      1. DB cache  → fast (< 10ms)
-      2. Gemini parse of FDA label + store to DB
-      3. None (caller falls back to heuristic regex parser)
+      1. DB cache            — < 10ms
+      2. Gemini parse + store — first hit only
+      3. None                — caller falls back to heuristic parser
+
+    Always logs: cache hit/miss, Gemini latency, fallback usage.
+    Never returns empty results — returns None to trigger caller fallback.
     """
     if not drug_name:
         return None
 
     # 1. DB lookup
+    t0 = time.time()
     cached = get_from_db(drug_name)
     if cached:
-        logger.info("[SEStore] DB cache hit for %s", drug_name)
+        logger.info("[SEStore] Cache HIT for %s (%.0fms)", drug_name, (time.time()-t0)*1000)
         return cached
 
+    logger.info("[SEStore] Cache MISS for %s", drug_name)
+
     if not fda_label:
+        logger.warning("[SEStore] No FDA label for %s — cannot parse, using heuristic fallback",
+                       drug_name)
         return None
 
     # 2. Gemini parse
-    logger.info("[SEStore] Cache miss for %s — parsing with Gemini", drug_name)
     parsed = parse_label_with_gemini(drug_name, fda_label)
+
     if not parsed:
+        logger.warning("[SEStore] Gemini failed for %s — using heuristic fallback", drug_name)
         return None
 
-    # Enrich with metadata from raw openFDA result
+    # Enrich with raw openFDA metadata
     if raw_label:
-        openfda  = raw_label.get("openfda", {})
-        set_id   = (openfda.get("set_id") or [None])[0]
-        eff_date = raw_label.get("effective_time", "")
+        openfda   = raw_label.get("openfda", {})
+        set_id    = (openfda.get("set_id") or [None])[0]
+        eff_date  = raw_label.get("effective_time", "")
         label_date = (
             f"{eff_date[:4]}-{eff_date[4:6]}-{eff_date[6:8]}"
             if eff_date and len(eff_date) >= 8 else ""
         )
-        parsed["brand_names"] = list(openfda.get("brand_name", []))[:5]
+        parsed["brand_names"]  = list(openfda.get("brand_name", []))[:5]
         parsed["generic_name"] = (openfda.get("generic_name") or [drug_name])[0]
         parsed["mechanism_of_action"]["pharmacologic_class"] = (
             (openfda.get("pharm_class_epc") or openfda.get("pharm_class_moa") or [""])[0]
         )
-
         effective_setid = dailymed_setid or set_id
         sources = []
         if effective_setid:
@@ -599,10 +853,10 @@ async def get_or_fetch_side_effects(
         })
         parsed["sources"] = sources
 
-    # 3. Store to DB (don't let a failure crash the request)
+    # 3. Store to DB
     try:
         store_to_db(drug_name, parsed)
     except Exception as exc:
-        logger.warning("[SEStore] Background store failed for %s: %s", drug_name, exc)
+        logger.warning("[SEStore] Store failed for %s: %s", drug_name, exc)
 
     return parsed

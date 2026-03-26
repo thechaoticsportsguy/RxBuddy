@@ -302,6 +302,17 @@ async def run_pipeline(query: str) -> dict:
         fetched_at=fetched_at,
     )
 
+    # ── Red-flag verdict upgrade (side_effects intent only) ───────────────
+    # If any parsed side effect has red_flag=True, upgrade verdict to
+    # CONSULT_PHARMACIST so the frontend shows the appropriate warning level.
+    if intent_str == "side_effects" and structured.get("side_effects_data"):
+        from pipeline.verdict_enforcer import enforce_verdict_for_red_flags
+        upgraded = enforce_verdict_for_red_flags(verdict, structured["side_effects_data"])
+        if upgraded != verdict:
+            verdict = upgraded
+            structured["verdict"] = upgraded
+            logger.info("[Pipeline] Verdict upgraded to %s due to red flags", upgraded)
+
     # Build full answer text for legacy consumers
     answer_text = (
         f"VERDICT: {verdict}\n"
