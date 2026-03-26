@@ -37,7 +37,7 @@ from pipeline.failsafe import build_failsafe_response, build_emergency_response
 logger = logging.getLogger("rxbuddy.pipeline.orchestrator")
 
 
-def _build_structured_answer(
+async def _build_structured_answer(
     verdict: str,
     explanation: Explanation,
     decision: DecisionResult,
@@ -292,7 +292,7 @@ async def run_pipeline(query: str) -> dict:
     explanation = clean_response(explanation)
 
     # ── Build the final structured response ───────────────────────────────
-    structured = _build_structured_answer(
+    structured = await _build_structured_answer(
         verdict=verdict,
         explanation=explanation,
         decision=decision,
