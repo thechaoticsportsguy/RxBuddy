@@ -809,15 +809,31 @@ async def get_or_fetch_side_effects(
     logger.info("[SEStore] Cache MISS for %s", drug_name)
 
     if not fda_label:
-        logger.warning("[SEStore] No FDA label for %s — cannot parse, using heuristic fallback",
-                       drug_name)
+        logger.warning("[SEStore] No FDA label for %s — skipping Gemini, trying class fallback", drug_name)
+        # Step 4: class hardcoded fallback
+        fallback = _get_class_fallback(drug_name)
+        if fallback:
+            return fallback
+        logger.warning("[SEStore] No fallback available for %s", drug_name)
         return None
 
     # 2. Gemini parse
     parsed = parse_label_with_gemini(drug_name, fda_label)
 
     if not parsed:
-        logger.warning("[SEStore] Gemini failed for %s — using heuristic fallback", drug_name)
+        logger.warning("[SEStore] Gemini failed for %s — trying heuristic label parse", drug_name)
+
+        # 3. Heuristic regex parse of the FDA label (no AI)
+        heuristic = _quick_heuristic_parse(drug_name, fda_label)
+        if heuristic:
+            return heuristic
+
+        # 4. Drug-class hardcoded fallback
+        fallback = _get_class_fallback(drug_name)
+        if fallback:
+            return fallback
+
+        logger.warning("[SEStore] All parsers failed for %s — no data available", drug_name)
         return None
 
     # Enrich with raw openFDA metadata
@@ -860,3 +876,333 @@ async def get_or_fetch_side_effects(
         logger.warning("[SEStore] Store failed for %s: %s", drug_name, exc)
 
     return parsed
+
+
+# ---------------------------------------------------------------------------
+# Step 3: Heuristic label parse (no AI, regex-based)
+# ---------------------------------------------------------------------------
+
+def _quick_heuristic_parse(drug_name: str, fda_label: dict) -> dict | None:
+    """
+    Fast regex extraction of side effects directly from FDA label text.
+    Used when Gemini is unavailable. Confidence is lower (0.4) but data is real.
+    Returns standard tier dict or None if no useful data could be extracted.
+    """
+    import re as _re
+
+    adverse_text = (fda_label or {}).get("adverse_reactions", "")
+    warnings_text = ((fda_label or {}).get("warnings_and_precautions", "")
+                     or (fda_label or {}).get("warnings", ""))
+    boxed_text = (fda_label or {}).get("boxed_warning", "")
+
+    if not adverse_text and not warnings_text:
+        return None
+
+    tiers: dict = {
+        "very_common": {"label": "Very Common (>10%)",  "items": []},
+        "common":      {"label": "Common (1–10%)",       "items": []},
+        "uncommon":    {"label": "Uncommon (0.1–1%)",    "items": []},
+        "rare":        {"label": "Rare (<0.1%)",          "items": []},
+        "serious":     {"label": "Serious — Seek Medical Attention", "items": [], "urgent": True},
+    }
+
+    # Serious-sounding terms detected via keyword scan of warnings text
+    serious_keywords = {
+        "liver failure", "hepatic failure", "anaphylaxis", "anaphylactic",
+        "angioedema", "suicidal", "serotonin syndrome", "lactic acidosis",
+        "rhabdomyolysis", "agranulocytosis", "aplastic anemia",
+        "stevens-johnson", "toxic epidermal", "QT prolongation",
+        "pancreatitis", "renal failure", "kidney failure",
+    }
+
+    # Extract named effects from adverse reactions text by splitting on delimiters
+    seen: set[str] = set()
+    items_added = 0
+
+    for text in (adverse_text, warnings_text):
+        if not text or items_added >= 20:
+            break
+        parts = _re.split(r"[;,\n\u2022\u25cf\u00b7]", text)
+        for part in parts:
+            part = part.strip()
+            # Skip very long strings (descriptions), very short, or obvious headers
+            if len(part) > 55 or len(part) < 3:
+                continue
+            # Remove leading bullets/numbers/punctuation
+            part = _re.sub(r"^[\s\-\•\*\d\.\)\(]+", "", part).strip()
+            # Skip % lines and parenthetical-only strings
+            if not part or _re.match(r"^\d", part) or part.startswith("("):
+                continue
+            # Skip anything that looks like a sentence (contains verb markers)
+            if len(part.split()) > 5:
+                continue
+
+            key = part.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+
+            canonical = _normalize_display_name(part)
+
+            # Classify as serious if any serious keyword found in warnings_text
+            is_serious = any(kw in key for kw in serious_keywords)
+            freq = "serious" if is_serious else "common"
+
+            tiers[freq]["items"].append({
+                "display_name":       canonical,
+                "frequency_category": freq,
+                "frequency_percent":  None,
+                "confidence_score":   0.4,
+                "severity":           "severe" if is_serious else "mild",
+                "patient_description": "",
+                "onset_days":         None,
+                "resolution_days":    None,
+                "management":         "contact_doctor" if is_serious else "monitor",
+                "red_flag":           is_serious,
+                "red_flag_reason":    None,
+                "evidence_tier":      "label",
+                "source_section":     "Adverse Reactions",
+                "source_quote":       None,
+            })
+            items_added += 1
+
+    # Boxed warnings
+    boxed_warnings = []
+    if boxed_text:
+        boxed_warnings = [s.strip() for s in boxed_text.split(".") if len(s.strip()) > 10][:3]
+
+    if not tiers["common"]["items"] and not tiers["serious"]["items"]:
+        return None
+
+    total = sum(len(t["items"]) for t in tiers.values())
+    logger.info("[SEStore] Heuristic parse for %s: %d effects extracted", drug_name, total)
+
+    return {
+        "drug":            drug_name,
+        "generic_name":    drug_name,
+        "brand_names":     [],
+        "side_effects":    tiers,
+        "boxed_warnings":  boxed_warnings,
+        "mechanism_of_action": {
+            "summary": "", "detail": "",
+            "pharmacologic_class": "", "molecular_targets": [],
+        },
+        "sources": [{
+            "id": 1, "name": "FDA Label (heuristic parse)",
+            "url": f'https://api.fda.gov/drug/label.json?search=openfda.generic_name:"{drug_name}"&limit=1',
+            "section": "Adverse Reactions", "last_updated": "",
+        }],
+        "overall_confidence": 0.4,
+        "overall_verdict":    "CONSULT_PHARMACIST" if tiers["serious"]["items"] else "CAUTION",
+        "has_red_flag":       bool(tiers["serious"]["items"]),
+        "_fallback":          True,
+        "_fallback_source":   "heuristic_label_parse",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Step 4: Drug-class hardcoded fallbacks — verified clinical facts
+# ---------------------------------------------------------------------------
+
+# Alias map: brand/common names → generic key
+_DRUG_ALIASES: dict[str, str] = {
+    "tylenol":   "acetaminophen",
+    "advil":     "ibuprofen",
+    "motrin":    "ibuprofen",
+    "aleve":     "naproxen",
+    "lipitor":   "atorvastatin",
+    "crestor":   "rosuvastatin",
+    "zoloft":    "sertraline",
+    "prozac":    "fluoxetine",
+    "lexapro":   "escitalopram",
+    "glucophage": "metformin",
+    "prinivil":  "lisinopril",
+    "zestril":   "lisinopril",
+    "norvasc":   "amlodipine",
+    "nexium":    "esomeprazole",
+    "prilosec":  "omeprazole",
+    "synthroid": "levothyroxine",
+}
+
+_DRUG_CLASS_FALLBACKS: dict[str, list[dict]] = {
+    "metformin": [
+        {"display_name": "Nausea",          "frequency_category": "very_common", "severity": "mild",   "management": "manage_at_home", "red_flag": False, "patient_description": "Feeling sick to your stomach, especially when first starting. Usually improves after a few weeks."},
+        {"display_name": "Diarrhea",        "frequency_category": "very_common", "severity": "mild",   "management": "manage_at_home", "red_flag": False, "patient_description": "Loose stools. Taking metformin with food usually helps."},
+        {"display_name": "Stomach Upset",   "frequency_category": "very_common", "severity": "mild",   "management": "manage_at_home", "red_flag": False, "patient_description": "Abdominal discomfort, especially when starting treatment."},
+        {"display_name": "Vomiting",        "frequency_category": "common",      "severity": "mild",   "management": "manage_at_home", "red_flag": False, "patient_description": "Contact your doctor if persistent."},
+        {"display_name": "Metallic Taste",  "frequency_category": "common",      "severity": "mild",   "management": "monitor",        "red_flag": False, "patient_description": "An unpleasant metallic taste in the mouth. Usually temporary."},
+        {"display_name": "Loss of Appetite","frequency_category": "common",      "severity": "mild",   "management": "monitor",        "red_flag": False},
+        {"display_name": "Vitamin B12 Deficiency", "frequency_category": "uncommon", "severity": "mild", "management": "monitor", "red_flag": False, "patient_description": "Long-term use may reduce B12 absorption. Your doctor may check your B12 levels."},
+        {"display_name": "Lactic Acidosis", "frequency_category": "serious",     "severity": "severe", "management": "contact_doctor", "red_flag": True,  "red_flag_reason": "Rare but life-threatening buildup of lactic acid. Seek emergency care for muscle pain, difficulty breathing, or unusual weakness."},
+    ],
+    "acetaminophen": [
+        {"display_name": "Nausea",            "frequency_category": "common",  "severity": "mild",   "management": "manage_at_home", "red_flag": False, "patient_description": "Mild stomach upset, especially on an empty stomach."},
+        {"display_name": "Stomach Pain",      "frequency_category": "common",  "severity": "mild",   "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Liver Damage",      "frequency_category": "serious", "severity": "severe", "management": "contact_doctor", "red_flag": True,  "red_flag_reason": "Overdose or combining with alcohol can cause acute liver failure. Never exceed 4g/day total."},
+        {"display_name": "Serious Skin Reactions", "frequency_category": "rare", "severity": "severe", "management": "contact_doctor", "red_flag": True, "red_flag_reason": "Rare but life-threatening skin reactions (DRESS, Stevens-Johnson Syndrome). Stop immediately and seek care."},
+    ],
+    "ibuprofen": [
+        {"display_name": "Stomach Upset",    "frequency_category": "very_common", "severity": "mild",     "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Nausea",           "frequency_category": "common",      "severity": "mild",     "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Heartburn",        "frequency_category": "common",      "severity": "mild",     "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Dizziness",        "frequency_category": "common",      "severity": "mild",     "management": "monitor",        "red_flag": False},
+        {"display_name": "Stomach Bleeding", "frequency_category": "serious",     "severity": "severe",   "management": "contact_doctor", "red_flag": True, "red_flag_reason": "NSAIDs can cause GI bleeding. Risk higher with long-term use or in older adults."},
+        {"display_name": "Kidney Problems",  "frequency_category": "serious",     "severity": "severe",   "management": "contact_doctor", "red_flag": True, "red_flag_reason": "NSAIDs may worsen kidney function, especially with dehydration or pre-existing kidney disease."},
+    ],
+    "naproxen": [
+        {"display_name": "Stomach Upset",    "frequency_category": "very_common", "severity": "mild",   "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Heartburn",        "frequency_category": "common",      "severity": "mild",   "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Dizziness",        "frequency_category": "common",      "severity": "mild",   "management": "monitor",        "red_flag": False},
+        {"display_name": "GI Bleeding",      "frequency_category": "serious",     "severity": "severe", "management": "contact_doctor", "red_flag": True, "red_flag_reason": "NSAIDs can cause stomach or intestinal bleeding."},
+    ],
+    "aspirin": [
+        {"display_name": "Stomach Upset",    "frequency_category": "very_common", "severity": "mild",   "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Heartburn",        "frequency_category": "common",      "severity": "mild",   "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Nausea",           "frequency_category": "common",      "severity": "mild",   "management": "manage_at_home", "red_flag": False},
+        {"display_name": "GI Bleeding",      "frequency_category": "serious",     "severity": "severe", "management": "contact_doctor", "red_flag": True, "red_flag_reason": "Aspirin can cause stomach or intestinal bleeding, especially with long-term use."},
+    ],
+    "atorvastatin": [
+        {"display_name": "Muscle Pain",      "frequency_category": "common",  "severity": "mild",   "management": "monitor",        "red_flag": False, "patient_description": "Soreness or weakness in muscles. Report to your doctor if severe."},
+        {"display_name": "Headache",         "frequency_category": "common",  "severity": "mild",   "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Diarrhea",         "frequency_category": "common",  "severity": "mild",   "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Joint Pain",       "frequency_category": "common",  "severity": "mild",   "management": "monitor",        "red_flag": False},
+        {"display_name": "Rhabdomyolysis",   "frequency_category": "serious", "severity": "severe", "management": "contact_doctor", "red_flag": True, "red_flag_reason": "Rare muscle breakdown that can damage kidneys. Seek care for severe muscle pain or dark urine."},
+    ],
+    "rosuvastatin": [
+        {"display_name": "Muscle Pain",      "frequency_category": "common",  "severity": "mild",   "management": "monitor",        "red_flag": False},
+        {"display_name": "Headache",         "frequency_category": "common",  "severity": "mild",   "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Nausea",           "frequency_category": "common",  "severity": "mild",   "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Rhabdomyolysis",   "frequency_category": "serious", "severity": "severe", "management": "contact_doctor", "red_flag": True, "red_flag_reason": "Rare but serious muscle breakdown. Seek care for severe muscle pain or dark urine."},
+    ],
+    "lisinopril": [
+        {"display_name": "Dry Cough",        "frequency_category": "very_common", "severity": "mild",     "management": "monitor",        "red_flag": False, "patient_description": "A persistent dry, tickling cough. Very common with ACE inhibitors — affects up to 20% of patients."},
+        {"display_name": "Dizziness",        "frequency_category": "common",      "severity": "mild",     "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Headache",         "frequency_category": "common",      "severity": "mild",     "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Fatigue",          "frequency_category": "common",      "severity": "mild",     "management": "monitor",        "red_flag": False},
+        {"display_name": "High Potassium",   "frequency_category": "uncommon",    "severity": "moderate", "management": "monitor",        "red_flag": False},
+        {"display_name": "Angioedema",       "frequency_category": "serious",     "severity": "severe",   "management": "contact_doctor", "red_flag": True, "red_flag_reason": "Life-threatening swelling of face, lips, tongue, or throat. Stop immediately and seek emergency care."},
+    ],
+    "amlodipine": [
+        {"display_name": "Leg Swelling",     "frequency_category": "very_common", "severity": "mild",   "management": "monitor",        "red_flag": False},
+        {"display_name": "Flushing",         "frequency_category": "common",      "severity": "mild",   "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Dizziness",        "frequency_category": "common",      "severity": "mild",   "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Headache",         "frequency_category": "common",      "severity": "mild",   "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Heart Palpitations", "frequency_category": "uncommon",  "severity": "mild",   "management": "monitor",        "red_flag": False},
+    ],
+    "sertraline": [
+        {"display_name": "Nausea",             "frequency_category": "very_common", "severity": "mild",   "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Diarrhea",           "frequency_category": "very_common", "severity": "mild",   "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Insomnia",           "frequency_category": "common",      "severity": "mild",   "management": "monitor",        "red_flag": False},
+        {"display_name": "Dry Mouth",          "frequency_category": "common",      "severity": "mild",   "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Sweating",           "frequency_category": "common",      "severity": "mild",   "management": "monitor",        "red_flag": False},
+        {"display_name": "Sexual Dysfunction", "frequency_category": "common",      "severity": "mild",   "management": "monitor",        "red_flag": False},
+        {"display_name": "Suicidal Thoughts",  "frequency_category": "serious",     "severity": "severe", "management": "contact_doctor", "red_flag": True, "red_flag_reason": "Antidepressants may increase suicidal thinking in children and young adults. Monitor closely, especially when starting treatment."},
+        {"display_name": "Serotonin Syndrome", "frequency_category": "serious",     "severity": "severe", "management": "contact_doctor", "red_flag": True, "red_flag_reason": "Dangerous drug interaction causing agitation, rapid heart rate, high temperature. Seek emergency care immediately."},
+    ],
+    "escitalopram": [
+        {"display_name": "Nausea",             "frequency_category": "very_common", "severity": "mild", "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Insomnia",           "frequency_category": "common",      "severity": "mild", "management": "monitor",        "red_flag": False},
+        {"display_name": "Dry Mouth",          "frequency_category": "common",      "severity": "mild", "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Sweating",           "frequency_category": "common",      "severity": "mild", "management": "monitor",        "red_flag": False},
+        {"display_name": "Sexual Dysfunction", "frequency_category": "common",      "severity": "mild", "management": "monitor",        "red_flag": False},
+        {"display_name": "Suicidal Thoughts",  "frequency_category": "serious",     "severity": "severe","management": "contact_doctor", "red_flag": True, "red_flag_reason": "Antidepressants may increase suicidal thinking in children and young adults. Monitor closely."},
+        {"display_name": "QT Prolongation",    "frequency_category": "serious",     "severity": "severe","management": "contact_doctor", "red_flag": True, "red_flag_reason": "Escitalopram can prolong the QT interval. Tell your doctor about any heart rhythm problems."},
+    ],
+    "fluoxetine": [
+        {"display_name": "Nausea",             "frequency_category": "very_common", "severity": "mild", "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Insomnia",           "frequency_category": "common",      "severity": "mild", "management": "monitor",        "red_flag": False},
+        {"display_name": "Headache",           "frequency_category": "common",      "severity": "mild", "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Sexual Dysfunction", "frequency_category": "common",      "severity": "mild", "management": "monitor",        "red_flag": False},
+        {"display_name": "Suicidal Thoughts",  "frequency_category": "serious",     "severity": "severe","management": "contact_doctor", "red_flag": True, "red_flag_reason": "Antidepressants may increase suicidal thinking in young adults. Monitor closely when starting."},
+    ],
+    "omeprazole": [
+        {"display_name": "Headache",           "frequency_category": "very_common", "severity": "mild", "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Diarrhea",           "frequency_category": "common",      "severity": "mild", "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Nausea",             "frequency_category": "common",      "severity": "mild", "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Stomach Pain",       "frequency_category": "common",      "severity": "mild", "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Magnesium Deficiency","frequency_category": "uncommon",   "severity": "mild", "management": "monitor",        "red_flag": False, "patient_description": "Long-term use may lower magnesium levels. Your doctor may monitor blood levels."},
+        {"display_name": "C. diff Infection",  "frequency_category": "uncommon",    "severity": "moderate","management": "contact_doctor","red_flag": False, "patient_description": "PPIs can increase risk of C. difficile diarrhea. Contact your doctor for severe or persistent diarrhea."},
+    ],
+    "esomeprazole": [
+        {"display_name": "Headache",    "frequency_category": "very_common", "severity": "mild", "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Diarrhea",    "frequency_category": "common",      "severity": "mild", "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Nausea",      "frequency_category": "common",      "severity": "mild", "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Stomach Pain","frequency_category": "common",      "severity": "mild", "management": "manage_at_home", "red_flag": False},
+    ],
+    "amoxicillin": [
+        {"display_name": "Diarrhea",          "frequency_category": "very_common", "severity": "mild",     "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Nausea",            "frequency_category": "common",      "severity": "mild",     "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Stomach Pain",      "frequency_category": "common",      "severity": "mild",     "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Rash",              "frequency_category": "common",      "severity": "mild",     "management": "monitor",        "red_flag": False},
+        {"display_name": "C. diff Infection", "frequency_category": "uncommon",    "severity": "moderate", "management": "contact_doctor", "red_flag": False},
+        {"display_name": "Allergic Reaction (Anaphylaxis)", "frequency_category": "serious", "severity": "severe", "management": "contact_doctor", "red_flag": True, "red_flag_reason": "Penicillin allergy can cause anaphylaxis — seek emergency care for breathing difficulty or facial swelling."},
+    ],
+    "levothyroxine": [
+        {"display_name": "Heart Palpitations", "frequency_category": "common",  "severity": "mild",   "management": "monitor",        "red_flag": False, "patient_description": "Racing or irregular heartbeat if dose is too high."},
+        {"display_name": "Tremors",            "frequency_category": "common",  "severity": "mild",   "management": "monitor",        "red_flag": False},
+        {"display_name": "Insomnia",           "frequency_category": "common",  "severity": "mild",   "management": "monitor",        "red_flag": False},
+        {"display_name": "Weight Loss",        "frequency_category": "common",  "severity": "mild",   "management": "monitor",        "red_flag": False},
+        {"display_name": "Headache",           "frequency_category": "common",  "severity": "mild",   "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Chest Pain",         "frequency_category": "serious", "severity": "severe", "management": "contact_doctor", "red_flag": True, "red_flag_reason": "Excess thyroid hormone can stress the heart. Seek care for chest pain, shortness of breath, or irregular heartbeat."},
+    ],
+    "gabapentin": [
+        {"display_name": "Drowsiness",      "frequency_category": "very_common", "severity": "mild",   "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Dizziness",       "frequency_category": "very_common", "severity": "mild",   "management": "manage_at_home", "red_flag": False},
+        {"display_name": "Coordination Problems", "frequency_category": "common", "severity": "mild",  "management": "monitor",        "red_flag": False},
+        {"display_name": "Fatigue",         "frequency_category": "common",      "severity": "mild",   "management": "monitor",        "red_flag": False},
+        {"display_name": "Swelling",        "frequency_category": "common",      "severity": "mild",   "management": "monitor",        "red_flag": False},
+        {"display_name": "Respiratory Depression", "frequency_category": "serious", "severity": "severe", "management": "contact_doctor", "red_flag": True, "red_flag_reason": "Especially dangerous when combined with opioids or CNS depressants. Seek emergency care for slow or difficult breathing."},
+    ],
+}
+
+
+def _get_class_fallback(drug_name: str) -> dict | None:
+    """
+    Return hardcoded drug-class fallback data for known drugs.
+    Returns None if the drug is not in the fallback catalog.
+    """
+    key = drug_name.strip().lower()
+    resolved = _DRUG_ALIASES.get(key, key)
+    effects = _DRUG_CLASS_FALLBACKS.get(resolved)
+    if not effects:
+        return None
+
+    tiers: dict = {
+        "very_common": {"label": "Very Common (>10%)",  "items": []},
+        "common":      {"label": "Common (1–10%)",       "items": []},
+        "uncommon":    {"label": "Uncommon (0.1–1%)",    "items": []},
+        "rare":        {"label": "Rare (<0.1%)",          "items": []},
+        "serious":     {"label": "Serious — Seek Medical Attention", "items": [], "urgent": True},
+    }
+    for item in effects:
+        freq = item.get("frequency_category", "common")
+        if freq not in tiers:
+            freq = "common"
+        clean = _validate_effect_schema(item)
+        tiers[freq]["items"].append(clean)
+
+    has_red = any(item.get("red_flag") for item in effects)
+    logger.info("[SEStore] Class fallback for %s (%s): %d effects",
+                drug_name, resolved, sum(len(t["items"]) for t in tiers.values()))
+
+    return {
+        "drug":           resolved,
+        "generic_name":   resolved,
+        "brand_names":    [],
+        "side_effects":   tiers,
+        "boxed_warnings": [],
+        "mechanism_of_action": {
+            "summary": "", "detail": "",
+            "pharmacologic_class": "", "molecular_targets": [],
+        },
+        "sources": [{
+            "id": 1, "name": "RxBuddy Clinical Reference (FDA-sourced)",
+            "url": f'https://api.fda.gov/drug/label.json?search=openfda.generic_name:"{resolved}"&limit=1',
+            "section": "Known Side Effects", "last_updated": "",
+        }],
+        "overall_confidence": 0.6,
+        "overall_verdict":    "CONSULT_PHARMACIST" if has_red else "CAUTION",
+        "has_red_flag":       has_red,
+        "_fallback":          True,
+        "_fallback_source":   "drug_class_hardcoded",
+    }

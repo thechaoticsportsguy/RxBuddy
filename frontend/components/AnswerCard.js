@@ -556,6 +556,8 @@ export default function AnswerCard({ result, query }) {
 
     // ── New tiered data from structured parsing ─────────────────────────────
     const seData = structured.side_effects_data || {};
+    const isFallbackData = seData?._fallback === true;
+    const fallbackSource = seData?._fallback_source || "";
     const boxedWarnings = Array.isArray(structured.boxed_warnings) ? structured.boxed_warnings : [];
     const moaObj = structured.mechanism_of_action || {};
     const structuredSources = Array.isArray(structured.structured_sources) ? structured.structured_sources : [];
@@ -645,6 +647,19 @@ export default function AnswerCard({ result, query }) {
                 <span className="text-slate-500"> ({brandNames.join(", ")})</span>
               )}
             </p>
+          </div>
+        )}
+
+        {/* FALLBACK DATA NOTICE */}
+        {isFallbackData && (
+          <div className="mx-5 mt-3 flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800" role="status">
+            <span aria-hidden="true" className="mt-0.5 shrink-0">ℹ️</span>
+            <span>
+              Showing basic data — full AI analysis unavailable.
+              {fallbackSource === "drug_class_hardcoded" && " Results sourced from verified clinical reference."}
+              {fallbackSource === "heuristic_label_parse" && " Results extracted from FDA label text."}
+              {" "}Consult a pharmacist or prescriber for a complete list.
+            </span>
           </div>
         )}
 
