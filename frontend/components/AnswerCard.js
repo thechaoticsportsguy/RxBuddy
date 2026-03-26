@@ -111,6 +111,44 @@ function sanitizeItems(items) {
     .filter(Boolean);
 }
 
+/**
+ * Extract rich side-effect objects from tier items.
+ * Backend returns items as objects with display_name, frequency_percent,
+ * patient_description, severity, management, onset_days, resolution_days, etc.
+ * If items are plain strings, wraps them in a minimal object.
+ */
+function extractRichItems(items) {
+  if (!items || !Array.isArray(items)) return [];
+  return items
+    .map((item) => {
+      if (typeof item === "string") {
+        const clean = stripMarkdown(item);
+        return clean ? { display_name: clean } : null;
+      }
+      if (typeof item === "object" && item !== null) {
+        const name = item.display_name || item.reaction || item.name || "";
+        const clean = stripMarkdown(String(name));
+        if (!clean) return null;
+        return {
+          display_name: clean,
+          frequency_percent: item.frequency_percent ?? null,
+          frequency_category: item.frequency_category || null,
+          confidence_score: item.confidence_score ?? null,
+          severity: item.severity || null,
+          patient_description: item.patient_description || null,
+          onset_days: item.onset_days ?? null,
+          resolution_days: item.resolution_days ?? null,
+          management: item.management || null,
+          red_flag: item.red_flag || false,
+          red_flag_reason: item.red_flag_reason || null,
+          source_quote: item.source_quote || null,
+        };
+      }
+      return null;
+    })
+    .filter(Boolean);
+}
+
 // Phrases that indicate placeholder/error strings — never render as medical data
 const PLACEHOLDER_SE_PATTERNS = [
   /temporary error/i,
@@ -408,6 +446,114 @@ function filterBanned(items) {
   });
 }
 
+// ── Management badge colors ─────────────────────────────────────────────────
+
+const MGMT_CONFIG = {
+  monitor: { label: "Monitor", className: "bg-green-100 text-green-700 border-green-200" },
+  manage_at_home: { label: "Manage at home", className: "bg-blue-100 text-blue-700 border-blue-200" },
+  contact_doctor: { label: "Contact doctor", className: "bg-red-100 text-red-700 border-red-200" },
+};
+
+const SEVERITY_CONFIG = {
+  mild: { label: "Mild", className: "bg-green-100 text-green-700" },
+  moderate: { label: "Moderate", className: "bg-yellow-100 text-yellow-700" },
+  severe: { label: "Severe", className: "bg-red-100 text-red-700" },
+};
+
+// ── RichSideEffectItem — individual side effect with full detail ────────────
+
+function RichSideEffectItem({ item, dotColor, isUrgent }) {
+  const [showDetail, setShowDetail] = useState(false);
+  const hasDetail = item.patient_description || item.onset_days || item.resolution_days || item.source_quote;
+
+  // Format frequency text
+  let freqText = "";
+  if (item.frequency_percent != null) {
+    freqText = `${item.frequency_percent}% of patients`;
+  }
+
+  // Format timing text
+  let timingText = "";
+  if (item.onset_days != null && item.resolution_days != null) {
+    timingText = `Starts ~${item.onset_days}d after starting, resolves ~${item.resolution_days}d`;
+  } else if (item.onset_days != null) {
+    timingText = `May start ~${item.onset_days} days after starting`;
+  } else if (item.resolution_days != null) {
+    timingText = `Usually resolves in ~${item.resolution_days} days`;
+  }
+
+  const mgmtCfg = item.management ? MGMT_CONFIG[item.management] : null;
+  const sevCfg = item.severity ? SEVERITY_CONFIG[item.severity] : null;
+
+  return (
+    <li className="text-sm text-slate-700">
+      <div className="flex items-start gap-2">
+        <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${dotColor}`} aria-hidden="true" />
+        <div className="flex-1 min-w-0">
+          {/* Main row: name + frequency + badges */}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="font-medium text-slate-800">{item.display_name}</span>
+
+            {freqText && (
+              <span className="text-xs text-slate-500">({freqText})</span>
+            )}
+
+            {sevCfg && item.severity !== "mild" && (
+              <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ${sevCfg.className}`}>
+                {sevCfg.label}
+              </span>
+            )}
+
+            {mgmtCfg && item.management !== "monitor" && (
+              <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium border ${mgmtCfg.className}`}>
+                {mgmtCfg.label}
+              </span>
+            )}
+
+            {item.red_flag && (
+              <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-bold bg-red-600 text-white" role="alert">
+                Seek help
+              </span>
+            )}
+          </div>
+
+          {/* Patient description (always visible if available) */}
+          {item.patient_description && (
+            <p className="mt-0.5 text-xs text-slate-500 leading-relaxed">
+              {item.patient_description}
+            </p>
+          )}
+
+          {/* Expandable detail section */}
+          {(timingText || item.source_quote || item.red_flag_reason) && (
+            <>
+              <button
+                type="button"
+                className="mt-0.5 text-[11px] text-slate-400 hover:text-slate-600 transition-colors"
+                onClick={() => setShowDetail(!showDetail)}
+              >
+                {showDetail ? "Less info ▲" : "More info ▼"}
+              </button>
+
+              {showDetail && (
+                <div className="mt-1 pl-0 text-xs text-slate-500 space-y-0.5">
+                  {timingText && <p>{timingText}</p>}
+                  {item.red_flag_reason && (
+                    <p className="text-red-600 font-medium">{item.red_flag_reason}</p>
+                  )}
+                  {item.source_quote && (
+                    <p className="italic text-slate-400">FDA label: &ldquo;{item.source_quote}&rdquo;</p>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </li>
+  );
+}
+
 // ── TierSection — collapsible side-effect frequency tier ────────────────────
 
 function TierSection({ tier, defaultExpanded, sources }) {
@@ -438,13 +584,27 @@ function TierSection({ tier, defaultExpanded, sources }) {
 
       {expanded && (
         <div id={`${headingId}-content`} className="px-4 pb-3">
-          <ul className="space-y-1" role="list">
-            {tier.items.map((item, i) => (
-              <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${tier.dotColor}`} aria-hidden="true" />
-                {item}
-              </li>
-            ))}
+          <ul className="space-y-2" role="list">
+            {tier.items.map((item, i) => {
+              // Handle both rich objects and plain strings
+              if (typeof item === "object" && item !== null && item.display_name) {
+                return (
+                  <RichSideEffectItem
+                    key={item.display_name + i}
+                    item={item}
+                    dotColor={tier.dotColor}
+                    isUrgent={tier.urgent}
+                  />
+                );
+              }
+              // Fallback: plain string item
+              return (
+                <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                  <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${tier.dotColor}`} aria-hidden="true" />
+                  {String(item)}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
@@ -564,11 +724,28 @@ export default function AnswerCard({ result, query }) {
     const brandNames = Array.isArray(structured.brand_names) ? structured.brand_names : [];
     const genericName = structured.generic_name || "";
 
-    // Build tiers — prefer structured tiers, fall back to flat lists
+    // Build tiers — prefer structured rich objects, fall back to flat string lists
+    // If seData has rich objects (from Gemini/DB parse), use extractRichItems
+    // Otherwise fall back to sanitizeItems for plain string arrays
+    const hasRichData = (items) =>
+      Array.isArray(items) && items.length > 0 && typeof items[0] === "object" && items[0]?.display_name;
+
+    const buildTierItems = (structuredItems, fallbackItems) => {
+      if (hasRichData(structuredItems)) {
+        return extractRichItems(structuredItems).filter(
+          (item) => !BANNED_SE_PHRASES.some((phrase) => item.display_name.toLowerCase().includes(phrase))
+        );
+      }
+      if (structuredItems && Array.isArray(structuredItems) && structuredItems.length > 0) {
+        return filterBanned(sanitizeItems(structuredItems));
+      }
+      return filterBanned(sanitizeItems(fallbackItems));
+    };
+
     const tiers = {
       serious: {
         label: seData?.serious?.label || "Serious — Seek Immediate Medical Attention",
-        items: filterBanned(sanitizeItems(seData?.serious?.items || seriousSE)),
+        items: buildTierItems(seData?.serious?.items, seriousSE),
         urgent: true,
         color: "text-red-700",
         dotColor: "bg-red-500",
@@ -578,7 +755,7 @@ export default function AnswerCard({ result, query }) {
       },
       very_common: {
         label: seData?.very_common?.label || "Very Common (>10%)",
-        items: filterBanned(sanitizeItems(seData?.very_common?.items || [])),
+        items: buildTierItems(seData?.very_common?.items, []),
         color: "text-orange-700",
         dotColor: "bg-orange-400",
         bgColor: "bg-orange-50",
@@ -587,7 +764,7 @@ export default function AnswerCard({ result, query }) {
       },
       common: {
         label: seData?.common?.label || "Common (1-10%)",
-        items: filterBanned(sanitizeItems(seData?.common?.items || commonSE)),
+        items: buildTierItems(seData?.common?.items, commonSE),
         color: "text-yellow-700",
         dotColor: "bg-yellow-400",
         bgColor: "bg-yellow-50",
@@ -595,11 +772,20 @@ export default function AnswerCard({ result, query }) {
         icon: "🟡",
       },
       uncommon: {
-        label: seData?.uncommon?.label || "Uncommon / Rare (<1%)",
-        items: filterBanned(sanitizeItems(seData?.uncommon?.items || [])),
+        label: seData?.uncommon?.label || "Uncommon (0.1-1%)",
+        items: buildTierItems(seData?.uncommon?.items, []),
         color: "text-slate-600",
         dotColor: "bg-slate-400",
         bgColor: "bg-slate-50",
+        borderColor: "border-slate-200",
+        icon: "⚪",
+      },
+      rare: {
+        label: seData?.rare?.label || "Rare (<0.1%)",
+        items: buildTierItems(seData?.rare?.items, []),
+        color: "text-slate-500",
+        dotColor: "bg-slate-300",
+        bgColor: "bg-slate-50/50",
         borderColor: "border-slate-200",
         icon: "⚪",
       },
