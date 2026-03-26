@@ -164,24 +164,27 @@ async def fetch_fda_label(drug_name: str) -> tuple[dict | None, dict | None]:
             return val[0][:1200] if isinstance(val, list) and val else ""
 
         parsed = {
-            "drug_name":                  drug_name,
-            "warnings":                   get_section("warnings"),
-            "boxed_warning":              get_section("boxed_warning"),
-            "dosage_and_administration":  get_section("dosage_and_administration"),
-            "contraindications":          get_section("contraindications"),
-            "drug_interactions":          get_section("drug_interactions"),
-            "adverse_reactions":          get_section("adverse_reactions"),
-            "pregnancy":                  get_section("pregnancy"),
-            "lactation":                  get_section("lactation"),
-            "indications_and_usage":      get_section("indications_and_usage"),
+            "drug_name":                   drug_name,
+            "warnings":                    get_section("warnings"),
+            "warnings_and_precautions":    get_section("warnings_and_precautions"),
+            "boxed_warning":               get_section("boxed_warning"),
+            "dosage_and_administration":   get_section("dosage_and_administration"),
+            "contraindications":           get_section("contraindications"),
+            "drug_interactions":           get_section("drug_interactions"),
+            "adverse_reactions":           get_section("adverse_reactions"),
+            "pregnancy":                   get_section("pregnancy"),
+            "lactation":                   get_section("lactation"),
+            "indications_and_usage":       get_section("indications_and_usage"),
             "use_in_specific_populations": get_section("use_in_specific_populations"),
-            "clinical_pharmacology":      get_section("clinical_pharmacology"),
-            "description":                get_section("description"),
+            "clinical_pharmacology":       get_section("clinical_pharmacology"),
+            "description":                 get_section("description"),
         }
 
         has_data = any(v for k, v in parsed.items() if k != "drug_name" and v)
         if has_data:
-            logger.info("[FDA] Resolved '%s' via openfda.%s", drug_name, fld)
+            sections_found = [k for k, v in parsed.items() if k != "drug_name" and v]
+            logger.info("[FDA] Label for '%s' via openfda.%s — sections: %s",
+                        drug_name, fld, sections_found)
             return parsed, raw_label
 
     # Also try drug_catalog brand names
@@ -207,19 +210,20 @@ async def fetch_fda_label(drug_name: str) -> tuple[dict | None, dict | None]:
                             return val[0][:1200] if isinstance(val, list) and val else ""
 
                         parsed = {
-                            "drug_name": drug_name,
-                            "warnings": get_section("warnings"),
-                            "boxed_warning": get_section("boxed_warning"),
-                            "dosage_and_administration": get_section("dosage_and_administration"),
-                            "contraindications": get_section("contraindications"),
-                            "drug_interactions": get_section("drug_interactions"),
-                            "adverse_reactions": get_section("adverse_reactions"),
-                            "pregnancy": get_section("pregnancy"),
-                            "lactation": get_section("lactation"),
-                            "indications_and_usage": get_section("indications_and_usage"),
+                            "drug_name":                   drug_name,
+                            "warnings":                    get_section("warnings"),
+                            "warnings_and_precautions":    get_section("warnings_and_precautions"),
+                            "boxed_warning":               get_section("boxed_warning"),
+                            "dosage_and_administration":   get_section("dosage_and_administration"),
+                            "contraindications":           get_section("contraindications"),
+                            "drug_interactions":           get_section("drug_interactions"),
+                            "adverse_reactions":           get_section("adverse_reactions"),
+                            "pregnancy":                   get_section("pregnancy"),
+                            "lactation":                   get_section("lactation"),
+                            "indications_and_usage":       get_section("indications_and_usage"),
                             "use_in_specific_populations": get_section("use_in_specific_populations"),
-                            "clinical_pharmacology": get_section("clinical_pharmacology"),
-                            "description": get_section("description"),
+                            "clinical_pharmacology":       get_section("clinical_pharmacology"),
+                            "description":                 get_section("description"),
                         }
                         if any(v for k, v in parsed.items() if k != "drug_name" and v):
                             return parsed, raw_label
@@ -231,16 +235,58 @@ async def fetch_fda_label(drug_name: str) -> tuple[dict | None, dict | None]:
 
 
 async def fetch_rxcui(drug_name: str) -> str | None:
-    """Look up RxCUI for a drug name via RxNorm API."""
+    """
+    Look up RxCUI for a drug name via RxNorm API.
+
+    Tries three strategies in order:
+      1. Exact name lookup
+      2. Base name (strips common pharmaceutical suffixes like "HCl", "ER")
+      3. RxNorm approximate/fuzzy term search
+    Logs RxCUI found or not found for every drug.
+    """
     if not drug_name:
         return None
-    data = await _async_get(RXNORM_RXCUI_URL, params={
-        "name": drug_name, "allSourcesFlag": "0"
-    })
-    if not data:
-        return None
-    rxcui = data.get("idGroup", {}).get("rxnormId", [None])
-    return rxcui[0] if rxcui else None
+
+    clean = drug_name.strip()
+
+    # Strip common pharmaceutical form/salt suffixes for base variant
+    base = re.sub(
+        r"\s+(hcl|hydrochloride|sodium|potassium|acetate|succinate|maleate|"
+        r"tartrate|citrate|phosphate|sulfate|fumarate|besylate|mesylate|"
+        r"xl|er|sr|ir|cr|xr|la)\s*$",
+        "", clean, flags=re.IGNORECASE,
+    ).strip()
+
+    # Deduplicated list: exact first, then base if different
+    variants: list[str] = list(dict.fromkeys(v for v in [clean, base] if v))
+
+    for name in variants:
+        data = await _async_get(RXNORM_RXCUI_URL, params={
+            "name": name, "allSourcesFlag": "0"
+        })
+        if data:
+            ids = data.get("idGroup", {}).get("rxnormId", [])
+            if ids:
+                logger.info("[RxNorm] RxCUI for '%s' = %s (via '%s')", drug_name, ids[0], name)
+                return ids[0]
+        logger.debug("[RxNorm] No exact match for variant '%s'", name)
+
+    # Approximate/fuzzy search as final fallback
+    approx = await _async_get(
+        "https://rxnav.nlm.nih.gov/REST/approximateTerm.json",
+        params={"term": clean, "maxEntries": "1", "option": "0"},
+    )
+    if approx:
+        candidates = (approx.get("approximateGroup") or {}).get("candidate", [])
+        if candidates:
+            rxcui = candidates[0].get("rxcui")
+            if rxcui:
+                logger.info("[RxNorm] Approx RxCUI for '%s' = %s", drug_name, rxcui)
+                return rxcui
+
+    logger.info("[RxNorm] No RxCUI found for '%s' after %d variant(s) + approx search",
+                drug_name, len(variants))
+    return None
 
 
 async def fetch_rxnav_interactions(rxcui_a: str, rxcui_b: str) -> list[dict]:
@@ -345,17 +391,36 @@ async def fetch_recalls(drug_name: str) -> list[dict]:
 
 
 async def fetch_dailymed_setid(drug_name: str) -> str | None:
-    """Look up the DailyMed SET ID for a drug to build source URLs."""
+    """
+    Look up the DailyMed SET ID for a drug to build source URLs.
+
+    Tries two variants: full name, then first word only.
+    Handles empty responses and API timeouts gracefully.
+    """
     if not drug_name:
         return None
-    data = await _async_get(DAILYMED_SPL_URL, params={
-        "drug_name": drug_name, "page": "1", "pagesize": "1"
-    })
-    if not data:
-        return None
-    results = data.get("data", [])
-    if results:
-        return results[0].get("setid")
+
+    clean = drug_name.strip()
+    # First word handles compound names like "metformin hcl" → "metformin"
+    first_word = clean.split()[0] if clean.split() else clean
+    variants = list(dict.fromkeys(v for v in [clean, first_word] if v))
+
+    for name in variants:
+        data = await _async_get(DAILYMED_SPL_URL, params={
+            "drug_name": name, "page": "1", "pagesize": "1"
+        })
+        if not data:
+            logger.debug("[DailyMed] No response for '%s'", name)
+            continue
+        results = data.get("data", [])
+        if results:
+            setid = results[0].get("setid")
+            if setid:
+                logger.info("[DailyMed] SET ID for '%s' = %s (via '%s')", drug_name, setid, name)
+                return setid
+        logger.debug("[DailyMed] Empty data for '%s'", name)
+
+    logger.info("[DailyMed] No SET ID found for '%s'", drug_name)
     return None
 
 
@@ -464,11 +529,18 @@ def parse_structured_side_effects(
         result["mechanism_of_action"]["detail"] = " ".join(sentences[:4])[:600]
 
     # ── Parse adverse reactions into frequency tiers ──────────────────────────
-    adverse_text = (fda_label or {}).get("adverse_reactions", "")
-    warnings_text = (fda_label or {}).get("warnings", "")
+    adverse_text    = (fda_label or {}).get("adverse_reactions", "")
+    wp_text         = (fda_label or {}).get("warnings_and_precautions", "")
+    warnings_text   = (fda_label or {}).get("warnings", "")
 
-    # Heuristic frequency parsing from FDA label text
+    logger.debug("[Parser] %s — adverse_reactions=%d chars, warnings_and_precautions=%d chars",
+                 drug_name, len(adverse_text), len(wp_text))
+
+    # Parse Adverse Reactions (primary section)
     _classify_effects_from_text(adverse_text, result["side_effects"])
+    # Also parse Warnings and Precautions — often contains critical serious effects
+    if wp_text:
+        _classify_effects_from_text(wp_text, result["side_effects"])
 
     # Merge FAERS terms into common if we didn't get enough from label text.
     # FAERS is an adverse-event reporting database biased toward serious/fatal events,
@@ -493,6 +565,12 @@ def parse_structured_side_effects(
     # Extract serious effects from warnings section
     if warnings_text:
         _extract_serious_from_warnings(warnings_text, result["side_effects"]["serious"]["items"])
+    if wp_text:
+        _extract_serious_from_warnings(wp_text, result["side_effects"]["serious"]["items"])
+
+    counts = {tier: len(data.get("items", [])) for tier, data in result["side_effects"].items()}
+    total = sum(counts.values())
+    logger.info("[Parser] %s — extracted %d effects: %s", drug_name, total, counts)
 
     return result
 

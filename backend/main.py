@@ -4044,13 +4044,18 @@ async def drug_side_effects(drug_name: str) -> JSONResponse:
     Priority:
       1. DB cache (pre-parsed, fast)
       2. Live FDA label fetch + Gemini parse + store to DB
-      3. Fallback: raw parse_structured_side_effects() (no DB storage)
+      3. Heuristic regex parse of FDA label text
+      4. Drug-class hardcoded fallback
+      5. Empty structured response (never an error)
 
-    Response shape matches what AnswerCard.js expects for side_effects_data.
+    Always returns HTTP 200. Response contains:
+      source = "dataset" | "fallback"
+      common_side_effects, serious_side_effects, mechanism
+      data = full structured tier dict for AnswerCard.js
     """
     from pipeline.side_effects_store import get_or_fetch_side_effects
     from pipeline.api_layer import fetch_fda_label, fetch_dailymed_setid, parse_structured_side_effects
-    import asyncio
+    import asyncio as _asyncio
 
     name = drug_name.strip().lower()
     if not name:
@@ -4058,35 +4063,80 @@ async def drug_side_effects(drug_name: str) -> JSONResponse:
 
     # Resolve brand name → generic
     generic = BRAND_TO_GENERIC.get(name, name)
+    logger.info("[SideEffects] Request for '%s' (resolved: '%s')", name, generic)
 
-    # Fetch FDA label + DailyMed SET ID concurrently
-    (fda_label, raw_label), setid = await asyncio.gather(
-        fetch_fda_label(generic),
-        fetch_dailymed_setid(generic),
-    )
-
-    # Try DB cache → Gemini parse → raw heuristic parse
-    result = await get_or_fetch_side_effects(generic, fda_label, raw_label, setid)
-
-    if not result:
-        # Raw heuristic fallback (no DB storage)
-        result = parse_structured_side_effects(
-            drug_name=generic,
-            fda_label=fda_label,
-            raw_label=raw_label,
-            dailymed_setid=setid,
+    try:
+        # Fetch FDA label + DailyMed SET ID concurrently
+        (fda_label, raw_label), setid = await _asyncio.gather(
+            fetch_fda_label(generic),
+            fetch_dailymed_setid(generic),
         )
-        result["_from_heuristic"] = True
+        logger.info("[SideEffects] '%s' — fda_label=%s, setid=%s",
+                    generic, bool(fda_label), setid or "none")
 
-    return JSONResponse(content={
-        "drug": generic,
-        "requested_name": drug_name,
-        "data": result,
-        "disclaimer": (
-            "This information is from FDA drug labels and is not medical advice. "
-            "For emergencies, call 911. Consult your doctor or pharmacist for clinical decisions."
-        ),
-    })
+        # 4-tier fallback chain (DB → Gemini → heuristic → hardcoded)
+        result = await get_or_fetch_side_effects(generic, fda_label, raw_label, setid)
+
+        if not result:
+            # Last resort: synchronous heuristic parse (no DB storage)
+            result = parse_structured_side_effects(
+                drug_name=generic,
+                fda_label=fda_label,
+                raw_label=raw_label,
+                dailymed_setid=setid,
+            )
+            result["_from_heuristic"] = True
+
+        # Summarise extraction for logs
+        se_data = result.get("side_effects", {})
+        counts = {tier: len(data.get("items", [])) for tier, data in se_data.items()}
+        total = sum(counts.values())
+        source_tag = "fallback" if result.get("_fallback") else "dataset"
+        logger.info("[SideEffects] '%s' — %d effects extracted %s, source=%s",
+                    generic, total, counts, result.get("_fallback_source", source_tag))
+
+        # Flatten common and serious lists for simple consumers
+        def _names(items: list) -> list[str]:
+            return [e.get("display_name", e) if isinstance(e, dict) else str(e)
+                    for e in items if e]
+
+        common_items = (se_data.get("very_common", {}).get("items", [])
+                        + se_data.get("common", {}).get("items", []))
+        serious_items = se_data.get("serious", {}).get("items", [])
+
+        return JSONResponse(content={
+            "drug":                 generic,
+            "requested_name":       drug_name,
+            "source":               source_tag,
+            "common_side_effects":  _names(common_items),
+            "serious_side_effects": _names(serious_items),
+            "mechanism":            result.get("mechanism_of_action", {}).get("summary", ""),
+            "data":                 result,
+            "disclaimer": (
+                "This information is from FDA drug labels and is not medical advice. "
+                "For emergencies, call 911. Consult your doctor or pharmacist."
+            ),
+        })
+
+    except Exception as exc:
+        logger.error("[SideEffects] Endpoint failed for '%s': %s", name, exc, exc_info=True)
+        return JSONResponse(
+            status_code=200,  # always 200 — let frontend handle gracefully
+            content={
+                "drug":                 name,
+                "requested_name":       drug_name,
+                "source":               "fallback",
+                "message":              "Dataset unavailable",
+                "common_side_effects":  [],
+                "serious_side_effects": [],
+                "mechanism":            "",
+                "data":                 None,
+                "disclaimer": (
+                    "Dataset temporarily unavailable. "
+                    "Please consult a pharmacist or prescriber."
+                ),
+            },
+        )
 
 
 @app.post("/api/drugs/{drug_name}/parse-label")
