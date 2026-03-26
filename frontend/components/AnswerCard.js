@@ -111,6 +111,24 @@ function sanitizeItems(items) {
     .filter(Boolean);
 }
 
+// Phrases that indicate placeholder/error strings — never render as medical data
+const PLACEHOLDER_SE_PATTERNS = [
+  /temporary error/i,
+  /error loading/i,
+  /loading data/i,
+  /failed to load/i,
+  /could not load/i,
+  /undefined/i,
+  /null/i,
+  /^\s*error\s*$/i,
+];
+
+function filterPlaceholders(items) {
+  return items.filter(
+    (item) => !PLACEHOLDER_SE_PATTERNS.some((re) => re.test(item))
+  );
+}
+
 // Patterns that indicate a corrupted / raw-internal DB answer — never render these
 const _CORRUPTED_PATTERNS = [
   /category\s+[3-6]/i,
@@ -530,8 +548,8 @@ export default function AnswerCard({ result, query }) {
     structured?.intent === "SIDE_EFFECTS";
 
   if (isSideEffects) {
-    const commonSE = filterBanned(sanitizeItems(structured.common_side_effects));
-    const seriousSE = filterBanned(sanitizeItems(structured.serious_side_effects));
+    const commonSE = filterPlaceholders(filterBanned(sanitizeItems(structured.common_side_effects)));
+    const seriousSE = filterPlaceholders(filterBanned(sanitizeItems(structured.serious_side_effects)));
     const warnSigns = filterBanned(sanitizeItems(structured.warning_signs || structured.when_to_get_help));
     const mechText = stripMarkdown(structured.mechanism || structured.mechanism_simple || structured.article || "");
     const studies = Array.isArray(structured.pubmed_studies) ? structured.pubmed_studies : [];

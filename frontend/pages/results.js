@@ -645,9 +645,9 @@ export default function ResultsPage() {
               answer: "We couldn't load results right now. Please try again in a moment.",
               structured: {
                 verdict: "CAUTION",
-                intent: "side_effects",
-                answer: "We couldn't load results right now.",
-                common_side_effects: ["Temporary error loading data"],
+                intent: "error",
+                answer: "We couldn't load results right now. Please try again in a moment.",
+                common_side_effects: [],
                 serious_side_effects: [],
                 warning_signs: [],
                 what_to_do: ["Try again in a moment"],
