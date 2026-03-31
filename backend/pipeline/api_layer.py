@@ -68,6 +68,80 @@ _FAERS_COMMON_BLOCKLIST = frozenset([
 ])
 
 
+# ── Garbage side-effect filter ───────────────────────────────────────────────
+# Blocks ALL the non-side-effect text that FDA labels / FAERS produce:
+# demographic fragments, section headers, statistical notation, company info, etc.
+
+_GARBAGE_BAD_STARTS = (
+    "%", "n=", "table ", "figure ", "see ", "note:", "ref ",
+    "the following", "the incidence", "patients who", "subjects who",
+    "in clinical", "in a study", "data from", "based on",
+    "contact ", "call 1-", "distributed by", "manufactured by",
+    "marketed by", "revised:", "nda ", "anda ", "ind ",
+    "warnings", "precautions", "adverse reactions",
+    "drug interaction", "clinical pharmacology",
+    "section ", "chapter ",
+)
+
+_GARBAGE_BAD_CONTAINS = (
+    # Demographic / statistical fragments
+    "% women", "% men", "% white", "% black", "% asian",
+    "% hispanic", "% other", "% placebo", "vs placebo",
+    "% of patients", "% vs", "n=", "(n=",
+    # Product / company info
+    "off label use", "product quality", "product adhesion",
+    "product performance", "off-label", "compassionate use",
+    # Body-part fragments (not side-effect names on their own)
+    "without respiratory distress",
+    "of the extremities", "of the lips", "of the tongue", "of the face",
+    # Drug names that leak from interaction text
+    "primidone", "carbamazepine", "phenobarbital",
+    # Section markers
+    "(see warnings", "(see precautions", "(see section",
+    "refer to ", "as described in",
+)
+
+_BODY_PARTS_NOT_SE = frozenset([
+    "extremities", "appendages", "limbs", "trunk", "torso",
+    "lips", "tongue", "face", "neck", "throat",
+])
+
+
+def _is_garbage_side_effect(text: str) -> bool:
+    """
+    Return True if *text* is NOT a real side-effect name.
+
+    Used to filter FDA label text and FAERS terms before showing to users.
+    Catches demographic fragments, section headers, statistical notation,
+    company info, body-part words, and pure-number strings.
+    """
+    if not text:
+        return True
+    t = text.strip()
+    if len(t) < 3 or len(t) > 80:
+        return True
+
+    tl = t.lower()
+
+    for s in _GARBAGE_BAD_STARTS:
+        if tl.startswith(s):
+            return True
+
+    for g in _GARBAGE_BAD_CONTAINS:
+        if g in tl:
+            return True
+
+    # Pure numbers, percentages, or statistical notation
+    if re.match(r'^[\d\s\.\,\%\(\)\+\-\/]+$', t):
+        return True
+
+    # Single words that are body parts, not side-effect names
+    if tl in _BODY_PARTS_NOT_SE:
+        return True
+
+    return False
+
+
 # ── Result container ──────────────────────────────────────────────────────────
 @dataclass
 class APIResults:
@@ -463,21 +537,204 @@ async def fetch_dailymed_setid(drug_name: str) -> str | None:
     return None
 
 
+# ── DailyMed Structured SPL Sections (Tier 3) ───────────────────────────────
+
+async def fetch_dailymed_structured_sections(setid: str) -> dict:
+    """
+    Fetch structured SPL label sections from DailyMed by SET ID.
+
+    Returns a dict with ``adverse_reactions_structured`` (HTML text) and
+    ``adverse_reactions_tables`` (list of table dicts) when available.
+    DailyMed structured data is considerably cleaner than raw openFDA prose.
+    """
+    if not setid:
+        return {}
+
+    url = f"https://dailymed.nlm.nih.gov/dailymed/services/v2/spls/{setid}.json"
+    data = await _async_get(url)
+    if not data:
+        return {}
+
+    # DailyMed returns a sections array inside "data"
+    sections = data.get("data", {}).get("sections", [])
+    result: dict[str, Any] = {}
+
+    for section in sections:
+        section_code = section.get("code", "")
+        section_title = (section.get("title") or "").lower()
+        section_text = section.get("text", "")
+
+        # Adverse reactions section code in SPL is 34084-4
+        if "34084-4" in section_code or "adverse" in section_title:
+            result["adverse_reactions_structured"] = section_text
+
+            # Try to extract table data if present
+            tables = section.get("tables", [])
+            if tables:
+                result["adverse_reactions_tables"] = tables
+
+    return result
+
+
+def _parse_frequency_string(freq_str: str) -> tuple[str, float | None, float]:
+    """
+    Parse a frequency string like ``'15%'``, ``'>10%'``, ``'common'`` into
+    ``(category, percent_or_None, confidence)``.
+    """
+    if not freq_str:
+        return "common", None, 0.25
+
+    f = freq_str.strip().lower().replace(" ", "")
+
+    # Extract a percentage number
+    pct_match = re.search(r'(\d+\.?\d*)\s*%', f)
+    if pct_match:
+        pct = float(pct_match.group(1))
+        confidence = 1.0
+        if pct > 10:
+            return "very_common", pct, confidence
+        elif pct >= 1:
+            return "common", pct, confidence
+        elif pct >= 0.1:
+            return "uncommon", pct, confidence
+        else:
+            return "rare", pct, confidence
+
+    # Qualitative frequency words
+    if any(w in f for w in ("verycommon", "veryfrequent", ">10")):
+        return "very_common", None, 0.75
+    if any(w in f for w in ("common", "frequent", "1-10", "1%to10")):
+        return "common", None, 0.5
+    if any(w in f for w in ("uncommon", "infrequent", "0.1-1", "<1")):
+        return "uncommon", None, 0.5
+    if any(w in f for w in ("rare", "veryrare", "<0.1")):
+        return "rare", None, 0.5
+
+    return "common", None, 0.25
+
+
+def parse_dailymed_structured(drug_name: str, structured_data: dict) -> dict | None:
+    """
+    Parse DailyMed structured section data into clean side-effect tiers.
+
+    This is more reliable than parsing raw FDA prose text because DailyMed
+    can return labelled tables with frequency percentages.
+
+    Returns a standard side-effects dict or ``None`` if insufficient data.
+    """
+    tables = structured_data.get("adverse_reactions_tables", [])
+    adverse_text = structured_data.get("adverse_reactions_structured", "")
+
+    if not tables and not adverse_text:
+        return None
+
+    tiers: dict = {
+        "very_common": {"label": "Very Common (>10%)",  "items": []},
+        "common":      {"label": "Common (1-10%)",       "items": []},
+        "uncommon":    {"label": "Uncommon (<1%)",        "items": []},
+        "rare":        {"label": "Rare (<0.1%)",          "items": []},
+        "serious":     {"label": "Serious — Seek Medical Attention", "items": [], "urgent": True},
+    }
+
+    extracted_count = 0
+
+    # ── Parse structured tables first (most reliable) ────────────────────────
+    for table in tables:
+        rows = table.get("rows", [])
+        for row in rows:
+            cells = row.get("cells", [])
+            if len(cells) < 1:
+                continue
+            name = str(cells[0]).strip()
+            freq_str = str(cells[1]).strip() if len(cells) > 1 else ""
+
+            # Skip header rows and garbage
+            if _is_garbage_side_effect(name):
+                continue
+            if len(name) < 3:
+                continue
+
+            freq_cat, freq_pct, confidence = _parse_frequency_string(freq_str)
+
+            item = {
+                "display_name":       name.title(),
+                "frequency_category": freq_cat,
+                "frequency_percent":  freq_pct,
+                "confidence_score":   confidence,
+                "severity":           "severe" if freq_cat == "serious" else "mild",
+                "management":         "contact_doctor" if freq_cat in ("serious", "rare") else "monitor",
+                "red_flag":           freq_cat == "serious",
+                "evidence_tier":      "label",
+                "source_section":     "Adverse Reactions Table",
+            }
+
+            if len(tiers[freq_cat]["items"]) < 10:
+                tiers[freq_cat]["items"].append(item)
+                extracted_count += 1
+
+    # ── Fallback: extract terms from the HTML text if tables were sparse ─────
+    if extracted_count < 3 and adverse_text:
+        # Strip HTML tags, split on common delimiters
+        clean_text = re.sub(r"<[^>]+>", " ", adverse_text)
+        parts = re.split(r"[,;•·\n]+", clean_text)
+        for p in parts:
+            t = p.strip()
+            t = re.sub(r"^[-–—\*\d\.\)]+\s*", "", t).strip()
+            if 3 < len(t) < 60 and not _is_garbage_side_effect(t):
+                if len(tiers["common"]["items"]) < 10:
+                    tiers["common"]["items"].append({
+                        "display_name":       t.title(),
+                        "frequency_category": "common",
+                        "frequency_percent":  None,
+                        "confidence_score":   0.4,
+                        "severity":           "mild",
+                        "management":         "monitor",
+                        "red_flag":           False,
+                        "evidence_tier":      "label",
+                        "source_section":     "Adverse Reactions (text)",
+                    })
+                    extracted_count += 1
+
+    if extracted_count < 3:
+        return None  # Not enough data — let the next tier handle it
+
+    logger.info("[DailyMed] Structured parse for %s: %d effects extracted", drug_name, extracted_count)
+
+    return {
+        "drug": drug_name,
+        "drug_name": drug_name,
+        "side_effects": tiers,
+        "boxed_warnings": [],
+        "mechanism_of_action": {
+            "summary": "", "detail": "",
+            "pharmacologic_class": "", "molecular_targets": [],
+        },
+        "sources": [{
+            "id": 1, "name": "DailyMed Structured Label",
+            "url": f"https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid={structured_data.get('_setid', '')}",
+            "section": "ADVERSE REACTIONS TABLE", "last_updated": "",
+        }],
+        "_from_dailymed_structured": True,
+    }
+
+
 def parse_structured_side_effects(
     drug_name: str,
     fda_label: dict | None,
     raw_label: dict | None,
     faers_terms: list[str] | None = None,
     dailymed_setid: str | None = None,
+    dailymed_structured: dict | None = None,
 ) -> dict:
     """
     Return structured side effects for a drug.
 
-    Priority:
+    Waterfall priority:
       1. Hardcoded clinical fallback  (always clean, highest reliability)
-      2. Gemini parse of FDA label    (if GEMINI_API_KEY is set)
-      3. FAERS terms only             (filtered through blocklist, max 8)
-      4. Empty tier structure         (never runs the broken heuristic parser)
+      2. DailyMed structured tables   (NEW — clean table data from SPL)
+      3. Gemini parse of FDA label    (if GEMINI_API_KEY is set)
+      4. Filtered FAERS terms only    (garbage-filtered, max 8)
+      5. Empty tier structure          (never runs the broken heuristic parser)
 
     The old comma-split heuristic (_classify_effects_from_text) is intentionally
     NOT called here — it produces garbage like "And/Or G", "And Coma", and
@@ -493,7 +750,16 @@ def parse_structured_side_effects(
         logger.info("[Parser] Hardcoded fallback hit for %s (resolved=%s)", drug_name, resolved)
         return fallback
 
-    # ── Step 2: try Gemini parse of the FDA label ─────────────────────────────
+    # ── Step 2: DailyMed structured tables (NEW — Tier 3 in the pipeline) ────
+    if dailymed_structured:
+        # Tag the setid so the source URL can be built inside the parser
+        dailymed_structured["_setid"] = dailymed_setid or ""
+        dm_result = parse_dailymed_structured(drug_name, dailymed_structured)
+        if dm_result:
+            logger.info("[Parser] DailyMed structured parse succeeded for %s", drug_name)
+            return dm_result
+
+    # ── Step 3: try Gemini parse of the FDA label ─────────────────────────────
     if fda_label or raw_label:
         try:
             from pipeline.side_effects_store import parse_label_with_gemini
@@ -540,7 +806,7 @@ def parse_structured_side_effects(
         except Exception as exc:
             logger.warning("[Parser] Gemini parse error for %s: %s", drug_name, exc)
 
-    # ── Step 3: safe empty structure + filtered FAERS terms only ─────────────
+    # ── Step 4: safe empty structure + garbage-filtered FAERS terms only ──────
     # DO NOT run the heuristic comma-split parser — it always produces garbage.
     tiers: dict = {
         "very_common": {"label": "Very Common (>10%)",  "items": []},
@@ -551,18 +817,23 @@ def parse_structured_side_effects(
     }
 
     if faers_terms:
-        for term in faers_terms[:8]:
-            clean = term.strip().lower()
-            if clean and len(clean) > 2:
-                if not any(blocked in clean for blocked in _FAERS_COMMON_BLOCKLIST):
-                    tiers["common"]["items"].append({
-                        "display_name": clean.title(),
-                        "frequency_category": "common",
-                        "confidence_score": 0.3,
-                        "severity": "mild",
-                        "management": "monitor",
-                        "red_flag": False,
-                    })
+        for term in faers_terms[:12]:
+            clean_term = term.strip()
+            # Use the comprehensive garbage filter + the FAERS blocklist
+            if _is_garbage_side_effect(clean_term):
+                continue
+            clean_lower = clean_term.lower()
+            if any(blocked in clean_lower for blocked in _FAERS_COMMON_BLOCKLIST):
+                continue
+            if len(tiers["common"]["items"]) < 8:
+                tiers["common"]["items"].append({
+                    "display_name": clean_lower.title(),
+                    "frequency_category": "common",
+                    "confidence_score": 0.3,
+                    "severity": "mild",
+                    "management": "monitor",
+                    "red_flag": False,
+                })
 
     counts = {tier: len(data["items"]) for tier, data in tiers.items()}
     logger.info("[Parser] %s — FAERS-only fallback, %d effects: %s", drug_name, sum(counts.values()), counts)

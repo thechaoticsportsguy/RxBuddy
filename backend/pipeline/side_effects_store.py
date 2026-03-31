@@ -788,18 +788,23 @@ async def get_or_fetch_side_effects(
     """
     Return structured side effects for a drug.
 
-    Priority:
-      1. DB cache            — < 10ms
-      2. Gemini parse + store — first hit only
-      3. None                — caller falls back to heuristic parser
+    Full waterfall:
+      1. DB cache              — < 10ms, any drug already seen
+      2. Hardcoded fallback    — top ~100 drugs (checked by caller in
+         parse_structured_side_effects, but also checked here)
+      3. DailyMed structured   — clean table data from SPL XML
+      4. Gemini parse          — AI parse of FDA label prose
+      5. Heuristic regex parse — no AI, lower confidence
+      6. Drug-class fallback   — generic class data
+      7. Store result to DB    — so Tier 1 catches it next time
 
-    Always logs: cache hit/miss, Gemini latency, fallback usage.
-    Never returns empty results — returns None to trigger caller fallback.
+    Always logs: cache hit/miss, tier used, latency.
+    Returns None only if every tier fails.
     """
     if not drug_name:
         return None
 
-    # 1. DB lookup
+    # ── Tier 1: DB cache ─────────────────────────────────────────────────────
     t0 = time.time()
     cached = get_from_db(drug_name)
     if cached:
@@ -808,74 +813,87 @@ async def get_or_fetch_side_effects(
 
     logger.info("[SEStore] Cache MISS for %s", drug_name)
 
-    if not fda_label:
-        logger.warning("[SEStore] No FDA label for %s — skipping Gemini, trying class fallback", drug_name)
-        # Step 4: class hardcoded fallback
-        fallback = _get_class_fallback(drug_name)
-        if fallback:
-            return fallback
-        logger.warning("[SEStore] No fallback available for %s", drug_name)
-        return None
+    # ── Tier 2: Hardcoded class fallback ─────────────────────────────────────
+    fallback = _get_class_fallback(drug_name)
+    if fallback:
+        logger.info("[SEStore] Hardcoded fallback for %s", drug_name)
+        return fallback
 
-    # 2. Gemini parse
-    parsed = parse_label_with_gemini(drug_name, fda_label)
+    # ── Tier 3: DailyMed structured API (clean table data) ───────────────────
+    if dailymed_setid:
+        try:
+            from pipeline.api_layer import fetch_dailymed_structured_sections, parse_dailymed_structured
+            import asyncio
+            structured_sections = await fetch_dailymed_structured_sections(dailymed_setid)
+            if structured_sections:
+                structured_sections["_setid"] = dailymed_setid
+                parsed_dm = parse_dailymed_structured(drug_name, structured_sections)
+                if parsed_dm:
+                    logger.info("[SEStore] DailyMed structured succeeded for %s", drug_name)
+                    try:
+                        store_to_db(drug_name, parsed_dm)
+                    except Exception as exc:
+                        logger.warning("[SEStore] Store failed for %s: %s", drug_name, exc)
+                    return parsed_dm
+        except Exception as e:
+            logger.warning("[SEStore] DailyMed structured fetch failed for %s: %s", drug_name, e)
 
-    if not parsed:
-        logger.warning("[SEStore] Gemini failed for %s — trying heuristic label parse", drug_name)
+    # ── Tier 4: Gemini parse of FDA label ────────────────────────────────────
+    if fda_label:
+        parsed = parse_label_with_gemini(drug_name, fda_label)
 
-        # 3. Heuristic regex parse of the FDA label (no AI)
+        if parsed:
+            # Enrich with raw openFDA metadata
+            if raw_label:
+                openfda   = raw_label.get("openfda", {})
+                set_id    = (openfda.get("set_id") or [None])[0]
+                eff_date  = raw_label.get("effective_time", "")
+                label_date = (
+                    f"{eff_date[:4]}-{eff_date[4:6]}-{eff_date[6:8]}"
+                    if eff_date and len(eff_date) >= 8 else ""
+                )
+                parsed["brand_names"]  = list(openfda.get("brand_name", []))[:5]
+                parsed["generic_name"] = (openfda.get("generic_name") or [drug_name])[0]
+                parsed["mechanism_of_action"]["pharmacologic_class"] = (
+                    (openfda.get("pharm_class_epc") or openfda.get("pharm_class_moa") or [""])[0]
+                )
+                effective_setid = dailymed_setid or set_id
+                sources = []
+                if effective_setid:
+                    sources.append({
+                        "id": 1,
+                        "name": f"DailyMed — {drug_name.title()} label",
+                        "url": f"https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid={effective_setid}",
+                        "section": "ADVERSE REACTIONS",
+                        "last_updated": label_date,
+                    })
+                sources.append({
+                    "id": len(sources) + 1,
+                    "name": "openFDA Drug Label API",
+                    "url": f'https://api.fda.gov/drug/label.json?search=openfda.generic_name:"{drug_name}"&limit=1',
+                    "section": "adverse_reactions",
+                    "last_updated": label_date,
+                })
+                parsed["sources"] = sources
+
+            # Store to DB (Tier 7)
+            try:
+                store_to_db(drug_name, parsed)
+            except Exception as exc:
+                logger.warning("[SEStore] Store failed for %s: %s", drug_name, exc)
+
+            return parsed
+
+        logger.warning("[SEStore] Gemini failed for %s — trying heuristic", drug_name)
+
+    # ── Tier 5: Heuristic regex parse of the FDA label (no AI) ───────────────
+    if fda_label:
         heuristic = _quick_heuristic_parse(drug_name, fda_label)
         if heuristic:
             return heuristic
 
-        # 4. Drug-class hardcoded fallback
-        fallback = _get_class_fallback(drug_name)
-        if fallback:
-            return fallback
-
-        logger.warning("[SEStore] All parsers failed for %s — no data available", drug_name)
-        return None
-
-    # Enrich with raw openFDA metadata
-    if raw_label:
-        openfda   = raw_label.get("openfda", {})
-        set_id    = (openfda.get("set_id") or [None])[0]
-        eff_date  = raw_label.get("effective_time", "")
-        label_date = (
-            f"{eff_date[:4]}-{eff_date[4:6]}-{eff_date[6:8]}"
-            if eff_date and len(eff_date) >= 8 else ""
-        )
-        parsed["brand_names"]  = list(openfda.get("brand_name", []))[:5]
-        parsed["generic_name"] = (openfda.get("generic_name") or [drug_name])[0]
-        parsed["mechanism_of_action"]["pharmacologic_class"] = (
-            (openfda.get("pharm_class_epc") or openfda.get("pharm_class_moa") or [""])[0]
-        )
-        effective_setid = dailymed_setid or set_id
-        sources = []
-        if effective_setid:
-            sources.append({
-                "id": 1,
-                "name": f"DailyMed — {drug_name.title()} label",
-                "url": f"https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid={effective_setid}",
-                "section": "ADVERSE REACTIONS",
-                "last_updated": label_date,
-            })
-        sources.append({
-            "id": len(sources) + 1,
-            "name": "openFDA Drug Label API",
-            "url": f'https://api.fda.gov/drug/label.json?search=openfda.generic_name:"{drug_name}"&limit=1',
-            "section": "adverse_reactions",
-            "last_updated": label_date,
-        })
-        parsed["sources"] = sources
-
-    # 3. Store to DB
-    try:
-        store_to_db(drug_name, parsed)
-    except Exception as exc:
-        logger.warning("[SEStore] Store failed for %s: %s", drug_name, exc)
-
-    return parsed
+    logger.warning("[SEStore] All parsers failed for %s — no data available", drug_name)
+    return None
 
 
 # ---------------------------------------------------------------------------
