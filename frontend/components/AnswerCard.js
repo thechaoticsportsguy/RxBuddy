@@ -708,243 +708,147 @@ export default function AnswerCard({ result, query }) {
     structured?.intent === "SIDE_EFFECTS";
 
   if (isSideEffects) {
-    const commonSE = filterPlaceholders(filterBanned(sanitizeItems(structured.common_side_effects)));
-    const seriousSE = filterPlaceholders(filterBanned(sanitizeItems(structured.serious_side_effects)));
-    const warnSigns = filterBanned(sanitizeItems(structured.warning_signs || structured.when_to_get_help));
-    const mechText = stripMarkdown(structured.mechanism || structured.mechanism_simple || structured.article || "");
-    const studies = Array.isArray(structured.pubmed_studies) ? structured.pubmed_studies : [];
-
-    // ── New tiered data from structured parsing ─────────────────────────────
+    // ── Drug name ────────────────────────────────────────────────────────────
     const seData = structured.side_effects_data || {};
-    const isFallbackData = seData?._fallback === true;
-    const fallbackSource = seData?._fallback_source || "";
-    const boxedWarnings = Array.isArray(structured.boxed_warnings) ? structured.boxed_warnings : [];
-    const moaObj = structured.mechanism_of_action || {};
-    const structuredSources = Array.isArray(structured.structured_sources) ? structured.structured_sources : [];
-    const brandNames = Array.isArray(structured.brand_names) ? structured.brand_names : [];
-    const genericName = structured.generic_name || "";
+    const rawDrugName =
+      structured.generic_name ||
+      structured.drug ||
+      (Array.isArray(structured.drugs) ? structured.drugs[0] : "") ||
+      "";
+    const drugDisplayName = rawDrugName
+      ? rawDrugName.charAt(0).toUpperCase() + rawDrugName.slice(1)
+      : "";
 
-    // Build tiers — prefer structured rich objects, fall back to flat string lists
-    // If seData has rich objects (from Gemini/DB parse), use extractRichItems
-    // Otherwise fall back to sanitizeItems for plain string arrays
-    const hasRichData = (items) =>
-      Array.isArray(items) && items.length > 0 && typeof items[0] === "object" && items[0]?.display_name;
+    // ── Garbage phrase filter ────────────────────────────────────────────────
+    const GARBAGE = [
+      "and/or", "including ", "primarily ", "and coma", "and other",
+      "contact teva", "contact pfizer", "see section",
+      "warnings and precautions", "drug abuse", "table ",
+      "the following", "clinical trial", "placebo", "n=", "%)",
+      "(see", "refer to",
+    ];
+    const isGarbage = (s) =>
+      s.length < 3 || GARBAGE.some((p) => s.toLowerCase().includes(p));
 
-    const buildTierItems = (structuredItems, fallbackItems) => {
-      if (hasRichData(structuredItems)) {
-        return extractRichItems(structuredItems).filter(
-          (item) => !BANNED_SE_PHRASES.some((phrase) => item.display_name.toLowerCase().includes(phrase))
-        );
-      }
-      if (structuredItems && Array.isArray(structuredItems) && structuredItems.length > 0) {
-        return filterBanned(sanitizeItems(structuredItems));
-      }
-      return filterBanned(sanitizeItems(fallbackItems));
+    // ── Normalize one item → display string or null ──────────────────────────
+    const toStr = (item) => {
+      const raw = (typeof item === "string" ? item : item?.display_name || "").trim();
+      if (!raw || isGarbage(raw)) return null;
+      return raw.charAt(0).toUpperCase() + raw.slice(1);
     };
 
-    const tiers = {
-      serious: {
-        label: seData?.serious?.label || "Serious — Seek Immediate Medical Attention",
-        items: buildTierItems(seData?.serious?.items, seriousSE),
-        urgent: true,
-        color: "text-red-700",
-        dotColor: "bg-red-500",
-        bgColor: "bg-red-50",
-        borderColor: "border-red-200",
-        icon: "🔴",
-      },
-      very_common: {
-        label: seData?.very_common?.label || "Very Common (>10%)",
-        items: buildTierItems(seData?.very_common?.items, []),
-        color: "text-orange-700",
-        dotColor: "bg-orange-400",
-        bgColor: "bg-orange-50",
-        borderColor: "border-orange-200",
-        icon: "🟠",
-      },
-      common: {
-        label: seData?.common?.label || "Common (1-10%)",
-        items: buildTierItems(seData?.common?.items, commonSE),
-        color: "text-yellow-700",
-        dotColor: "bg-yellow-400",
-        bgColor: "bg-yellow-50",
-        borderColor: "border-yellow-200",
-        icon: "🟡",
-      },
-      uncommon: {
-        label: seData?.uncommon?.label || "Uncommon (0.1-1%)",
-        items: buildTierItems(seData?.uncommon?.items, []),
-        color: "text-slate-600",
-        dotColor: "bg-slate-400",
-        bgColor: "bg-slate-50",
-        borderColor: "border-slate-200",
-        icon: "⚪",
-      },
-      rare: {
-        label: seData?.rare?.label || "Rare (<0.1%)",
-        items: buildTierItems(seData?.rare?.items, []),
-        color: "text-slate-500",
-        dotColor: "bg-slate-300",
-        bgColor: "bg-slate-50/50",
-        borderColor: "border-slate-200",
-        icon: "⚪",
-      },
+    // ── Build deduplicated list from one or more source arrays ───────────────
+    const buildItems = (...arrays) => {
+      const seen = new Set();
+      const out = [];
+      for (const arr of arrays) {
+        if (!Array.isArray(arr)) continue;
+        for (const item of arr) {
+          const s = toStr(item);
+          if (!s) continue;
+          const key = s.toLowerCase();
+          if (!seen.has(key)) { seen.add(key); out.push(s); }
+        }
+      }
+      return out;
     };
 
-    const hasAnyData = Object.values(tiers).some(t => t.items.length > 0);
-    const cautionCfg = VERDICT_CONFIG.CAUTION;
+    // ── Step 1: structured tier data ─────────────────────────────────────────
+    let greenItems  = buildItems(seData?.very_common?.items, seData?.common?.items);
+    let yellowItems = buildItems(seData?.uncommon?.items);
+    let redItems    = buildItems(seData?.rare?.items, seData?.serious?.items);
 
-    // Mechanism display — prefer structured, fall back to flat
-    const moaSummary = moaObj.summary || mechText || "";
-    const moaDetail = moaObj.detail || "";
-    const moaClass = moaObj.pharmacologic_class || "";
-    const moaTargets = Array.isArray(moaObj.molecular_targets) ? moaObj.molecular_targets : [];
-
-    // Empty state — inject a placeholder into the common tier so the layout stays intact
-    if (!hasAnyData) {
-      tiers.common.items = [{
-        display_name: "Detailed data not yet available",
-        frequency_category: "common",
-        confidence_score: 0,
-        severity: "mild",
-        management: "monitor",
-        red_flag: false,
-        patient_description: "Please consult your pharmacist or prescriber for a complete list of side effects for this medication.",
-      }];
+    // ── Step 2: flat string arrays fallback ───────────────────────────────────
+    if (greenItems.length + yellowItems.length + redItems.length === 0) {
+      greenItems  = buildItems(structured.common_side_effects);
+      yellowItems = [];
+      redItems    = buildItems(structured.serious_side_effects);
     }
 
-    // ── Full tiered side effects card ──────────────────────────────────────────
+    // ── Step 3: ultimate fallback ─────────────────────────────────────────────
+    if (greenItems.length + yellowItems.length + redItems.length === 0) {
+      greenItems = ["No side effect data found for this drug."];
+    }
+
+    const EmptyMsg = () => (
+      <p style={{ fontStyle: "italic", color: "#94a3b8", fontSize: 13, margin: 0 }}>
+        None clearly identified in available label data.
+      </p>
+    );
+
+    const boxes = [
+      {
+        title: "Most Common Side Effects",
+        items: greenItems,
+        border: "#86efac",
+        bg: "#f0fdf4",
+        titleColor: "#15803d",
+        leftBorder: "#16a34a",
+        bullet: "#16a34a",
+      },
+      {
+        title: "More Rare Side Effects",
+        items: yellowItems,
+        border: "#fde047",
+        bg: "#fefce8",
+        titleColor: "#854d0e",
+        leftBorder: "#ca8a04",
+        bullet: "#ca8a04",
+      },
+      {
+        title: "Very Rare Side Effects",
+        items: redItems,
+        border: "#fca5a5",
+        bg: "#fef2f2",
+        titleColor: "#991b1b",
+        leftBorder: "#dc2626",
+        bullet: "#dc2626",
+      },
+    ];
+
     return (
-      <article className="rounded-xl border border-yellow-300 shadow-sm overflow-hidden" aria-label="Side effects information — use with caution" role="article">
-        <VerdictBanner config={cautionCfg} />
+      <div>
+        {drugDisplayName && (
+          <p style={{ fontSize: 12, color: "#94a3b8", marginBottom: 16, margin: "0 0 16px 0" }}>
+            Showing results for {drugDisplayName}
+          </p>
+        )}
 
-        {/* Brand-to-generic resolution header */}
-        {(brandNames.length > 0 || genericName) && (
-          <div className="bg-yellow-100 px-5 py-2 border-b border-yellow-200">
-            <p className="text-xs text-slate-600">
-              Showing results for <strong className="text-slate-800">{genericName || structured.drug || ""}</strong>
-              {brandNames.length > 0 && (
-                <span className="text-slate-500"> ({brandNames.join(", ")})</span>
-              )}
+        {boxes.map((box) => (
+          <div
+            key={box.title}
+            style={{
+              border: `1px solid ${box.border}`,
+              borderLeft: `4px solid ${box.leftBorder}`,
+              borderRadius: 10,
+              backgroundColor: box.bg,
+              padding: "16px 20px",
+              marginBottom: 14,
+            }}
+          >
+            <p style={{
+              fontSize: 13,
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+              color: box.titleColor,
+              margin: "0 0 10px 0",
+            }}>
+              {box.title}
             </p>
+            {box.items.length === 0 ? (
+              <EmptyMsg />
+            ) : (
+              box.items.map((item, i) => (
+                <div key={i} style={{ fontSize: 14, color: "#1e293b", lineHeight: 1.7 }}>
+                  <span style={{ color: box.bullet, marginRight: 8 }}>●</span>
+                  {item}
+                </div>
+              ))
+            )}
           </div>
-        )}
-
-        {/* FALLBACK DATA NOTICE */}
-        {isFallbackData && (
-          <div className="mx-5 mt-3 flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800" role="status">
-            <span aria-hidden="true" className="mt-0.5 shrink-0">ℹ️</span>
-            <span>
-              Showing basic data — full AI analysis unavailable.
-              {fallbackSource === "drug_class_hardcoded" && " Results sourced from verified clinical reference."}
-              {fallbackSource === "heuristic_label_parse" && " Results extracted from FDA label text."}
-              {" "}Consult a pharmacist or prescriber for a complete list.
-            </span>
-          </div>
-        )}
-
-        {/* BOXED WARNING BANNER */}
-        {boxedWarnings.length > 0 && (
-          <div className="mx-5 mt-4 rounded-lg border-2 border-black bg-white p-4" role="alert" aria-live="assertive">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-lg" aria-hidden="true">⚠️</span>
-              <h3 className="text-sm font-black uppercase tracking-wider text-black">FDA Boxed Warning</h3>
-            </div>
-            {boxedWarnings.map((w, i) => (
-              <p key={i} className="text-sm text-slate-800 leading-relaxed mt-1">{w}.</p>
-            ))}
-          </div>
-        )}
-
-        <div className="bg-yellow-50 p-5 space-y-3">
-
-          {/* TIERED SIDE EFFECTS */}
-          {Object.entries(tiers).map(([key, tier]) => {
-            if (tier.items.length === 0) return null;
-            const defaultExpanded = key === "serious" || key === "very_common" || key === "common";
-            return (
-              <TierSection
-                key={key}
-                tier={tier}
-                defaultExpanded={defaultExpanded}
-                sources={structuredSources}
-              />
-            );
-          })}
-
-          {/* MECHANISM OF ACTION */}
-          {moaSummary && (
-            <MechanismSection
-              summary={moaSummary}
-              detail={moaDetail}
-              pharmacologicClass={moaClass}
-              targets={moaTargets}
-              sources={structuredSources}
-            />
-          )}
-
-          {/* WHEN TO GET HELP */}
-          {warnSigns.length > 0 && (
-            <section aria-labelledby="se-help-heading">
-              <h3 id="se-help-heading" className="mb-2 text-xs font-bold uppercase tracking-wider text-red-700">WHEN TO GET HELP</h3>
-              <ul className="space-y-1" role="list">
-                {warnSigns.map((x, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" aria-hidden="true" />
-                    {x}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          {/* RELATED RESEARCH */}
-          {studies.length > 0 && (
-            <section aria-labelledby="se-studies-heading">
-              <h3 id="se-studies-heading" className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-600">RELATED RESEARCH</h3>
-              <div className="space-y-2">
-                {studies.slice(0, 3).map((study, i) => (
-                  <a
-                    key={study.pmid || i}
-                    href={study.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block rounded-lg border border-slate-200 bg-white p-3 hover:border-emerald-300 hover:shadow transition-all"
-                  >
-                    <p className="text-sm font-medium text-slate-800 line-clamp-2">{study.title}</p>
-                    <p className="mt-1 text-xs text-slate-500">{study.journal}{study.year ? ` • ${study.year}` : ""}</p>
-                  </a>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* INLINE CITATIONS / SOURCES */}
-          {structuredSources.length > 0 ? (
-            <SourceCitations sources={structuredSources} />
-          ) : (
-            <div className="border-t border-yellow-200 pt-3">
-              <p className="text-xs text-slate-400 italic">
-                Data sourced from{" "}
-                <a href="https://dailymed.nlm.nih.gov" target="_blank" rel="noopener noreferrer" className="underline">DailyMed</a>{" "}
-                and{" "}
-                <a href="https://www.fda.gov/drugs" target="_blank" rel="noopener noreferrer" className="underline">Drugs@FDA</a>
-                . Not medical advice — always consult a licensed healthcare provider.
-              </p>
-            </div>
-          )}
-
-          {/* MEDICAL DISCLAIMER + MEDWATCH */}
-          <div className="border-t border-yellow-200 pt-3">
-            <p className="text-xs text-slate-400 italic">
-              This information is for educational purposes only and is not a substitute for professional medical advice. Always consult your doctor or pharmacist.{" "}
-              <a href="https://www.fda.gov/safety/medwatch-fda-safety-information-and-adverse-event-reporting-program" target="_blank" rel="noopener noreferrer" className="underline text-slate-500">
-                Report side effects to FDA MedWatch
-              </a>.
-            </p>
-          </div>
-        </div>
-      </article>
+        ))}
+      </div>
     );
   }
 
