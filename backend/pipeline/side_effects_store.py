@@ -373,6 +373,8 @@ def get_from_db(drug_name: str) -> dict | None:
                 text("SELECT * FROM drug_se_meta WHERE drug_generic_name = :n"),
                 {"n": key},
             ).mappings().first()
+            logger.info("[SEStore] get_from_db(%s) — meta row: %s", key,
+                        dict(meta) if meta else None)
             if not meta:
                 return None
 
@@ -827,7 +829,11 @@ async def get_or_fetch_side_effects(
     # ── Tier 2: Hardcoded class fallback ─────────────────────────────────────
     fallback = _get_class_fallback(drug_name)
     if fallback:
-        logger.info("[SEStore] Hardcoded fallback for %s", drug_name)
+        logger.info("[SEStore] Hardcoded fallback for %s — storing to DB", drug_name)
+        try:
+            store_to_db(drug_name, fallback)
+        except Exception as exc:
+            logger.warning("[SEStore] Store failed for %s: %s", drug_name, exc)
         return fallback
 
     # ── Tier 3: DailyMed structured API (clean table data) ───────────────────
