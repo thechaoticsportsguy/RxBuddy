@@ -800,23 +800,17 @@ export default function AnswerCard({ result, query }) {
     const moaClass = moaObj.pharmacologic_class || "";
     const moaTargets = Array.isArray(moaObj.molecular_targets) ? moaObj.molecular_targets : [];
 
-    // Empty state — no real side effects data
+    // Empty state — inject a placeholder into the common tier so the layout stays intact
     if (!hasAnyData) {
-      return (
-        <article className="rounded-xl border border-yellow-300 shadow-sm overflow-hidden" aria-label="Side effects information" role="article">
-          <VerdictBanner config={cautionCfg} />
-          <div className="bg-yellow-50 p-5">
-            <div className="rounded-lg border border-yellow-200 bg-white p-4">
-              <p className="text-sm font-semibold text-slate-800">
-                {"We don't have detailed side effect data for this medication yet."}
-              </p>
-              <p className="mt-2 text-sm text-slate-600">
-                Please consult your pharmacist or prescriber for a complete list of side effects.
-              </p>
-            </div>
-          </div>
-        </article>
-      );
+      tiers.common.items = [{
+        display_name: "Detailed data not yet available",
+        frequency_category: "common",
+        confidence_score: 0,
+        severity: "mild",
+        management: "monitor",
+        red_flag: false,
+        patient_description: "Please consult your pharmacist or prescriber for a complete list of side effects for this medication.",
+      }];
     }
 
     // ── Full tiered side effects card ──────────────────────────────────────────

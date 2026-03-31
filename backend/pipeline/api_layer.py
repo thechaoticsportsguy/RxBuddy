@@ -183,6 +183,45 @@ async def fetch_fda_label(drug_name: str) -> tuple[dict | None, dict | None]:
         has_data = any(v for k, v in parsed.items() if k != "drug_name" and v)
         if has_data:
             sections_found = [k for k, v in parsed.items() if k != "drug_name" and v]
+            # Bug fix: if the fetched label looks like an injectable/parenteral formulation,
+            # try to find an oral formulation instead (e.g. Benadryl IV vs OTC allergy pill).
+            indications = parsed.get("indications_and_usage", "").lower()
+            description_text = parsed.get("description", "").lower()
+            looks_parenteral = any(
+                kw in indications or kw in description_text
+                for kw in ("injection", "intravenous", "parenteral", "injectable", "iv ")
+            )
+            if looks_parenteral:
+                logger.info("[FDA] '%s' label looks parenteral — retrying with ORAL route filter", drug_name)
+                oral_url = (
+                    f'{OPENFDA_LABEL_URL}?search=openfda.generic_name:"{drug_name}"'
+                    f'+AND+openfda.route:"ORAL"&limit=1'
+                )
+                oral_data = await _async_get(oral_url)
+                if oral_data and oral_data.get("results"):
+                    oral_raw = oral_data["results"][0]
+                    def get_oral_section(k: str) -> str:  # noqa: E306
+                        val = oral_raw.get(k, [])
+                        return val[0][:1200] if isinstance(val, list) and val else ""
+                    oral_parsed = {
+                        "drug_name":                   drug_name,
+                        "warnings":                    get_oral_section("warnings"),
+                        "warnings_and_precautions":    get_oral_section("warnings_and_precautions"),
+                        "boxed_warning":               get_oral_section("boxed_warning"),
+                        "dosage_and_administration":   get_oral_section("dosage_and_administration"),
+                        "contraindications":           get_oral_section("contraindications"),
+                        "drug_interactions":           get_oral_section("drug_interactions"),
+                        "adverse_reactions":           get_oral_section("adverse_reactions"),
+                        "pregnancy":                   get_oral_section("pregnancy"),
+                        "lactation":                   get_oral_section("lactation"),
+                        "indications_and_usage":       get_oral_section("indications_and_usage"),
+                        "use_in_specific_populations": get_oral_section("use_in_specific_populations"),
+                        "clinical_pharmacology":       get_oral_section("clinical_pharmacology"),
+                        "description":                 get_oral_section("description"),
+                    }
+                    if any(v for k, v in oral_parsed.items() if k != "drug_name" and v):
+                        logger.info("[FDA] '%s' oral label found — using oral formulation", drug_name)
+                        return oral_parsed, oral_raw
             logger.info("[FDA] Label for '%s' via openfda.%s — sections: %s",
                         drug_name, fld, sections_found)
             return parsed, raw_label
@@ -432,147 +471,114 @@ def parse_structured_side_effects(
     dailymed_setid: str | None = None,
 ) -> dict:
     """
-    Parse raw FDA label data into a structured side effects object with
-    frequency tiers, boxed warnings, mechanism of action, and source URLs.
+    Return structured side effects for a drug.
+
+    Priority:
+      1. Hardcoded clinical fallback  (always clean, highest reliability)
+      2. Gemini parse of FDA label    (if GEMINI_API_KEY is set)
+      3. FAERS terms only             (filtered through blocklist, max 8)
+      4. Empty tier structure         (never runs the broken heuristic parser)
+
+    The old comma-split heuristic (_classify_effects_from_text) is intentionally
+    NOT called here — it produces garbage like "And/Or G", "And Coma", and
+    "Including Buspirone" by splitting prose paragraphs on commas.
     """
-    result: dict = {
-        "drug_name": drug_name,
-        "side_effects": {
-            "very_common": {"label": "Very Common (>10%)", "items": []},
-            "common":      {"label": "Common (1-10%)",    "items": []},
-            "uncommon":    {"label": "Uncommon (<1%)",     "items": []},
-            "serious":     {"label": "Serious — Seek Immediate Medical Attention", "items": [], "urgent": True},
-        },
-        "boxed_warnings": [],
-        "mechanism_of_action": {
-            "summary": "",
-            "pharmacologic_class": "",
-            "molecular_targets": [],
-            "detail": "",
-        },
-        "sources": [],
+    from pipeline.side_effects_store import _get_class_fallback, _DRUG_ALIASES
+
+    # ── Step 1: hardcoded fallback (most reliable for common drugs) ───────────
+    key = drug_name.strip().lower()
+    resolved = _DRUG_ALIASES.get(key, key)
+    fallback = _get_class_fallback(resolved)
+    if fallback:
+        logger.info("[Parser] Hardcoded fallback hit for %s (resolved=%s)", drug_name, resolved)
+        return fallback
+
+    # ── Step 2: try Gemini parse of the FDA label ─────────────────────────────
+    if fda_label or raw_label:
+        try:
+            from pipeline.side_effects_store import parse_label_with_gemini
+            gemini_result = parse_label_with_gemini(drug_name, fda_label or {})
+            if gemini_result:
+                # Enrich with metadata from raw_label (source URLs, brand names, MOA)
+                if raw_label:
+                    openfda = raw_label.get("openfda", {})
+                    set_ids = openfda.get("set_id", [])
+                    set_id = set_ids[0] if set_ids else None
+                    app_nums = openfda.get("application_number", [])
+                    nda = app_nums[0] if app_nums else None
+                    brand_names = openfda.get("brand_name", [])
+                    generic_names = openfda.get("generic_name", [])
+                    eff_date = raw_label.get("effective_time", "")
+                    last_updated = (
+                        f"{eff_date[:4]}-{eff_date[4:6]}-{eff_date[6:8]}"
+                        if eff_date and len(eff_date) >= 8 else ""
+                    )
+                    gemini_result["brand_names"] = brand_names[:5]
+                    gemini_result["generic_name"] = generic_names[0] if generic_names else drug_name
+                    effective_setid = dailymed_setid or set_id
+                    sources = []
+                    if effective_setid:
+                        sources.append({
+                            "id": 1, "name": f"DailyMed — {drug_name.title()} label",
+                            "url": f"https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid={effective_setid}",
+                            "section": "ADVERSE REACTIONS", "last_updated": last_updated,
+                        })
+                    if nda:
+                        sources.append({
+                            "id": 2, "name": "Drugs@FDA Application",
+                            "url": f"https://www.accessdata.fda.gov/scripts/cder/daf/index.cfm?event=overview.process&ApplNo={nda}",
+                            "section": "FDA Label", "last_updated": last_updated,
+                        })
+                    sources.append({
+                        "id": len(sources) + 1, "name": "openFDA Drug Label API",
+                        "url": f'https://api.fda.gov/drug/label.json?search=openfda.generic_name:"{drug_name}"&limit=1',
+                        "section": "adverse_reactions", "last_updated": last_updated,
+                    })
+                    gemini_result["sources"] = sources
+                logger.info("[Parser] Gemini parse succeeded for %s", drug_name)
+                return gemini_result
+        except Exception as exc:
+            logger.warning("[Parser] Gemini parse error for %s: %s", drug_name, exc)
+
+    # ── Step 3: safe empty structure + filtered FAERS terms only ─────────────
+    # DO NOT run the heuristic comma-split parser — it always produces garbage.
+    tiers: dict = {
+        "very_common": {"label": "Very Common (>10%)",  "items": []},
+        "common":      {"label": "Common (1-10%)",       "items": []},
+        "uncommon":    {"label": "Uncommon (<1%)",        "items": []},
+        "rare":        {"label": "Rare (<0.1%)",          "items": []},
+        "serious":     {"label": "Serious — Seek Medical Attention", "items": [], "urgent": True},
     }
 
-    if not fda_label and not raw_label:
-        return result
-
-    # ── Extract metadata from raw openFDA label ──────────────────────────────
-    openfda = (raw_label or {}).get("openfda", {}) if raw_label else {}
-    set_ids = openfda.get("set_id", [])
-    set_id = set_ids[0] if set_ids else None
-    app_nums = openfda.get("application_number", [])
-    nda = app_nums[0] if app_nums else None
-    pharm_moa = openfda.get("pharm_class_moa", [])
-    pharm_epc = openfda.get("pharm_class_epc", [])
-    brand_names = openfda.get("brand_name", [])
-    generic_names = openfda.get("generic_name", [])
-
-    result["brand_names"] = brand_names[:5]
-    result["generic_name"] = generic_names[0] if generic_names else drug_name
-
-    # ── Build source URLs ────────────────────────────────────────────────────
-    effective_setid = dailymed_setid or set_id
-    last_updated = ""
-    if raw_label:
-        eff_date = raw_label.get("effective_time", "")
-        if eff_date and len(eff_date) >= 8:
-            last_updated = f"{eff_date[:4]}-{eff_date[4:6]}-{eff_date[6:8]}"
-
-    if effective_setid:
-        result["sources"].append({
-            "id": 1,
-            "name": f"DailyMed — {drug_name.title()} label",
-            "url": f"https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid={effective_setid}",
-            "section": "ADVERSE REACTIONS",
-            "last_updated": last_updated,
-        })
-    if nda:
-        result["sources"].append({
-            "id": 2,
-            "name": "Drugs@FDA Application",
-            "url": f"https://www.accessdata.fda.gov/scripts/cder/daf/index.cfm?event=overview.process&ApplNo={nda}",
-            "section": "FDA Label",
-            "last_updated": last_updated,
-        })
-    # Generic openFDA source always included
-    result["sources"].append({
-        "id": len(result["sources"]) + 1,
-        "name": "openFDA Drug Label API",
-        "url": f'https://api.fda.gov/drug/label.json?search=openfda.generic_name:"{drug_name}"&limit=1',
-        "section": "adverse_reactions",
-        "last_updated": last_updated,
-    })
-
-    # ── Boxed warnings ───────────────────────────────────────────────────────
-    boxed = (fda_label or {}).get("boxed_warning", "")
-    if boxed:
-        result["boxed_warnings"] = [s.strip() for s in boxed.split(".") if len(s.strip()) > 10][:3]
-
-    # ── Mechanism of action ──────────────────────────────────────────────────
-    clin_pharm = (fda_label or {}).get("clinical_pharmacology", "")
-    description = (fda_label or {}).get("description", "")
-    moa_class = pharm_moa[0] if pharm_moa else ""
-    epc_class = pharm_epc[0] if pharm_epc else ""
-
-    result["mechanism_of_action"]["pharmacologic_class"] = epc_class or moa_class
-    if moa_class:
-        result["mechanism_of_action"]["molecular_targets"] = [moa_class.replace(" [MoA]", "")]
-
-    if clin_pharm:
-        # Take up to 2 sentences for summary, full text for detail
-        sentences = [s.strip() + "." for s in clin_pharm.split(".") if len(s.strip()) > 15]
-        result["mechanism_of_action"]["summary"] = " ".join(sentences[:2])[:300]
-        result["mechanism_of_action"]["detail"] = " ".join(sentences[:5])[:800]
-    elif description:
-        sentences = [s.strip() + "." for s in description.split(".") if len(s.strip()) > 15]
-        result["mechanism_of_action"]["summary"] = " ".join(sentences[:2])[:300]
-        result["mechanism_of_action"]["detail"] = " ".join(sentences[:4])[:600]
-
-    # ── Parse adverse reactions into frequency tiers ──────────────────────────
-    adverse_text    = (fda_label or {}).get("adverse_reactions", "")
-    wp_text         = (fda_label or {}).get("warnings_and_precautions", "")
-    warnings_text   = (fda_label or {}).get("warnings", "")
-
-    logger.debug("[Parser] %s — adverse_reactions=%d chars, warnings_and_precautions=%d chars",
-                 drug_name, len(adverse_text), len(wp_text))
-
-    # Parse Adverse Reactions (primary section)
-    _classify_effects_from_text(adverse_text, result["side_effects"])
-    # Also parse Warnings and Precautions — often contains critical serious effects
-    if wp_text:
-        _classify_effects_from_text(wp_text, result["side_effects"])
-
-    # Merge FAERS terms into common if we didn't get enough from label text.
-    # FAERS is an adverse-event reporting database biased toward serious/fatal events,
-    # so we filter out any term that matches the serious-event blocklist before
-    # adding it to the "common" bucket.
     if faers_terms:
-        existing = set()
-        for tier in result["side_effects"].values():
-            existing.update(s.lower() for s in tier.get("items", []))
-        for term in faers_terms:
+        for term in faers_terms[:8]:
             clean = term.strip().lower()
-            if not clean or clean in existing or len(clean) <= 2:
-                continue
-            # Skip serious/fatal FAERS terms — they don't belong in "common"
-            if any(blocked in clean for blocked in _FAERS_COMMON_BLOCKLIST):
-                continue
-            result["side_effects"]["common"]["items"].append(clean.title())
-            existing.add(clean)
-            if len(result["side_effects"]["common"]["items"]) >= 12:
-                break
+            if clean and len(clean) > 2:
+                if not any(blocked in clean for blocked in _FAERS_COMMON_BLOCKLIST):
+                    tiers["common"]["items"].append({
+                        "display_name": clean.title(),
+                        "frequency_category": "common",
+                        "confidence_score": 0.3,
+                        "severity": "mild",
+                        "management": "monitor",
+                        "red_flag": False,
+                    })
 
-    # Extract serious effects from warnings section
-    if warnings_text:
-        _extract_serious_from_warnings(warnings_text, result["side_effects"]["serious"]["items"])
-    if wp_text:
-        _extract_serious_from_warnings(wp_text, result["side_effects"]["serious"]["items"])
+    counts = {tier: len(data["items"]) for tier, data in tiers.items()}
+    logger.info("[Parser] %s — FAERS-only fallback, %d effects: %s", drug_name, sum(counts.values()), counts)
 
-    counts = {tier: len(data.get("items", [])) for tier, data in result["side_effects"].items()}
-    total = sum(counts.values())
-    logger.info("[Parser] %s — extracted %d effects: %s", drug_name, total, counts)
-
-    return result
+    return {
+        "drug": drug_name,
+        "drug_name": drug_name,
+        "side_effects": tiers,
+        "boxed_warnings": [],
+        "mechanism_of_action": {
+            "summary": "", "detail": "", "pharmacologic_class": "", "molecular_targets": [],
+        },
+        "sources": [],
+        "_fallback": True,
+        "_fallback_source": "faers_safe",
+    }
 
 
 def _classify_effects_from_text(text: str, tiers: dict) -> None:
