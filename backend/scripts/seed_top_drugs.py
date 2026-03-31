@@ -15,25 +15,26 @@ Usage:
 """
 from __future__ import annotations
 
-import argparse
-import asyncio
-import logging
 import os
 import sys
 from pathlib import Path
 
-# Ensure backend/ is importable
-_BACKEND = str(Path(__file__).resolve().parents[1])
+# ── Load .env FIRST — before any imports that read environment variables ─────
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if _BACKEND not in sys.path:
-    sys.path.insert(0, _BACKEND)
-
-# Load .env so DATABASE_URL / GEMINI_API_KEY are available
 try:
     from dotenv import load_dotenv
     load_dotenv(_PROJECT_ROOT / ".env")
 except ImportError:
     pass  # dotenv not installed — rely on environment variables
+
+import argparse
+import asyncio
+import logging
+
+# Ensure backend/ is importable
+_BACKEND = str(Path(__file__).resolve().parents[1])
+if _BACKEND not in sys.path:
+    sys.path.insert(0, _BACKEND)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -69,6 +70,7 @@ async def seed_drug(drug_name: str) -> bool:
     logger.info("  SEEDING: %s", drug_name)
 
     try:
+        print(f"  DEBUG: Starting {drug_name}", flush=True)
         # Fetch FDA label + DailyMed SET ID in parallel
         (fda_label, raw_label), setid = await asyncio.gather(
             fetch_fda_label(drug_name),
@@ -104,8 +106,8 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description="Pre-seed side-effects DB from CSV")
     parser.add_argument("--limit", type=int, default=0,
                         help="Only seed the first N drugs (0 = all)")
-    parser.add_argument("--batch", type=int, default=5,
-                        help="Concurrent batch size (default 5)")
+    parser.add_argument("--batch", type=int, default=1,
+                        help="Concurrent batch size (default 1)")
     args = parser.parse_args()
 
     # Locate the drug CSV
@@ -143,8 +145,6 @@ async def main() -> None:
             else:
                 failed += 1
 
-        # Small delay between batches to respect API rate limits
-        await asyncio.sleep(1.0)
         logger.info(
             "Progress: %d/%d  (ok=%d, failed=%d)",
             min(i + batch_size, len(drugs)),
@@ -152,6 +152,9 @@ async def main() -> None:
             ok,
             failed,
         )
+
+        # 3-second delay after each drug to respect API rate limits
+        await asyncio.sleep(3.0)
 
     logger.info("\nDONE — OK: %d, Failed: %d, Total: %d", ok, failed, len(drugs))
 

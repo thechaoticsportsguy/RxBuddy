@@ -756,7 +756,7 @@ def _try_gemini_generic(system_prompt: str, user_message: str) -> Explanation | 
     try:
         client = _genai.Client(api_key=gemini_key)
         full_prompt = f"{system_prompt}\n\n{user_message}\n\nRespond with valid JSON only."
-        response = client.models.generate_content(model="gemini-2.0-flash", contents=full_prompt)
+        response = client.models.generate_content(model="gemini-1.5-pro", contents=full_prompt)
         if not response or not hasattr(response, "text") or not response.text:
             raise RuntimeError("Gemini returned empty response")
         raw = response.text.strip()
@@ -787,7 +787,7 @@ def _try_gemini_side_effects(system_prompt: str, user_message: str) -> Explanati
     try:
         client = _genai.Client(api_key=gemini_key)
         full_prompt = f"{system_prompt}\n\n{user_message}\n\nRespond with valid JSON only."
-        response = client.models.generate_content(model="gemini-2.0-flash", contents=full_prompt)
+        response = client.models.generate_content(model="gemini-1.5-pro", contents=full_prompt)
         if not response or not hasattr(response, "text") or not response.text:
             raise RuntimeError("Gemini returned empty response")
         raw = response.text.strip()

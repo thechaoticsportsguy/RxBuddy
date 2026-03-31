@@ -660,9 +660,8 @@ def parse_label_with_gemini(drug_name: str, fda_label: dict) -> dict | None:
         return None
 
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=gemini_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
+        from google import genai
+        client = genai.Client(api_key=gemini_key)
     except Exception as exc:
         logger.error("[SEStore] Gemini init failed: %s", exc)
         return None
@@ -683,9 +682,9 @@ def parse_label_with_gemini(drug_name: str, fda_label: dict) -> dict | None:
 
     t0 = time.time()
     try:
-        resp = model.generate_content(
-            prompt,
-            generation_config={"temperature": 0.1, "max_output_tokens": 2000},
+        resp = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
         )
         latency_ms = int((time.time() - t0) * 1000)
         raw = (resp.text or "").strip()
@@ -697,11 +696,23 @@ def parse_label_with_gemini(drug_name: str, fda_label: dict) -> dict | None:
                      drug_name, latency_ms, exc)
         return None
 
+    # Log raw response for debugging
+    logger.info("[SEStore] Gemini raw response for %s (first 500 chars): %.500s",
+                drug_name, raw)
+
     # Strip markdown fences
     if "```json" in raw:
         raw = raw.split("```json", 1)[1].split("```")[0].strip()
     elif raw.startswith("```"):
         raw = "\n".join(l for l in raw.splitlines() if not l.strip().startswith("```")).strip()
+
+    # If raw is empty, resp.text may need to come from candidates instead
+    if not raw:
+        try:
+            raw = resp.candidates[0].content.parts[0].text.strip()
+            logger.info("[SEStore] Fell back to candidates path — got %d chars", len(raw))
+        except Exception:
+            pass
 
     try:
         effects_list = json.loads(raw)
@@ -710,7 +721,7 @@ def parse_label_with_gemini(drug_name: str, fda_label: dict) -> dict | None:
         if not effects_list:
             raise ValueError("Response array is empty")
     except Exception as exc:
-        logger.error("[SEStore] Gemini JSON parse failed for %s: %s — raw: %.200s",
+        logger.error("[SEStore] Gemini JSON parse failed for %s: %s — raw: %.500s",
                      drug_name, exc, raw)
         return None
 
