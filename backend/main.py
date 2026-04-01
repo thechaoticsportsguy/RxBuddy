@@ -1948,6 +1948,13 @@ class StructuredAnswer(BaseModel):
     serious_side_effects: list[str] = Field(default_factory=list)
     warning_signs: list[str] = Field(default_factory=list)
     pubmed_studies: list[dict] = Field(default_factory=list)
+    # Rich structured side-effects fields (populated from DB cache / Gemini parse)
+    generic_name: str = ""
+    brand_names: list[str] = Field(default_factory=list)
+    side_effects_data: dict = Field(default_factory=dict)
+    boxed_warnings: list[str] = Field(default_factory=list)
+    mechanism_of_action: dict = Field(default_factory=dict)
+    structured_sources: list[dict] = Field(default_factory=list)
 
 
 DOSAGE_TERMS = (
@@ -3130,6 +3137,40 @@ def _build_dataset_result(query: str) -> QuestionMatch | None:
         print(f"🔍 [Dataset] No CSV match for: {query_lower}")
         return None
 
+    # ── DB-first: check the rich structured cache before using CSV text ───────
+    try:
+        from pipeline.side_effects_store import get_from_db, _DRUG_ALIASES
+        db_key = _DRUG_ALIASES.get(dataset_drug_name, dataset_drug_name)
+        db_result = get_from_db(db_key)
+        if db_result:
+            print(f"✅ [Dataset] DB cache hit for: {dataset_drug_name} (key={db_key})")
+            pubmed_studies = _fetch_pubmed_studies(dataset_drug_name)
+            return QuestionMatch(
+                id=0,
+                question=query,
+                category="side_effects",
+                tags=[dataset_drug_name, "db_cache"],
+                score=1.0,
+                answer=db_key,
+                structured=StructuredAnswer(
+                    answer=db_key,
+                    short_answer=db_key,
+                    sources="db_cache",
+                    intent="side_effects",
+                    drug=db_key,
+                    generic_name=db_result.get("generic_name", db_key),
+                    brand_names=db_result.get("brand_names", []),
+                    side_effects_data=db_result,
+                    boxed_warnings=db_result.get("boxed_warnings", []),
+                    mechanism_of_action=db_result.get("mechanism_of_action", {}),
+                    structured_sources=db_result.get("sources", []),
+                    pubmed_studies=pubmed_studies,
+                ),
+            )
+    except Exception as exc:
+        print(f"⚠️ [Dataset] DB check failed for {dataset_drug_name}: {exc}")
+
+    # ── CSV fallback: use flat text if DB has nothing ─────────────────────────
     drug = get_drug_by_generic(dataset_drug_name)
     if not drug:
         print(f"🔍 [Dataset] CSV row not found for drug: {dataset_drug_name}")
