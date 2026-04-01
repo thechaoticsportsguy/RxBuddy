@@ -603,47 +603,73 @@ def store_to_db(drug_name: str, parsed: dict) -> bool:
 # ---------------------------------------------------------------------------
 
 def _build_gemini_prompt(drug_name: str, label_text: str) -> str:
-    return f"""You are a pharmaceutical NLP expert parsing FDA drug labels.
+    return f"""You are a clinical pharmacist and NLP expert extracting structured side-effect data from FDA drug labels.
 
-Extract ALL side effects from this label for "{drug_name}".
+TASK: Extract ALL clinically meaningful side effects for "{drug_name}" from the label below.
 
 Return a JSON array. Each element MUST have exactly these fields:
 
 {{
-  "display_name":        "Patient-friendly name (e.g. Diarrhea, not Bowel disorder)",
+  "display_name":        "Specific medical term — e.g. 'Hyponatremia', 'Orthostatic Hypotension', 'QT Prolongation' (NOT vague terms like 'Infection', 'Pain', 'Lab abnormality')",
   "frequency_category":  "very_common|common|uncommon|rare|serious",
-  "frequency_percent":   30.0,        // exact number if stated, else null
-  "confidence_score":    0.95,        // 1.0=exact%, 0.75=strong qualifier, 0.5=inferred, 0.25=guessed
+  "frequency_percent":   30.0,        // REQUIRED if label states a number. Use midpoint for ranges (e.g. '5-10%' → 7.5). null only if no number in label.
+  "confidence_score":    0.95,        // see CONFIDENCE RULES below
   "severity":            "mild|moderate|severe",
-  "patient_description": "1-2 plain English sentences describing what it feels like",
-  "onset_days":          3,           // days after starting — integer, or null
-  "resolution_days":     7,           // days until resolved — integer, or null
+  "patient_description": "1-2 plain-English sentences a patient with no medical training can understand. Describe what it feels like, when it typically starts, and what to do.",
+  "onset_days":          3,           // days after starting drug — integer from label, or null if unknown
+  "resolution_days":     7,           // days until resolved after stopping — integer, or null
   "management":          "monitor|manage_at_home|contact_doctor",
-  "red_flag":            false,       // true ONLY if life-threatening or requires emergency care
-  "red_flag_reason":     null,        // why urgent — string, or null if red_flag=false
-  "evidence_tier":       "label",     // always "label" for FDA data
-  "source_section":      "Adverse Reactions",  // exact section name from label
-  "source_quote":        "exact quote from label (max 20 words)"
+  "red_flag":            false,       // true ONLY for conditions requiring an ER visit or that are life-threatening (anaphylaxis, Stevens-Johnson, hepatic failure, serotonin syndrome, etc.)
+  "red_flag_reason":     null,        // If red_flag=true: 1 sentence explaining why this needs emergency care. null otherwise.
+  "evidence_tier":       "label",     // always "label" for data extracted from FDA labels
+  "source_section":      "Adverse Reactions",  // exact section name the data came from
+  "source_quote":        "verbatim quote from label (max 20 words) proving this effect exists"
 }}
 
-FREQUENCY RULES (apply strictly):
-  very_common  = >10% OR "most common" OR "frequently reported"
-  common       = 1-10% OR "common" OR listed without qualifier in adverse reactions
-  uncommon     = 0.1-1% OR "uncommon" OR "infrequent" OR "rare" (< 1%)
-  rare         = <0.1% OR "very rare" OR "isolated reports"
-  serious      = life-threatening, regardless of frequency (cardiac arrest, liver failure, etc.)
+═══════════════════════════════════════════════════════════════
+FREQUENCY CLASSIFICATION (apply strictly — do NOT guess):
+═══════════════════════════════════════════════════════════════
+  very_common  = >10%, OR label says "most common", "most frequently reported"
+  common       = 1–10%, OR label says "common", "frequent", or lists in adverse reactions without qualifier
+  uncommon     = 0.1–1%, OR label says "uncommon", "infrequent", "occasional"
+  rare         = <0.1%, OR label says "rare", "isolated reports", "postmarketing" with very few cases
+  serious      = life-threatening regardless of frequency: anaphylaxis, hepatic failure,
+                 Stevens-Johnson syndrome, agranulocytosis, serotonin syndrome, rhabdomyolysis,
+                 torsades de pointes, NMS, pancreatitis, pulmonary embolism, etc.
+                 Also use for any Boxed Warning adverse reactions.
 
-CONFIDENCE RULES:
-  1.0  = exact % stated: "occurred in 30% of patients"
-  0.75 = strong qualifier: "most common", "frequently", "commonly observed"
-  0.5  = listed without qualifier in adverse reactions section
-  0.25 = inferred, guessed, or from unrelated context
+An effect CAN appear TWICE — once by frequency AND once as serious if it is both
+common and life-threatening (e.g. "QT Prolongation" may be common AND serious).
 
-CRITICAL:
-- Do NOT invent effects not in the label
-- NEVER put death, overdose, addiction, cardiac arrest, respiratory failure in common/very_common
-- If % is stated, always set frequency_percent and confidence_score=1.0
-- Return ONLY the JSON array, no markdown, no explanations
+═══════════════════════════════════════════════════════════════
+CONFIDENCE SCORING (strict rules):
+═══════════════════════════════════════════════════════════════
+  1.0  = exact percentage stated in label: "diarrhea (30%)", "occurred in 15% of patients"
+  0.75 = mentioned in label with strong qualifier but no exact %: "most common", "frequently observed", "commonly reported"
+  0.5  = listed in Adverse Reactions section without any frequency qualifier
+  0.25 = only found in Postmarketing or Warnings section, no frequency data at all
+
+═══════════════════════════════════════════════════════════════
+DISPLAY NAME RULES (be specific, not vague):
+═══════════════════════════════════════════════════════════════
+  BAD:  "Infection"           → GOOD: "Upper Respiratory Tract Infection", "Urinary Tract Infection"
+  BAD:  "Blood disorder"     → GOOD: "Neutropenia", "Thrombocytopenia", "Anemia"
+  BAD:  "Liver problem"      → GOOD: "Elevated ALT/AST", "Hepatotoxicity", "Jaundice"
+  BAD:  "Heart issue"        → GOOD: "QT Prolongation", "Bradycardia", "Atrial Fibrillation"
+  BAD:  "Electrolyte issue"  → GOOD: "Hypokalemia", "Hyponatremia", "Hyperkalemia"
+  BAD:  "Pain"               → GOOD: "Arthralgia", "Myalgia", "Headache", "Back Pain"
+
+═══════════════════════════════════════════════════════════════
+CRITICAL RULES:
+═══════════════════════════════════════════════════════════════
+1. Extract ONLY effects explicitly stated in this label — NEVER invent or hallucinate effects
+2. NEVER classify death, overdose, addiction, substance dependence as very_common or common
+3. When a percentage IS stated, you MUST set frequency_percent to that number AND confidence_score=1.0
+4. Extract from ALL label sections: Adverse Reactions, Warnings & Precautions, Boxed Warning, Postmarketing
+5. For Boxed Warning effects: always set red_flag=true and frequency_category="serious"
+6. Include at least 10 effects if the label mentions that many — do not stop early
+7. source_quote MUST be a real verbatim quote from the label text — do not fabricate quotes
+8. Return ONLY the JSON array — no markdown fences, no commentary, no explanations
 
 FDA LABEL — {drug_name.upper()}:
 {label_text}"""
@@ -1943,23 +1969,21 @@ def _get_class_fallback(drug_name: str) -> dict | None:
                 drug_name, resolved, sum(len(t["items"]) for t in tiers.values()))
 
     return {
-        "drug":           resolved,
-        "generic_name":   resolved,
-        "brand_names":    [],
-        "side_effects":   tiers,
-        "boxed_warnings": [],
+        "drug":             key,
+        "generic_name":     resolved,
+        "brand_names":      [],
+        "side_effects":     tiers,
+        "boxed_warnings":   [],
         "mechanism_of_action": {
-            "summary": "", "detail": "",
-            "pharmacologic_class": "", "molecular_targets": [],
+            "summary":             "",
+            "detail":              "",
+            "pharmacologic_class": "",
+            "molecular_targets":   [],
         },
-        "sources": [{
-            "id": 1, "name": "RxBuddy Clinical Reference (FDA-sourced)",
-            "url": f'https://api.fda.gov/drug/label.json?search=openfda.generic_name:"{resolved}"&limit=1',
-            "section": "Known Side Effects", "last_updated": "",
-        }],
+        "sources":          [],
         "overall_confidence": 0.6,
-        "overall_verdict":    "CONSULT_PHARMACIST" if has_red else "CAUTION",
-        "has_red_flag":       has_red,
-        "_fallback":          True,
-        "_fallback_source":   "drug_class_hardcoded",
+        "overall_verdict":  "CONSULT_PHARMACIST" if has_red else "CAUTION",
+        "has_red_flag":     has_red,
+        "_fallback":        True,
+        "_fallback_source": "hardcoded_class",
     }

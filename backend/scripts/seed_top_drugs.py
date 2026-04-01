@@ -50,8 +50,6 @@ async def seed_drug(drug_name: str) -> bool:
     from pipeline.side_effects_store import (
         get_from_db,
         get_or_fetch_side_effects,
-        _get_class_fallback,
-        _DRUG_ALIASES,
     )
 
     key = drug_name.strip().lower()
@@ -61,11 +59,8 @@ async def seed_drug(drug_name: str) -> bool:
         logger.info("  SKIP (DB cache): %s", drug_name)
         return True
 
-    # Has hardcoded fallback?
-    resolved = _DRUG_ALIASES.get(key, key)
-    if _get_class_fallback(resolved):
-        logger.info("  SKIP (hardcoded): %s", drug_name)
-        return True
+    # NOTE: We no longer skip hardcoded drugs — we want Gemini-quality
+    # data for ALL drugs, so every drug goes through the full pipeline.
 
     logger.info("  SEEDING: %s", drug_name)
 
@@ -139,9 +134,12 @@ async def main() -> None:
         results = await asyncio.gather(
             *[seed_drug(d) for d in batch], return_exceptions=True
         )
-        for r in results:
+        for idx, r in enumerate(results):
             if r is True:
                 ok += 1
+            elif isinstance(r, Exception):
+                failed += 1
+                print(f"  EXCEPTION for {batch[idx]}: {type(r).__name__}: {r}", flush=True)
             else:
                 failed += 1
 
