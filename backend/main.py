@@ -69,7 +69,11 @@ from drug_catalog import find_drug, is_high_risk as catalog_is_high_risk, is_kno
 
 # ---------- 1) Load secrets from .env ----------
 # `.env` lives in your project root and is NOT committed to GitHub.
-load_dotenv()
+# Use explicit path so it works regardless of current working directory.
+from pathlib import Path as _Path
+_PROJECT_ROOT = _Path(__file__).resolve().parent.parent  # backend/../ = project root
+load_dotenv(_PROJECT_ROOT / ".env")
+print(f"[RxBuddy] DATABASE_URL loaded: {bool(os.getenv('DATABASE_URL'))}", flush=True)
 
 
 # ---------- 1b) Medical dictionary from RxNorm (cached on startup) ----------
