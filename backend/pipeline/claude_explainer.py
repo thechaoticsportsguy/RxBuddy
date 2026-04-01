@@ -57,6 +57,11 @@ def _get_api_key() -> str | None:
     return key or None
 
 
+def _sanitize(text: str) -> str:
+    """Strip surrogate characters that cause UTF-8 codec errors."""
+    return text.encode("utf-8", errors="replace").decode("utf-8")
+
+
 def _build_context_summary(
     intent: str,
     drug_names: list[str],
@@ -82,7 +87,7 @@ def _build_context_summary(
                         "adverse_reactions", "indications_and_usage",
                         "dosage_and_administration", "contraindications",
                         "pregnancy", "description"):
-            text = fda.get(section, "")
+            text = _sanitize(fda.get(section, ""))
             if text:
                 drug_parts.append(f"{section.upper()}: {text[:400]}")
         if len(drug_parts) > 1:
@@ -132,11 +137,11 @@ def _build_side_effects_context(
         # ONLY include ADVERSE REACTIONS for common_side_effects context.
         # Warnings/boxed warnings are kept separate so Claude cannot confuse them
         # with common effects.
-        adverse = fda.get("adverse_reactions", "")
+        adverse = _sanitize(fda.get("adverse_reactions", ""))
         if adverse:
             drug_parts.append(f"ADVERSE_REACTIONS: {adverse[:800]}")
         # Boxed warning provided as reference only — explicitly NOT for common_side_effects
-        boxed = fda.get("boxed_warning", "")
+        boxed = _sanitize(fda.get("boxed_warning", ""))
         if boxed:
             drug_parts.append(f"[REFERENCE ONLY - DO NOT USE FOR common_side_effects] BOXED_WARNING: {boxed[:300]}")
         if len(drug_parts) > 1:

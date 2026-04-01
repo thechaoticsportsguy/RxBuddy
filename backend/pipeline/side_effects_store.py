@@ -668,11 +668,14 @@ def parse_label_with_gemini(drug_name: str, fda_label: dict) -> dict | None:
         logger.error("[SEStore] Gemini init failed: %s", exc)
         return None
 
-    # Build label context
+    # Build label context — sanitize surrogates before embedding in prompt
+    def _san(t: str) -> str:
+        return t.encode("utf-8", errors="replace").decode("utf-8")
+
     section_texts = []
     for sec in ("adverse_reactions", "warnings", "boxed_warning",
                 "warnings_and_precautions", "clinical_pharmacology", "description"):
-        txt = (fda_label or {}).get(sec, "")
+        txt = _san((fda_label or {}).get(sec, ""))
         if txt:
             section_texts.append(f"=== {sec.upper()} ===\n{txt[:1200]}")
 
