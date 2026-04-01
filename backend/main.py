@@ -3145,25 +3145,42 @@ def _build_dataset_result(query: str) -> QuestionMatch | None:
         if db_result:
             print(f"✅ [Dataset] DB cache hit for: {dataset_drug_name} (key={db_key})")
             pubmed_studies = _fetch_pubmed_studies(dataset_drug_name)
+
+            # Frontend expects side_effects_data to be the tier dict directly:
+            #   { "very_common": {"items": [...]}, "common": {"items": [...]}, ... }
+            # db_result nests them under "side_effects", so extract that key.
+            se_tiers = db_result.get("side_effects", {})
+
+            # Also build flat common/serious strings as fallback for older code paths
+            common_names = ", ".join(
+                e.get("display_name", "") for tier_key in ("very_common", "common")
+                for e in se_tiers.get(tier_key, {}).get("items", [])
+            )
+            serious_names = [
+                e.get("display_name", "") for e in se_tiers.get("serious", {}).get("items", [])
+            ]
+
             return QuestionMatch(
                 id=0,
                 question=query,
                 category="side_effects",
                 tags=[dataset_drug_name, "db_cache"],
                 score=1.0,
-                answer=db_key,
+                answer=common_names or db_key,
                 structured=StructuredAnswer(
-                    answer=db_key,
+                    answer=common_names or db_key,
                     short_answer=db_key,
                     sources="db_cache",
                     intent="side_effects",
                     drug=db_key,
                     generic_name=db_result.get("generic_name", db_key),
                     brand_names=db_result.get("brand_names", []),
-                    side_effects_data=db_result,
+                    side_effects_data=se_tiers,
                     boxed_warnings=db_result.get("boxed_warnings", []),
                     mechanism_of_action=db_result.get("mechanism_of_action", {}),
                     structured_sources=db_result.get("sources", []),
+                    common_side_effects=common_names,
+                    serious_side_effects=serious_names,
                     pubmed_studies=pubmed_studies,
                 ),
             )
