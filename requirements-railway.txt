@@ -4,6 +4,7 @@ numpy
 scikit-learn
 SQLAlchemy
 psycopg[binary]
+psycopg2-binary
 python-dotenv
 fastapi
 uvicorn[standard]
