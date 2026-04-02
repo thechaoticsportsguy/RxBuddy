@@ -1,7 +1,7 @@
 /**
- * DrugChatWidget — Floating AI assistant chat for drug-related results.
+ * DrugChatWidget — Black & white brutalist AI chat for drug results.
  *
- * Bottom-right chat bubble that expands into a glass-morphism drawer.
+ * Sharp corners, Times New Roman, pure black/white palette.
  * Sends messages to POST /v2/chat scoped to a specific drug name.
  *
  * Props:
@@ -13,6 +13,25 @@ import { useState, useRef, useEffect, useCallback } from "react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
+function PillLogo() {
+  return (
+    <svg width="40" height="28" viewBox="0 0 40 28" style={{ flexShrink: 0 }}>
+      {/* Pill body */}
+      <rect x="2" y="4" width="36" height="16" rx="8" fill="white" stroke="black" strokeWidth="1.5"/>
+      {/* Divider line */}
+      <line x1="20" y1="4" x2="20" y2="20" stroke="black" strokeWidth="1.5"/>
+      {/* Rx text */}
+      <text x="8" y="16" fontSize="9" fontFamily="Times New Roman, serif" fill="black" fontWeight="bold">Rx</text>
+      {/* Robot eyes on right half */}
+      <circle cx="26" cy="11" r="2" fill="black"/>
+      <circle cx="33" cy="11" r="2" fill="black"/>
+      {/* T-shirt shape below pill */}
+      <path d="M15 20 L17 23 L23 23 L25 20" fill="white" stroke="black" strokeWidth="1"/>
+      <text x="17" y="26" fontSize="5" fontFamily="Times New Roman, serif" fill="black">Rx</text>
+    </svg>
+  );
+}
+
 export default function DrugChatWidget({ drugName, isVisible }) {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState([]);
@@ -21,12 +40,14 @@ export default function DrugChatWidget({ drugName, isVisible }) {
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
+  const FONT = "'Times New Roman', Times, serif";
+
   // Seed opening message when first opened
   useEffect(() => {
     if (isOpen && messages.length === 0) {
       setMessages([{
         role: "assistant",
-        content: `Hi! I'm your RxBuddy AI assistant \u{1F44B} I can answer questions about ${drugName || "this medication"}. Ask me about side effects, interactions, dosage, warnings, or anything else!`,
+        content: `Hello! I'm your RxBuddy AI assistant. I can answer questions about ${drugName || "this medication"} \u2014 side effects, interactions, dosage, warnings, and more.\nAny questions about your prescription? Ask me, I can help! \uD83D\uDC8A`,
       }]);
     }
   }, [isOpen, drugName, messages.length]);
@@ -53,10 +74,9 @@ export default function DrugChatWidget({ drugName, isVisible }) {
     setIsLoading(true);
 
     try {
-      // Build conversation_history (exclude the opening assistant greeting)
       const history = messages
-        .filter((_, i) => i > 0) // skip greeting
-        .slice(-6); // last 3 turns
+        .filter((_, i) => i > 0)
+        .slice(-6);
 
       const res = await fetch(`${API_BASE}/v2/chat`, {
         method: "POST",
@@ -71,9 +91,10 @@ export default function DrugChatWidget({ drugName, isVisible }) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
 
+      const reply = data.reply || "Sorry, I couldn't generate a response.";
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: data.reply || "Sorry, I couldn't generate a response." },
+        { role: "assistant", content: reply + "\n\nAny other questions on your prescription? Ask me, I can help! \uD83D\uDC8A" },
       ]);
     } catch (err) {
       console.error("[DrugChatWidget] Error:", err);
@@ -97,7 +118,7 @@ export default function DrugChatWidget({ drugName, isVisible }) {
 
   return (
     <>
-      {/* ── Floating chat bubble ──────────────────────────────────── */}
+      {/* ── Rectangular chat button ───────────────────────────────── */}
       {!isOpen && (
         <button
           onClick={() => setIsOpen(true)}
@@ -105,32 +126,29 @@ export default function DrugChatWidget({ drugName, isVisible }) {
             position: "fixed",
             bottom: 24,
             right: 24,
-            zIndex: 100,
-            width: 56,
-            height: 56,
-            borderRadius: "50%",
-            background: "#0f172a",
-            border: "1px solid rgba(255,255,255,0.15)",
-            color: "#fff",
-            fontSize: 24,
+            zIndex: 999,
+            background: "#000000",
+            color: "#ffffff",
+            border: "2px solid #ffffff",
+            borderRadius: 0,
+            padding: "12px 20px",
+            fontFamily: FONT,
+            fontSize: 15,
+            fontWeight: 700,
             cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            boxShadow: "0 4px 20px rgba(0,0,0,0.4), 0 0 20px rgba(56,100,220,0.3)",
-            transition: "transform 0.2s ease, box-shadow 0.2s ease",
+            transition: "background 0.15s, color 0.15s",
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.transform = "scale(1.1)";
-            e.currentTarget.style.boxShadow = "0 4px 24px rgba(0,0,0,0.5), 0 0 30px rgba(56,100,220,0.5)";
+            e.currentTarget.style.background = "#ffffff";
+            e.currentTarget.style.color = "#000000";
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.transform = "scale(1)";
-            e.currentTarget.style.boxShadow = "0 4px 20px rgba(0,0,0,0.4), 0 0 20px rgba(56,100,220,0.3)";
+            e.currentTarget.style.background = "#000000";
+            e.currentTarget.style.color = "#ffffff";
           }}
           aria-label="Open RxBuddy AI chat"
         >
-          {"\uD83D\uDC8A"}
+          {"\uD83D\uDC8A Ask RxBuddy AI"}
         </button>
       )}
 
@@ -138,77 +156,62 @@ export default function DrugChatWidget({ drugName, isVisible }) {
       {isOpen && (
         <div style={{
           position: "fixed",
-          bottom: 24,
+          bottom: 70,
           right: 24,
-          zIndex: 100,
+          zIndex: 999,
           width: 380,
-          height: 500,
-          background: "rgba(10,15,30,0.95)",
-          backdropFilter: "blur(20px)",
-          WebkitBackdropFilter: "blur(20px)",
-          border: "1px solid rgba(255,255,255,0.1)",
-          borderRadius: 16,
-          boxShadow: "0 25px 50px rgba(0,0,0,0.5)",
+          height: 520,
+          background: "#000000",
+          border: "2px solid #ffffff",
+          borderRadius: 0,
           display: "flex",
           flexDirection: "column",
-          fontFamily: "'Inter', system-ui, sans-serif",
-          animation: "slideUp 0.25s ease-out",
+          fontFamily: FONT,
+          animation: "chatSlideUp 0.2s ease-out",
         }}>
           {/* Header */}
           <div style={{
-            padding: "16px 20px 12px",
-            borderBottom: "1px solid rgba(255,255,255,0.08)",
+            padding: "14px 16px",
+            borderBottom: "1px solid #ffffff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
             flexShrink: 0,
           }}>
-            <div style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <PillLogo />
               <span style={{
-                fontSize: 16,
+                fontSize: 18,
                 fontWeight: 700,
-                color: "#fff",
+                color: "#ffffff",
+                fontFamily: FONT,
               }}>
-                {"\uD83D\uDC8A RxBuddy Assistant"}
+                RxBuddy Assistant
               </span>
-              <button
-                onClick={() => setIsOpen(false)}
-                style={{
-                  background: "rgba(255,255,255,0.08)",
-                  border: "none",
-                  color: "rgba(255,255,255,0.6)",
-                  fontSize: 18,
-                  width: 28,
-                  height: 28,
-                  borderRadius: 8,
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  transition: "background 0.15s",
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.15)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.08)"; }}
-                aria-label="Close chat"
-              >
-                {"\u00D7"}
-              </button>
             </div>
-            <div style={{
-              fontSize: 12,
-              color: "rgba(160,180,220,0.6)",
-              marginTop: 4,
-            }}>
-              {"Ask me anything about " + (drugName || "this medication")}
-            </div>
+            <button
+              onClick={() => setIsOpen(false)}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#ffffff",
+                fontSize: 24,
+                cursor: "pointer",
+                padding: "0 4px",
+                fontFamily: FONT,
+                lineHeight: 1,
+              }}
+              aria-label="Close chat"
+            >
+              {"\u00D7"}
+            </button>
           </div>
 
           {/* Messages area */}
           <div style={{
             flex: 1,
             overflowY: "auto",
-            padding: "12px 16px",
+            padding: "12px 14px",
             display: "flex",
             flexDirection: "column",
             gap: 10,
@@ -222,15 +225,16 @@ export default function DrugChatWidget({ drugName, isVisible }) {
                 }}
               >
                 <div style={{
-                  padding: "10px 14px",
-                  borderRadius: msg.role === "user" ? "14px 14px 4px 14px" : "14px 14px 14px 4px",
-                  background: msg.role === "user"
-                    ? "rgba(56,100,220,0.5)"
-                    : "rgba(255,255,255,0.07)",
-                  color: "#fff",
+                  padding: "8px 12px",
+                  borderRadius: 0,
+                  background: msg.role === "user" ? "#ffffff" : "#000000",
+                  color: msg.role === "user" ? "#000000" : "#ffffff",
+                  border: msg.role === "user" ? "1px solid #ffffff" : "1px solid #333333",
                   fontSize: 13,
-                  lineHeight: 1.5,
+                  lineHeight: 1.6,
                   wordBreak: "break-word",
+                  fontFamily: FONT,
+                  whiteSpace: "pre-wrap",
                 }}>
                   {msg.content}
                 </div>
@@ -241,17 +245,18 @@ export default function DrugChatWidget({ drugName, isVisible }) {
             {isLoading && (
               <div style={{ alignSelf: "flex-start", maxWidth: "85%" }}>
                 <div style={{
-                  padding: "10px 14px",
-                  borderRadius: "14px 14px 14px 4px",
-                  background: "rgba(255,255,255,0.07)",
-                  color: "rgba(160,180,220,0.7)",
-                  fontSize: 13,
+                  padding: "8px 12px",
+                  borderRadius: 0,
+                  background: "#000000",
+                  border: "1px solid #ffffff",
+                  color: "#ffffff",
+                  fontSize: 16,
                   display: "flex",
-                  gap: 4,
+                  gap: 6,
                 }}>
-                  <span style={{ animation: "dotPulse 1.2s infinite", animationDelay: "0s" }}>{"\u2022"}</span>
-                  <span style={{ animation: "dotPulse 1.2s infinite", animationDelay: "0.2s" }}>{"\u2022"}</span>
-                  <span style={{ animation: "dotPulse 1.2s infinite", animationDelay: "0.4s" }}>{"\u2022"}</span>
+                  <span style={{ animation: "chatDotPulse 1.2s infinite", animationDelay: "0s" }}>{"\u2022"}</span>
+                  <span style={{ animation: "chatDotPulse 1.2s infinite", animationDelay: "0.2s" }}>{"\u2022"}</span>
+                  <span style={{ animation: "chatDotPulse 1.2s infinite", animationDelay: "0.4s" }}>{"\u2022"}</span>
                 </div>
               </div>
             )}
@@ -261,8 +266,8 @@ export default function DrugChatWidget({ drugName, isVisible }) {
 
           {/* Input area */}
           <div style={{
-            padding: "12px 16px",
-            borderTop: "1px solid rgba(255,255,255,0.08)",
+            padding: "12px 14px",
+            borderTop: "1px solid #ffffff",
             display: "flex",
             gap: 8,
             flexShrink: 0,
@@ -273,34 +278,33 @@ export default function DrugChatWidget({ drugName, isVisible }) {
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={"Ask about " + (drugName || "this drug") + "..."}
+              placeholder="Type your question..."
               style={{
                 flex: 1,
-                background: "rgba(255,255,255,0.06)",
-                border: "1px solid rgba(255,255,255,0.1)",
-                borderRadius: 10,
-                padding: "10px 14px",
-                color: "#fff",
+                background: "#000000",
+                border: "1px solid #ffffff",
+                borderRadius: 0,
+                padding: "10px 12px",
+                color: "#ffffff",
                 fontSize: 13,
                 outline: "none",
-                fontFamily: "inherit",
+                fontFamily: FONT,
               }}
             />
             <button
               onClick={sendMessage}
               disabled={isLoading || !inputText.trim()}
               style={{
-                background: isLoading || !inputText.trim()
-                  ? "rgba(56,100,220,0.25)"
-                  : "rgba(56,100,220,0.6)",
-                border: "none",
-                borderRadius: 10,
+                background: isLoading || !inputText.trim() ? "#333333" : "#ffffff",
+                color: isLoading || !inputText.trim() ? "#666666" : "#000000",
+                border: "1px solid #ffffff",
+                borderRadius: 0,
                 padding: "10px 16px",
-                color: "#fff",
                 fontSize: 13,
-                fontWeight: 600,
+                fontWeight: 700,
+                fontFamily: FONT,
                 cursor: isLoading || !inputText.trim() ? "default" : "pointer",
-                transition: "background 0.15s",
+                transition: "background 0.15s, color 0.15s",
                 flexShrink: 0,
               }}
             >
@@ -308,13 +312,13 @@ export default function DrugChatWidget({ drugName, isVisible }) {
             </button>
           </div>
 
-          {/* Inline keyframes for animations */}
+          {/* Inline keyframes */}
           <style jsx>{`
-            @keyframes slideUp {
-              from { opacity: 0; transform: translateY(20px); }
+            @keyframes chatSlideUp {
+              from { opacity: 0; transform: translateY(16px); }
               to   { opacity: 1; transform: translateY(0); }
             }
-            @keyframes dotPulse {
+            @keyframes chatDotPulse {
               0%, 80%, 100% { opacity: 0.3; }
               40% { opacity: 1; }
             }
