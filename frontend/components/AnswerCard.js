@@ -702,6 +702,81 @@ export default function AnswerCard({ result, query }) {
 
   const structured = result.structured || {};
 
+  // ── Non-drug query rejection card ─────────────────────────────────────────
+  if (structured?.intent === "non_drug_query") {
+    const isIllegal = structured?.verdict === "NON_DRUG" &&
+      (structured?.answer || "").includes("SAMHSA");
+    return (
+      <article
+        className="rounded-xl border shadow-sm overflow-hidden"
+        style={{
+          borderColor: isIllegal ? "#fca5a5" : "#86efac",
+          background: isIllegal
+            ? "linear-gradient(135deg, #fef2f2 0%, #fff1f2 100%)"
+            : "linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)",
+        }}
+      >
+        <div style={{
+          padding: "24px",
+          textAlign: "center",
+        }}>
+          <div style={{ fontSize: 48, marginBottom: 12 }}>
+            {isIllegal ? "\uD83C\uDFE5" : "\uD83D\uDC8A"}
+          </div>
+          <h3 style={{
+            fontSize: 18,
+            fontWeight: 700,
+            color: isIllegal ? "#991b1b" : "#166534",
+            marginBottom: 8,
+          }}>
+            {isIllegal ? "Not in Our Scope" : "Not a Medication"}
+          </h3>
+          <p style={{
+            fontSize: 15,
+            color: isIllegal ? "#7f1d1d" : "#15803d",
+            lineHeight: 1.6,
+            maxWidth: 480,
+            margin: "0 auto 16px",
+          }}>
+            {structured.answer || structured.short_answer || "That doesn't look like a medication query."}
+          </p>
+          {!isIllegal && (
+            <div style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              background: "#dcfce7",
+              borderRadius: 999,
+              padding: "6px 16px",
+              fontSize: 13,
+              color: "#166534",
+              fontWeight: 500,
+            }}>
+              <span>{"\u2728"}</span>
+              <span>Try: &quot;lisinopril side effects&quot; or &quot;metformin dosage&quot;</span>
+            </div>
+          )}
+          {isIllegal && (
+            <div style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              background: "#fee2e2",
+              borderRadius: 999,
+              padding: "6px 16px",
+              fontSize: 13,
+              color: "#991b1b",
+              fontWeight: 500,
+            }}>
+              <span>{"\uD83D\uDCDE"}</span>
+              <span>SAMHSA Helpline: 1-800-662-4357</span>
+            </div>
+          )}
+        </div>
+      </article>
+    );
+  }
+
   // ── Unified side-effects detection — works for BOTH dataset and AI ──────────
   const isSideEffects =
     structured?.intent === "side_effects" ||

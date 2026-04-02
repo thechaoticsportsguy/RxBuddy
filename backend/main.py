@@ -3247,12 +3247,111 @@ from ml.knn_search import search as knn_search
 NEAR_EXACT_THRESHOLD = 0.95
 
 
+# ---------------------------------------------------------------------------
+# Non-drug query detection — reject clearly non-pharmacy queries
+# ---------------------------------------------------------------------------
+
+_ILLEGAL_DRUGS = frozenset({
+    "cocaine", "heroin", "meth", "methamphetamine", "crack", "ecstasy",
+    "mdma", "lsd", "acid", "pcp", "angel dust", "ketamine", "shrooms",
+    "psilocybin", "magic mushrooms", "fentanyl street", "molly",
+    "bath salts", "flakka", "spice", "k2", "krokodil", "ghb",
+    "crystal meth", "speedball", "dmt", "ayahuasca", "mescaline",
+    "peyote", "salvia", "whippets", "poppers", "lean", "purple drank",
+    "marijuana", "weed", "cannabis", "thc", "delta-8", "delta 8",
+})
+
+_MEDICAL_TERMS = frozenset({
+    "side effect", "side effects", "dosage", "dose", "drug", "medication",
+    "medicine", "prescription", "interact", "interaction", "allergy",
+    "allergic", "pregnant", "pregnancy", "breastfeed", "overdose",
+    "withdraw", "withdrawal", "tablet", "capsule", "pill", "mg",
+    "milligram", "pharmacy", "pharmacist", "doctor", "otc",
+    "over the counter", "rx", "generic", "brand", "adverse",
+    "contraindic", "indication", "warning", "precaution",
+    "mechanism", "half-life", "half life",
+})
+
+_REJECTION_MESSAGES = [
+    "Hmm, that's not in our formulary! RxBuddy only answers questions about real medications. Try searching a drug like 'lisinopril side effects'!",
+    "That one isn't in any pharmacy we know of! Try asking about a real medication like 'metformin dosage' or 'ibuprofen side effects'.",
+    "RxBuddy is great at drugs (the legal kind). Try searching for a medication like 'amoxicillin' or 'atorvastatin'!",
+    "We checked every shelf in the pharmacy... nothing found! Try a real drug name like 'omeprazole' or 'gabapentin side effects'.",
+]
+
+_SAMHSA_MESSAGE = (
+    "RxBuddy only covers FDA-approved medications. "
+    "If you or someone you know is struggling with substance use, "
+    "please contact the SAMHSA National Helpline: 1-800-662-4357 (free, confidential, 24/7)."
+)
+
+
+def _check_non_drug_query(query: str) -> dict | None:
+    """
+    Returns a rejection dict if the query is clearly not about a real drug.
+    Returns None if the query looks like a legitimate pharmacy question.
+    """
+    q_lower = query.strip().lower()
+    if not q_lower or len(q_lower) < 2:
+        return None
+
+    # Check for illegal/street drugs first
+    for term in _ILLEGAL_DRUGS:
+        if term in q_lower:
+            logger.info("[NonDrugFilter] Illegal drug detected: '%s'", term)
+            return {
+                "intent": "non_drug_query",
+                "sub_type": "illegal_drug",
+                "message": _SAMHSA_MESSAGE,
+                "detected_term": term,
+            }
+
+    # If the query contains a medical term, let it through
+    for term in _MEDICAL_TERMS:
+        if term in q_lower:
+            return None
+
+    # If query matches a known drug from CSV or brand map, let it through
+    for brand in BRAND_TO_GENERIC:
+        if brand in q_lower:
+            return None
+    try:
+        for drug_name in load_drug_lookup():
+            if drug_name in q_lower:
+                return None
+    except Exception:
+        pass
+
+    # Check against the hardcoded generic list too
+    from pipeline.side_effects_store import _DRUG_CLASS_FALLBACKS, _DRUG_ALIASES
+    for name in list(_DRUG_CLASS_FALLBACKS.keys()) + list(_DRUG_ALIASES.keys()):
+        if name in q_lower:
+            return None
+
+    # Very short queries with no drug match are likely nonsense
+    # Longer queries might be legitimate questions phrased oddly — only reject short ones
+    # or ones that are clearly not medical
+    words = q_lower.split()
+    if len(words) <= 5:
+        import hashlib
+        idx = int(hashlib.md5(q_lower.encode()).hexdigest(), 16) % len(_REJECTION_MESSAGES)
+        logger.info("[NonDrugFilter] Non-drug query rejected: '%s'", q_lower)
+        return {
+            "intent": "non_drug_query",
+            "sub_type": "not_a_drug",
+            "message": _REJECTION_MESSAGES[idx],
+        }
+
+    return None
+
+
 @app.post("/search", response_model=SearchResponse)
 def search(req: SearchRequest) -> SearchResponse:
     """
     Takes a user query and returns the top 5 matching questions.
 
     How it works:
+    0) Pre-check: reject clearly non-drug/non-pharmacy queries with a fun message
     1) Check for exact/near-exact match FIRST (instant return if found)
     2) Normalize query (fix misspellings, slang, filler words) — zero API calls
     3) Run spell check and generate "did you mean?" suggestion
@@ -3265,6 +3364,34 @@ def search(req: SearchRequest) -> SearchResponse:
     user_query = req.query.strip()
     if not user_query:
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
+
+    # ── Step 0: Non-drug query gate ──────────────────────────────────────────
+    rejection = _check_non_drug_query(user_query)
+    if rejection:
+        return SearchResponse(
+            query=user_query,
+            results=[
+                QuestionMatch(
+                    id=0,
+                    question=user_query,
+                    category="non_drug_query",
+                    tags=["rejected"],
+                    score=0.0,
+                    answer=rejection["message"],
+                    structured=StructuredAnswer(
+                        answer=rejection["message"],
+                        short_answer=rejection["message"],
+                        intent=rejection["intent"],
+                        verdict="NON_DRUG",
+                        sources="filter",
+                    ),
+                )
+            ],
+            did_you_mean=None,
+            source="filter",
+            saved_to_db=False,
+        )
+
     dataset_result = _build_dataset_result(user_query)
     if dataset_result:
         _log_search(user_query, None)
