@@ -107,6 +107,7 @@ def normalize_drug_name(name: str) -> str:
 
     best_dist = _MAX_DIST + 1
     best_generic: Optional[str] = None
+    best_catalog_name: str = ""
 
     for catalog_name, generic in _FUZZY:
         # Skip candidates whose length difference already precludes a match
@@ -116,20 +117,22 @@ def normalize_drug_name(name: str) -> str:
         if d < best_dist:
             best_dist = d
             best_generic = generic
+            best_catalog_name = catalog_name
             if d == 0:  # can't do better
                 break
 
     if best_generic is not None and best_dist <= _MAX_DIST:
         # Similarity gate: require at least 70% character-level similarity.
-        # Without this, short non-drug words like "obama" (5 chars) match
-        # a drug at distance 2 — that's only 60% similar, far too loose.
-        # Formula: similarity = 1 - (edits / max(len(input), len(match)))
-        match_len = max(len(key), len(best_generic))
+        # IMPORTANT: compare against the *matched catalog name* length, not the
+        # resolved generic name.  Using the generic length causes false positives:
+        # e.g. "hate" → distance-2 match against "hctz" (4 chars) → generic is
+        # "hydrochlorothiazide" (19 chars) → similarity = 1-2/19 = 0.89, passes.
+        # Correct: similarity = 1-2/max(4,4) = 0.50, correctly rejected.
+        match_len = max(len(key), len(best_catalog_name))
         similarity = 1.0 - (best_dist / match_len) if match_len > 0 else 0.0
         if similarity >= 0.70:
             return best_generic
         # Below 70% similarity — reject the fuzzy match
-        pass
 
     # 3. No match — return input as-is so callers can still try RxNorm API
     return name

@@ -78,7 +78,7 @@ def _build_context_summary(
     parts.append(f"BACKEND VERDICT (FINAL — do NOT override): {verdict}")
     parts.append(f"INTENT: {intent}")
     parts.append(f"DRUGS: {', '.join(drug_names)}")
-    parts.append(f"REASONING: {reasoning}")
+    parts.append(f"REASONING: {_sanitize(reasoning)}")
 
     # FDA label excerpts (keep short — Claude only needs enough to explain)
     for drug, fda in fda_labels.items():
@@ -98,21 +98,21 @@ def _build_context_summary(
         parts.append("\n--- RXNAV VETTED INTERACTIONS ---")
         for ix in rxnav_interactions[:3]:
             sev = (ix.get("severity") or "unknown").upper()
-            desc = ix.get("description", "")[:200]
+            desc = _sanitize(ix.get("description", ""))[:200]
             parts.append(f"[{sev}] {desc}")
 
     # FAERS adverse events
     for drug, events in adverse_events.items():
         if events:
             parts.append(f"\n--- FAERS TOP REACTIONS ({drug}) ---")
-            parts.append(", ".join(events[:10]))
+            parts.append(", ".join(_sanitize(e) for e in events[:10]))
 
     # Recalls
     for drug, recs in recalls.items():
         if recs:
             parts.append(f"\n--- ACTIVE RECALLS ({drug}) ---")
             for r in recs[:2]:
-                parts.append(f"[{r.get('classification','')}] {r.get('reason_for_recall','')[:150]}")
+                parts.append(f"[{_sanitize(r.get('classification',''))}] {_sanitize(r.get('reason_for_recall',''))[:150]}")
 
     return "\n".join(parts)
 
@@ -130,7 +130,7 @@ def _build_side_effects_context(
     parts = []
     parts.append(f"BACKEND VERDICT (FINAL): {verdict}")
     parts.append(f"DRUGS: {', '.join(drug_names)}")
-    parts.append(f"REASONING: {reasoning}")
+    parts.append(f"REASONING: {_sanitize(reasoning)}")
 
     for drug, fda in fda_labels.items():
         drug_parts = [f"\n--- FDA LABEL: {drug.upper()} ---"]
