@@ -15,7 +15,7 @@ const NonDrugQuery = dynamic(() => import("../components/NonDrugQuery"), {
   ),
 });
 
-const DrugChatWidget = dynamic(() => import("../components/DrugChatWidget"), {
+const RxPillButton = dynamic(() => import("../components/RxPillButton"), {
   ssr: false,
 });
 
@@ -1014,13 +1014,13 @@ export default function ResultsPage() {
         </div>
       </div>
 
-      {/* ── Drug Chat Widget (only on drug results, never on NON_DRUG) ── */}
+      {/* ── 3D Pill Button → opens Chat Widget (drug results only) ── */}
       {(() => {
         const s = results?.[0]?.structured || {};
         const isNonDrug = s.intent === "non_drug_query" || s.verdict === "NON_DRUG";
         const drugName = s.drug || s.drugs?.[0] || s.generic_name || "";
         if (drugName && !isNonDrug) {
-          return <DrugChatWidget drugName={drugName} isVisible />;
+          return <RxPillButton drugName={drugName} />;
         }
         return null;
       })()}
