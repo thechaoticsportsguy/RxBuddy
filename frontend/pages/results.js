@@ -583,6 +583,7 @@ export default function ResultsPage() {
                 setStreamStatus(evt.message || "");
               } else if (evt.type === "done" && !cancelled) {
                 const r = evt.result;
+                console.log("[RxBuddy] stream done — raw result:", r);
                 // NON_DRUG pipeline responses are flat dicts — wrap them so
                 // AnswerCard receives result.structured correctly.
                 if (r && (r.verdict === "NON_DRUG" || r.intent === "non_drug_query")) {
@@ -640,6 +641,8 @@ export default function ResultsPage() {
         let data;
         try { data = await res.json(); }
         catch { throw new Error("Server returned an unreadable response. Please try again."); }
+
+        console.log("[RxBuddy] /v2/search response:", data);
 
         if (!cancelled) {
           // NON_DRUG responses are flat dicts with no `results` array
@@ -856,7 +859,7 @@ export default function ResultsPage() {
                     <div className="mb-4">
                       <NonDrugQuery
                         query={q}
-                        message={s.answer || s.short_answer}
+                        message={s.message || s.answer || s.short_answer}
                         isIllegal={illegal}
                       />
                     </div>
