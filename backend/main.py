@@ -4516,8 +4516,13 @@ async def search_v2_stream(req: SearchRequest) -> StreamingResponse:
             result = await run_pipeline(user_query)
             print(f"✅ [v2/stream] Pipeline returned: {list(result.keys()) if isinstance(result, dict) else type(result)}")
             source = result.get("source", "pipeline_v2")
-            first_result = result["results"][0] if result.get("results") else {}
-            yield _sse_v2({"type": "done", "source": source, "result": first_result})
+            # NON_DRUG early-exit returns a flat dict with no "results" key —
+            # forward it directly so the frontend can detect verdict=="NON_DRUG".
+            if result.get("verdict") == "NON_DRUG" or result.get("intent") == "non_drug_query":
+                yield _sse_v2({"type": "done", "source": "pipeline_v2", "result": result})
+            else:
+                first_result = result["results"][0] if result.get("results") else {}
+                yield _sse_v2({"type": "done", "source": source, "result": first_result})
         except Exception as exc:
             print(f"❌ [v2/stream] Pipeline FAILED: {exc}")
             logger.error("[v2/stream] Pipeline failed: %s", exc, exc_info=True)

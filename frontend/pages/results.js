@@ -853,8 +853,10 @@ export default function ResultsPage() {
               {/* Non-drug query → 3D pill rejection page */}
               {(() => {
                 const s = results?.[0]?.structured || {};
+                console.log("[RxBuddy] render check — structured:", s, "verdict:", s.verdict, "intent:", s.intent);
                 if (s.intent === "non_drug_query" || s.verdict === "NON_DRUG") {
-                  const illegal = (s.answer || "").includes("SAMHSA");
+                  console.log("[RxBuddy] NON_DRUG condition hit — rendering 3D pill");
+                  const illegal = (s.message || s.answer || "").includes("SAMHSA");
                   return (
                     <div className="mb-4">
                       <NonDrugQuery
