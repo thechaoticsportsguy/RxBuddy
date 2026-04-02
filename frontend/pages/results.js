@@ -998,5 +998,16 @@ export default function ResultsPage() {
                           <td className="py-1">Pain relief / fever reduction</td>
                           <td className="py-1">4-6 hours</td>
                         </tr>
-                        <tr>
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
               
