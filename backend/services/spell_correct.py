@@ -120,7 +120,16 @@ def normalize_drug_name(name: str) -> str:
                 break
 
     if best_generic is not None and best_dist <= _MAX_DIST:
-        return best_generic
+        # Similarity gate: require at least 70% character-level similarity.
+        # Without this, short non-drug words like "obama" (5 chars) match
+        # a drug at distance 2 — that's only 60% similar, far too loose.
+        # Formula: similarity = 1 - (edits / max(len(input), len(match)))
+        match_len = max(len(key), len(best_generic))
+        similarity = 1.0 - (best_dist / match_len) if match_len > 0 else 0.0
+        if similarity >= 0.70:
+            return best_generic
+        # Below 70% similarity — reject the fuzzy match
+        pass
 
     # 3. No match — return input as-is so callers can still try RxNorm API
     return name
