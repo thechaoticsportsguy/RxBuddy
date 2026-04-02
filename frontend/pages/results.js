@@ -5,6 +5,15 @@ import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import Disclaimer from "../components/Disclaimer";
 import AnswerCard from "../components/AnswerCard";
+import dynamic from "next/dynamic";
+
+// Lazy-load the 3D pill component (Three.js is client-only, no SSR)
+const NonDrugQuery = dynamic(() => import("../components/NonDrugQuery"), {
+  ssr: false,
+  loading: () => (
+    <div style={{ width: "100%", height: 420, background: "#060c1a", borderRadius: 16 }} />
+  ),
+});
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
@@ -574,7 +583,13 @@ export default function ResultsPage() {
                 setStreamStatus(evt.message || "");
               } else if (evt.type === "done" && !cancelled) {
                 const r = evt.result;
-                setResults(r ? [r] : []);
+                // NON_DRUG pipeline responses are flat dicts — wrap them so
+                // AnswerCard receives result.structured correctly.
+                if (r && (r.verdict === "NON_DRUG" || r.intent === "non_drug_query")) {
+                  setResults([{ id: 0, question: q, answer: "", structured: r }]);
+                } else {
+                  setResults(r ? [r] : []);
+                }
                 setSource(evt.source || "ai_generated");
                 setSavedToDb(false);
                 gotResult = true;
@@ -627,10 +642,16 @@ export default function ResultsPage() {
         catch { throw new Error("Server returned an unreadable response. Please try again."); }
 
         if (!cancelled) {
-          setResults(Array.isArray(data.results) ? data.results : []);
-          setDidYouMean(data.did_you_mean || null);
-          setSource(data.source || "database");
-          setSavedToDb(data.saved_to_db || false);
+          // NON_DRUG responses are flat dicts with no `results` array
+          if (data.verdict === "NON_DRUG" || data.intent === "non_drug_query") {
+            setResults([{ id: 0, question: q, answer: "", structured: data }]);
+            setSource("pipeline_v2");
+          } else {
+            setResults(Array.isArray(data.results) ? data.results : []);
+            setDidYouMean(data.did_you_mean || null);
+            setSource(data.source || "database");
+            setSavedToDb(data.saved_to_db || false);
+          }
         }
       } catch (e) {
         clearTimeout(timeoutId);
@@ -826,13 +847,34 @@ export default function ResultsPage() {
             </div>
           ) : (
             <>
-              {/* Single-answer card — Phase 4 */}
+              {/* Non-drug query → 3D pill rejection page */}
+              {(() => {
+                const s = results?.[0]?.structured || {};
+                if (s.intent === "non_drug_query" || s.verdict === "NON_DRUG") {
+                  const illegal = (s.answer || "").includes("SAMHSA");
+                  return (
+                    <div className="mb-4">
+                      <NonDrugQuery
+                        query={q}
+                        message={s.answer || s.short_answer}
+                        isIllegal={illegal}
+                      />
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+
+              {/* Single-answer card — Phase 4 (skip if non-drug was rendered) */}
+              {!(results?.[0]?.structured?.intent === "non_drug_query" ||
+                 results?.[0]?.structured?.verdict === "NON_DRUG") && (
               <div className="mb-4">
                 <AnswerCard
                   result={results?.[0]}
                   query={q}
                 />
               </div>
+              )}
 
               {/* Collapsible Full Answer - BUG 2 FIX: Better markdown rendering with prose styling */}
               {!shouldBypassDetailedExplanation && (parsedAnswer?.full || results?.[0]?.answer) && (
@@ -954,24 +996,4 @@ export default function ResultsPage() {
                           <td className="py-1">4-6 hours</td>
                         </tr>
                         <tr>
-                          <td className="py-1">Anti-inflammatory effect</td>
-                          <td className="py-1">6-12 hours</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                    <p className="mt-3 text-xs text-slate-500">Drug mechanism data will be populated based on detected drugs.</p>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-
-          {/* Footer Disclaimer */}
-          <div className="mt-6 rounded-xl bg-slate-50 border border-slate-200 p-5">
-            <Disclaimer variant="full" />
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}
+              

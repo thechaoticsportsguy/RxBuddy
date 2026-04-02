@@ -703,75 +703,68 @@ export default function AnswerCard({ result, query }) {
   const structured = result.structured || {};
 
   // ── Non-drug query rejection card ─────────────────────────────────────────
-  if (structured?.intent === "non_drug_query") {
-    const isIllegal = structured?.verdict === "NON_DRUG" &&
-      (structured?.answer || "").includes("SAMHSA");
-    return (
-      <article
-        className="rounded-xl border shadow-sm overflow-hidden"
-        style={{
-          borderColor: isIllegal ? "#fca5a5" : "#86efac",
-          background: isIllegal
-            ? "linear-gradient(135deg, #fef2f2 0%, #fff1f2 100%)"
-            : "linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)",
-        }}
-      >
-        <div style={{
-          padding: "24px",
-          textAlign: "center",
-        }}>
-          <div style={{ fontSize: 48, marginBottom: 12 }}>
-            {isIllegal ? "\uD83C\uDFE5" : "\uD83D\uDC8A"}
-          </div>
-          <h3 style={{
-            fontSize: 18,
-            fontWeight: 700,
-            color: isIllegal ? "#991b1b" : "#166534",
-            marginBottom: 8,
-          }}>
-            {isIllegal ? "Not in Our Scope" : "Not a Medication"}
-          </h3>
-          <p style={{
-            fontSize: 15,
-            color: isIllegal ? "#7f1d1d" : "#15803d",
-            lineHeight: 1.6,
-            maxWidth: 480,
-            margin: "0 auto 16px",
-          }}>
-            {structured.answer || structured.short_answer || "That doesn't look like a medication query."}
-          </p>
-          {!isIllegal && (
-            <div style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              background: "#dcfce7",
-              borderRadius: 999,
-              padding: "6px 16px",
-              fontSize: 13,
-              color: "#166534",
-              fontWeight: 500,
-            }}>
-              <span>{"\u2728"}</span>
-              <span>Try: &quot;lisinopril side effects&quot; or &quot;metformin dosage&quot;</span>
-            </div>
-          )}
-          {isIllegal && (
-            <div style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              background: "#fee2e2",
-              borderRadius: 999,
-              padding: "6px 16px",
-              fontSize: 13,
-              color: "#991b1b",
-              fontWeight: 500,
-            }}>
+  // Catches both the new flat {verdict:"NON_DRUG"} shape AND the old
+  // structured.intent path so existing DB rows still render correctly.
+  const isNonDrug =
+    result.verdict === "NON_DRUG" ||
+    result.intent === "non_drug_query" ||
+    structured.intent === "non_drug_query" ||
+    structured.verdict === "NON_DRUG";
+
+  if (isNonDrug) {
+    const messageText =
+      result.message ||
+      structured.message ||
+      structured.answer ||
+      structured.short_answer ||
+      "RxBuddy only answers questions about real medications. Try searching something like \u2018lisinopril side effects\u2019 or \u2018metformin dosage\u2019!";
+
+    // Sub-case: substance-abuse / illegal-drug query — keep SAMHSA routing
+    const isSamhsa = messageText.includes("SAMHSA");
+    if (isSamhsa) {
+      return (
+        <article
+          className="rounded-xl border shadow-sm overflow-hidden"
+          style={{ borderColor: "#fca5a5", background: "linear-gradient(135deg, #fef2f2 0%, #fff1f2 100%)" }}
+          role="status"
+          aria-label="Query outside RxBuddy scope"
+        >
+          <div className="flex flex-col items-center text-center px-8 py-10 gap-3">
+            <span style={{ fontSize: 48 }} aria-hidden="true">{"\uD83C\uDFE5"}</span>
+            <h3 className="text-lg font-bold text-red-900">Not in Our Scope</h3>
+            <p className="text-sm text-red-800 max-w-md leading-relaxed">{messageText}</p>
+            <div className="inline-flex items-center gap-2 rounded-full bg-red-100 px-4 py-2 text-sm font-medium text-red-900 border border-red-200">
               <span>{"\uD83D\uDCDE"}</span>
               <span>SAMHSA Helpline: 1-800-662-4357</span>
             </div>
-          )}
+          </div>
+        </article>
+      );
+    }
+
+    // Standard formulary rejection — shown when no drugs were recognised
+    return (
+      <article
+        className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden"
+        role="status"
+        aria-label="Not a medication query"
+      >
+        <div className="flex flex-col items-center text-center px-8 py-10 gap-4">
+          <span style={{ fontSize: 52 }} aria-hidden="true">{"\uD83D\uDC8A"}</span>
+          <h3 className="text-xl font-bold text-slate-900">
+            Oops! That&apos;s not in our formulary &#x1F605;
+          </h3>
+          <p className="text-sm text-slate-600 max-w-md leading-relaxed">
+            RxBuddy only answers questions about real medications. Try searching
+            something like &ldquo;lisinopril side effects&rdquo; or &ldquo;metformin dosage&rdquo;!
+          </p>
+          <a
+            href="/"
+            className="mt-2 inline-flex items-center gap-2 rounded-full bg-emerald-500 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-600 transition-colors"
+          >
+            <span>{"\uD83D\uDD0D"}</span>
+            <span>Try a new search</span>
+          </a>
         </div>
       </article>
     );
