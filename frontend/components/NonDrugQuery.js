@@ -501,8 +501,8 @@ export default function NonDrugQuery({ query, isIllegal = false, message }) {
         {/* Top center heading */}
         <h2 style={{
           marginTop: 48,
-          fontSize: "2.5rem",
-          fontWeight: 800,
+          fontSize: "3.2rem",
+          fontWeight: 900,
           color: "#ffffff",
           letterSpacing: "-0.01em",
           textAlign: "center",
@@ -545,51 +545,41 @@ export default function NonDrugQuery({ query, isIllegal = false, message }) {
         )}
       </div>
 
-      {/* ── Bottom bar ──────────────────────────────────────────── */}
-      <div style={{
-        position: "absolute",
-        bottom: 0,
-        left: 0,
-        right: 0,
-        padding: "20px 24px",
-        background: "linear-gradient(transparent, rgba(6,12,26,0.95))",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 10,
-        zIndex: 2,
-        pointerEvents: "none",
-      }}>
-        {isIllegal ? (
-          <div style={{
-            display: "inline-flex", alignItems: "center", gap: 8,
-            background: "rgba(254,202,202,0.15)", borderRadius: 999,
-            padding: "8px 20px", fontSize: 13, color: "#fca5a5",
-            fontWeight: 500, border: "1px solid rgba(252,165,165,0.2)",
-          }}>
-            <span>{"\uD83D\uDCDE"}</span>
-            <span>SAMHSA Helpline: 1-800-662-4357 (free, 24/7)</span>
-          </div>
-        ) : (
-          <div style={{
-            display: "inline-flex", alignItems: "center", gap: 8,
-            background: "rgba(130,160,255,0.12)", borderRadius: 999,
-            padding: "8px 20px", fontSize: 13,
-            color: "rgba(170,200,255,0.85)", fontWeight: 500,
-            border: "1px solid rgba(130,160,255,0.2)",
-          }}>
-            <span>{"\u2728"}</span>
-            <span>Try searching a real drug like &quot;lisinopril side effects&quot;</span>
-          </div>
-        )}
-
-        <span style={{
-          fontSize: 10, fontWeight: 700, letterSpacing: "0.38em",
-          textTransform: "uppercase", color: "rgba(130,160,255,0.4)",
-        }}>
-          RxBuddy
-        </span>
-      </div>
+      {/* ── Glass "Return to Search" button ───────────────────── */}
+      <button
+        onClick={() => window.history.back()}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "rgba(255,255,255,0.18)";
+          e.currentTarget.style.transform = "translateX(-50%) scale(1.05)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "rgba(255,255,255,0.1)";
+          e.currentTarget.style.transform = "translateX(-50%) scale(1)";
+        }}
+        style={{
+          position: "fixed",
+          bottom: 40,
+          left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 10,
+          pointerEvents: "auto",
+          background: "rgba(255,255,255,0.1)",
+          backdropFilter: "blur(20px) saturate(180%)",
+          WebkitBackdropFilter: "blur(20px) saturate(180%)",
+          border: "1px solid rgba(255,255,255,0.25)",
+          borderRadius: 50,
+          padding: "14px 32px",
+          color: "#ffffff",
+          fontSize: 16,
+          fontWeight: 600,
+          cursor: "pointer",
+          boxShadow: "0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.2)",
+          transition: "all 0.2s ease",
+          fontFamily: "'Inter', system-ui, sans-serif",
+        }}
+      >
+        {"\u2190 Return to Search"}
+      </button>
     </div>
   );
 }
