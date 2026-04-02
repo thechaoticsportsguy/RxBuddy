@@ -782,11 +782,13 @@ def parse_label_with_gemini(drug_name: str, fda_label: dict) -> dict | None:
             tiers[freq]["items"].append(effect)
 
     # Boxed warnings direct from label (more reliable than AI)
-    bw_text = (fda_label or {}).get("boxed_warning", "")
+    bw_text = _san((fda_label or {}).get("boxed_warning", ""))
     boxed_warnings = [s.strip() for s in bw_text.split(".") if len(s.strip()) > 10][:3] if bw_text else []
 
     # MOA from label sections
-    moa_raw = (fda_label or {}).get("clinical_pharmacology", "") or (fda_label or {}).get("description", "")
+    moa_raw = _san(
+        (fda_label or {}).get("clinical_pharmacology", "") or (fda_label or {}).get("description", "")
+    )
     sents = [s.strip() + "." for s in moa_raw.split(".") if len(s.strip()) > 15]
     moa_summary = " ".join(sents[:2])[:300]
     moa_detail  = " ".join(sents[:5])[:800]

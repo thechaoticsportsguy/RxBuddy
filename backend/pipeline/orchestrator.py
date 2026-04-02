@@ -228,6 +228,19 @@ async def run_pipeline(query: str) -> dict:
     print(f"🔍 [Pipeline] Intent={intent_str} drugs={drug_names}")
     logger.info("[Pipeline] Intent=%s drugs=%s", intent_str, drug_names)
 
+    # ── Early exit: non-drug general query (no drugs found + general intent) ─
+    if intent_str == "general" and not drug_names:
+        logger.info("[Pipeline] Non-drug general query — returning NON_DRUG rejection")
+        return {
+            "verdict": "NON_DRUG",
+            "message": (
+                "Hmm, that's not in our formulary \U0001f605 RxBuddy only answers "
+                "questions about real medications. Try searching something like "
+                "'lisinopril side effects' or 'metformin dosage'!"
+            ),
+            "intent": "non_drug_query",
+        }
+
     # ── Step 4: Fetch all APIs in parallel ────────────────────────────────
     try:
         api_results = await fetch_all(drug_names, intent=intent_str)
