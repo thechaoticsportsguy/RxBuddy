@@ -17,11 +17,30 @@
  *   message   — optional custom message override
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+
+const FallingPattern = dynamic(() => import("./ui/falling-pattern"), {
+  ssr: false,
+});
 
 export default function NonDrugQuery({ query, isIllegal = false, message }) {
   const mountRef = useRef(null);
   const cleanupRef = useRef(null);
+  const [hue, setHue] = useState(200);
+
+  // Rainbow hue cycling for FallingPattern
+  useEffect(() => {
+    let raf;
+    let start = performance.now();
+    function tick() {
+      const elapsed = (performance.now() - start) / 1000;
+      setHue(Math.round((elapsed * 36) % 360)); // full cycle every 10s
+      raf = requestAnimationFrame(tick);
+    }
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -40,9 +59,9 @@ export default function NonDrugQuery({ query, isIllegal = false, message }) {
       const width = container.clientWidth || window.innerWidth;
       const height = container.clientHeight || window.innerHeight;
 
-      // ── Scene ────────────────────────────────────────────────────────
+      // ── Scene (transparent so FallingPattern shows behind) ──────────
       const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x060c1a);
+      scene.background = null;
 
       const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
       camera.position.set(0, 0, 6);
@@ -438,17 +457,35 @@ export default function NonDrugQuery({ query, isIllegal = false, message }) {
   }, []);
 
   return (
-    <div
-      ref={mountRef}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 50,
-        background: "#060c1a",
-        overflow: "hidden",
-      }}
-    >
-      {/* ── UI Overlay (CSS over canvas, pointer-events: none) ───── */}
+    <div style={{
+      position: "fixed",
+      inset: 0,
+      zIndex: 50,
+      background: "#060c1a",
+      overflow: "hidden",
+    }}>
+      {/* Layer 0: Falling pattern background */}
+      <div style={{ position: "fixed", inset: 0, zIndex: 0 }}>
+        <FallingPattern
+          color={`hsl(${hue}, 100%, 60%)`}
+          backgroundColor="transparent"
+          count={50}
+          speed={0.8}
+        />
+      </div>
+
+      {/* Layer 1: Three.js canvas */}
+      <div
+        ref={mountRef}
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 1,
+          overflow: "hidden",
+        }}
+      />
+
+      {/* Layer 2: UI Overlay (CSS over canvas, pointer-events: none) */}
       <div style={{
         position: "absolute",
         inset: 0,
@@ -459,7 +496,7 @@ export default function NonDrugQuery({ query, isIllegal = false, message }) {
         pointerEvents: "none",
         userSelect: "none",
         fontFamily: "'Inter', system-ui, sans-serif",
-        zIndex: 1,
+        zIndex: 2,
       }}>
         {/* Top center heading */}
         <h2 style={{
@@ -520,7 +557,7 @@ export default function NonDrugQuery({ query, isIllegal = false, message }) {
         flexDirection: "column",
         alignItems: "center",
         gap: 10,
-        zIndex: 1,
+        zIndex: 2,
         pointerEvents: "none",
       }}>
         {isIllegal ? (
