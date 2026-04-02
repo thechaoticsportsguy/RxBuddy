@@ -210,7 +210,46 @@ async def run_pipeline(query: str) -> dict:
         logger.info("[Pipeline] CACHE HIT (%.0fms)", elapsed)
         return cached
 
-    # ── Step 3: Extract and normalize drugs ───────────────────────────────
+    # ── Quick NON_DRUG guard (zero network calls) ─────────────────────────
+    # Scan for drug names using only in-memory tables (BRAND_TO_GENERIC,
+    # _KNOWN_GENERICS, drug_catalog). If nothing found and the classifier
+    # agrees the intent is general, return immediately — before full drug
+    # extraction (which calls RxNorm) and before any FDA/DailyMed API calls.
+    _q = cleaned_query.lower()
+    _fast_drugs: list[str] = []
+    try:
+        from pipeline.drug_extractor import BRAND_TO_GENERIC, _KNOWN_GENERICS
+        for _b, _g in BRAND_TO_GENERIC.items():
+            if _b in _q and _g not in _fast_drugs:
+                _fast_drugs.append(_g)
+        for _g in _KNOWN_GENERICS:
+            if _g in _q and _g not in _fast_drugs:
+                _fast_drugs.append(_g)
+        from drug_catalog import _CATALOG, _ALIAS_MAP
+        for _k in _CATALOG:
+            if _k in _q and _k not in _fast_drugs:
+                _fast_drugs.append(_k)
+        for _a, _k in _ALIAS_MAP.items():
+            if _a in _q and _k not in _fast_drugs:
+                _fast_drugs.append(_k)
+    except Exception:
+        pass  # import failure → fall through to full pipeline
+
+    if classify_fast(cleaned_query, drug_count=len(_fast_drugs)).value == "general" and not _fast_drugs:
+        elapsed = (time.monotonic() - start_time) * 1000
+        logger.info("[Pipeline] NON_DRUG fast path (%.0fms) — no network calls made", elapsed)
+        return {
+            "verdict": "NON_DRUG",
+            "message": (
+                "Hmm, that\u2019s not in our formulary \U0001f605 RxBuddy only answers "
+                "questions about real medications. Try searching something like "
+                "'lisinopril side effects' or 'metformin dosage'!"
+            ),
+            "intent": "non_drug_query",
+        }
+
+    # ── Step 3: Full drug extraction + normalization ───────────────────────
+    # Only reached when in-memory scan found drugs — safe to call RxNorm.
     try:
         drug_names = extract_drug_names(cleaned_query)
         drug_names = normalize_drug_names(drug_names)
@@ -227,19 +266,6 @@ async def run_pipeline(query: str) -> dict:
 
     print(f"🔍 [Pipeline] Intent={intent_str} drugs={drug_names}")
     logger.info("[Pipeline] Intent=%s drugs=%s", intent_str, drug_names)
-
-    # ── Early exit: non-drug general query (no drugs found + general intent) ─
-    if intent_str == "general" and not drug_names:
-        logger.info("[Pipeline] Non-drug general query — returning NON_DRUG rejection")
-        return {
-            "verdict": "NON_DRUG",
-            "message": (
-                "Hmm, that's not in our formulary \U0001f605 RxBuddy only answers "
-                "questions about real medications. Try searching something like "
-                "'lisinopril side effects' or 'metformin dosage'!"
-            ),
-            "intent": "non_drug_query",
-        }
 
     # ── Step 4: Fetch all APIs in parallel ────────────────────────────────
     try:

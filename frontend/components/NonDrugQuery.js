@@ -88,14 +88,14 @@ export default function NonDrugQuery({ query, isIllegal = false }) {
         capsuleRadius, 64, 32, 0, Math.PI * 2, 0, Math.PI / 2
       );
       const leftHemi = new THREE.Mesh(leftHemiGeo, leftMat);
-      leftHemi.rotation.z = -Math.PI / 2;
+      leftHemi.rotation.z = Math.PI / 2;
       leftHemi.position.x = -halfLen;
       leftHemi.castShadow = true;
       pillGroup.add(leftHemi);
 
       // ── Left cylinder (barrel) ───────────────────────────────────────
       const leftCylGeo = new THREE.CylinderGeometry(
-        capsuleRadius, capsuleRadius, capsuleLength / 2, 64, 1, true
+        capsuleRadius, capsuleRadius, capsuleLength / 2, 64
       );
       const leftCyl = new THREE.Mesh(leftCylGeo, leftMat);
       leftCyl.rotation.z = Math.PI / 2;
@@ -115,7 +115,7 @@ export default function NonDrugQuery({ query, isIllegal = false }) {
 
       // ── Right cylinder (barrel) ──────────────────────────────────────
       const rightCylGeo = new THREE.CylinderGeometry(
-        capsuleRadius, capsuleRadius, capsuleLength / 2, 64, 1, true
+        capsuleRadius, capsuleRadius, capsuleLength / 2, 64
       );
       const rightCyl = new THREE.Mesh(rightCylGeo, rightMat);
       rightCyl.rotation.z = Math.PI / 2;
