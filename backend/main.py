@@ -4539,3 +4539,67 @@ async def search_v2_stream(req: SearchRequest) -> StreamingResponse:
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ── Chat widget endpoint ────────────────────────────────────────────────────
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatRequest(BaseModel):
+    drug_name: str
+    message: str
+    conversation_history: list[ChatMessage] = Field(default_factory=list)
+
+
+class ChatResponse(BaseModel):
+    reply: str
+
+
+@app.post("/v2/chat", response_model=ChatResponse)
+async def chat_v2(req: ChatRequest):
+    """
+    Conversational AI assistant scoped to a specific drug.
+    Uses Claude Haiku for fast, inexpensive responses.
+    """
+    api_key = _anthropic_api_key()
+    if not api_key:
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY is not configured.")
+
+    drug = req.drug_name.strip() or "this medication"
+
+    system_prompt = (
+        f"You are RxBuddy AI, a helpful pharmacy assistant. The user is asking "
+        f"about {drug}. You only answer questions related to this specific "
+        f"medication. Keep answers concise, clear, and patient-friendly. "
+        f"Always recommend consulting a pharmacist or doctor for personalized "
+        f"advice. If asked about something unrelated to {drug} or "
+        f"medications, politely redirect back to the drug topic.\n\n"
+        f"Drug context: The user searched for {drug} on RxBuddy, a pharmacy "
+        f"consultation app. Answer as a knowledgeable but friendly pharmacist."
+    )
+
+    # Build messages: keep only last 3 turns of history
+    messages = []
+    history = req.conversation_history[-6:]  # 3 turns = 6 messages max
+    for msg in history:
+        messages.append({"role": msg.role, "content": msg.content})
+    messages.append({"role": "user", "content": req.message})
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            system=system_prompt,
+            messages=messages,
+        )
+        reply_text = response.content[0].text if response.content else "Sorry, I couldn't generate a response."
+    except Exception as exc:
+        logger.error("[Chat] Claude API error: %s", exc)
+        reply_text = "I'm having trouble connecting right now. Please try again in a moment."
+
+    return ChatResponse(reply=reply_text)

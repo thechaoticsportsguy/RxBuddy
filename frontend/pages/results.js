@@ -15,6 +15,10 @@ const NonDrugQuery = dynamic(() => import("../components/NonDrugQuery"), {
   ),
 });
 
+const DrugChatWidget = dynamic(() => import("../components/DrugChatWidget"), {
+  ssr: false,
+});
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 // BUG 3 FIX: DrugImage component with category-based SVG pills
@@ -1009,6 +1013,17 @@ export default function ResultsPage() {
           )}
         </div>
       </div>
+
+      {/* ── Drug Chat Widget (only on drug results, never on NON_DRUG) ── */}
+      {(() => {
+        const s = results?.[0]?.structured || {};
+        const isNonDrug = s.intent === "non_drug_query" || s.verdict === "NON_DRUG";
+        const drugName = s.drug || s.drugs?.[0] || s.generic_name || "";
+        if (drugName && !isNonDrug) {
+          return <DrugChatWidget drugName={drugName} isVisible />;
+        }
+        return null;
+      })()}
     </>
   );
 }
