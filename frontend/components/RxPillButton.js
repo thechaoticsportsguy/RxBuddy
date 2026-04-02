@@ -1,34 +1,51 @@
 /**
- * RxPillButton — 3D Three.js spinning pill that opens DrugChatWidget.
+ * RxPillButton — Large 3D spinning pill that opens DrugChatWidget.
  *
- * Renders a small inline 220x80 canvas with a realistic black/white
- * capsule pill that rotates continuously. On hover it spins faster
- * and scales up. On click it opens the DrugChatWidget chat drawer.
+ * 320x110 Three.js canvas with a black/white capsule, Inter font,
+ * framer-motion transitions between pill and chat states. Clicking
+ * the pill smoothly transitions to the chat drawer; closing the
+ * chat brings the pill back.
  *
  * Props:
  *   drugName  — passed through to DrugChatWidget
- *   textColor — color of the label text above the pill (default "white")
+ *   textColor — label text color (default "white")
  */
 
 import { useEffect, useRef, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import dynamic from "next/dynamic";
 
 const DrugChatWidget = dynamic(() => import("./DrugChatWidget"), { ssr: false });
 
-const CANVAS_W = 220;
-const CANVAS_H = 80;
+const CANVAS_W = 320;
+const CANVAS_H = 110;
+const FONT = "'Inter', system-ui, sans-serif";
 
 export default function RxPillButton({ drugName, textColor = "white" }) {
   const mountRef = useRef(null);
   const cleanupRef = useRef(null);
   const [isHovered, setIsHovered] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isTransitioning, setIsTransitioning] = useState(false);
   const hoveredRef = useRef(false);
 
-  // Keep ref in sync so the animation loop reads the latest value
   useEffect(() => { hoveredRef.current = isHovered; }, [isHovered]);
 
+  function handleOpen() {
+    setIsTransitioning(true);
+    setTimeout(() => {
+      setIsChatOpen(true);
+      setIsTransitioning(false);
+    }, 350);
+  }
+
+  function handleClose() {
+    setIsChatOpen(false);
+  }
+
   useEffect(() => {
+    if (isChatOpen) return; // don't init Three.js while chat is open
+
     let cancelled = false;
 
     async function init() {
@@ -40,26 +57,29 @@ export default function RxPillButton({ drugName, textColor = "white" }) {
       }
       if (cancelled || !mountRef.current) return;
 
+      // Wait for Inter font to load before drawing canvas texture
+      if (document.fonts && document.fonts.ready) {
+        await document.fonts.ready;
+      }
+
       const container = mountRef.current;
 
-      // ── Scene ──────────────────────────────────────────────────
+      // ── Scene ──────────────────────────────────────────────
       const scene = new THREE.Scene();
-      // transparent background — alpha renderer
       scene.background = null;
 
       const camera = new THREE.PerspectiveCamera(45, CANVAS_W / CANVAS_H, 0.1, 100);
-      camera.position.set(0, 0, 3.5);
+      camera.position.set(0, 0, 4.0);
 
       const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
       renderer.setSize(CANVAS_W, CANVAS_H);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       container.appendChild(renderer.domElement);
 
-      // ── Pill group ─────────────────────────────────────────────
+      // ── Pill group ─────────────────────────────────────────
       const pillGroup = new THREE.Group();
       scene.add(pillGroup);
 
-      // Left-half material (black)
       const leftMat = new THREE.MeshPhysicalMaterial({
         color: 0x000000,
         roughness: 0.1,
@@ -68,7 +88,6 @@ export default function RxPillButton({ drugName, textColor = "white" }) {
         clearcoatRoughness: 0.05,
       });
 
-      // Right-half material (white)
       const rightMat = new THREE.MeshPhysicalMaterial({
         color: 0xffffff,
         roughness: 0.1,
@@ -77,18 +96,16 @@ export default function RxPillButton({ drugName, textColor = "white" }) {
         clearcoatRoughness: 0.05,
       });
 
-      // ── "RxBuddy" texture ──────────────────────────────────────
+      // ── "RxBuddy" texture ──────────────────────────────────
       const txCanvas = document.createElement("canvas");
       txCanvas.width = 512;
       txCanvas.height = 128;
       const txCtx = txCanvas.getContext("2d");
-      // Left half black, right half white
       txCtx.fillStyle = "#000000";
       txCtx.fillRect(0, 0, 256, 128);
       txCtx.fillStyle = "#ffffff";
       txCtx.fillRect(256, 0, 256, 128);
-      // Text — white on left, black on right
-      txCtx.font = "bold 48px 'Times New Roman', Times, serif";
+      txCtx.font = "bold 48px 'Inter', system-ui, sans-serif";
       txCtx.textAlign = "center";
       txCtx.textBaseline = "middle";
       txCtx.fillStyle = "#ffffff";
@@ -97,45 +114,40 @@ export default function RxPillButton({ drugName, textColor = "white" }) {
       txCtx.fillText("Buddy", 384, 64);
       const rxTex = new THREE.CanvasTexture(txCanvas);
 
-      // Clone materials with texture for the cylinders
       const leftMatTex = leftMat.clone();
       leftMatTex.map = rxTex;
       const rightMatTex = rightMat.clone();
       rightMatTex.map = rxTex;
 
-      // ── Left hemisphere (cap) ──────────────────────────────────
-      const leftHemiGeo = new THREE.SphereGeometry(
-        0.5, 64, 32, 0, Math.PI * 2, 0, Math.PI / 2
-      );
+      // ── Left hemisphere ────────────────────────────────────
+      const leftHemiGeo = new THREE.SphereGeometry(0.5, 64, 32, 0, Math.PI * 2, 0, Math.PI / 2);
       const leftHemi = new THREE.Mesh(leftHemiGeo, leftMat);
       leftHemi.rotation.z = Math.PI / 2;
       leftHemi.position.x = -0.6;
       pillGroup.add(leftHemi);
 
-      // ── Left cylinder (barrel) ─────────────────────────────────
+      // ── Left cylinder ──────────────────────────────────────
       const leftCylGeo = new THREE.CylinderGeometry(0.5, 0.5, 1.2, 64, 1, false);
       const leftCyl = new THREE.Mesh(leftCylGeo, leftMatTex);
       leftCyl.rotation.z = Math.PI / 2;
       leftCyl.position.x = 0;
       pillGroup.add(leftCyl);
 
-      // ── Right hemisphere (cap) ─────────────────────────────────
-      const rightHemiGeo = new THREE.SphereGeometry(
-        0.5, 64, 32, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2
-      );
+      // ── Right hemisphere ───────────────────────────────────
+      const rightHemiGeo = new THREE.SphereGeometry(0.5, 64, 32, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2);
       const rightHemi = new THREE.Mesh(rightHemiGeo, rightMat);
       rightHemi.rotation.z = Math.PI / 2;
       rightHemi.position.x = 0.6;
       pillGroup.add(rightHemi);
 
-      // ── Right cylinder (barrel) ────────────────────────────────
+      // ── Right cylinder ─────────────────────────────────────
       const rightCylGeo = new THREE.CylinderGeometry(0.5, 0.5, 1.2, 64, 1, false);
       const rightCyl = new THREE.Mesh(rightCylGeo, rightMatTex);
       rightCyl.rotation.z = Math.PI / 2;
       rightCyl.position.x = 0;
       pillGroup.add(rightCyl);
 
-      // ── Seam ring ──────────────────────────────────────────────
+      // ── Seam ring ──────────────────────────────────────────
       const seamGeo = new THREE.TorusGeometry(0.502, 0.008, 16, 128);
       const seamMat = new THREE.MeshPhysicalMaterial({
         color: 0x888888,
@@ -146,7 +158,7 @@ export default function RxPillButton({ drugName, textColor = "white" }) {
       seam.rotation.y = Math.PI / 2;
       pillGroup.add(seam);
 
-      // ── Lighting ───────────────────────────────────────────────
+      // ── Lighting ───────────────────────────────────────────
       scene.add(new THREE.AmbientLight(0xffffff, 0.6));
 
       const dirLight = new THREE.DirectionalLight(0xffffff, 2);
@@ -157,7 +169,12 @@ export default function RxPillButton({ drugName, textColor = "white" }) {
       ptLight.position.set(-2, 1, 2);
       scene.add(ptLight);
 
-      // ── Animation loop ─────────────────────────────────────────
+      // Blue rim light for accent glow
+      const rimLight = new THREE.PointLight(0x4a9eff, 0.3);
+      rimLight.position.set(0, 0, -2);
+      scene.add(rimLight);
+
+      // ── Animation loop ─────────────────────────────────────
       let hoverScale = 1;
       let animId;
 
@@ -176,7 +193,7 @@ export default function RxPillButton({ drugName, textColor = "white" }) {
 
       animate();
 
-      // ── Cleanup ────────────────────────────────────────────────
+      // ── Cleanup ────────────────────────────────────────────
       cleanupRef.current = () => {
         cancelAnimationFrame(animId);
         scene.traverse((obj) => {
@@ -196,50 +213,68 @@ export default function RxPillButton({ drugName, textColor = "white" }) {
     init();
     return () => {
       cancelled = true;
-      if (cleanupRef.current) cleanupRef.current();
+      if (cleanupRef.current) {
+        cleanupRef.current();
+        cleanupRef.current = null;
+      }
     };
-  }, []);
+  }, [isChatOpen]);
 
   return (
-    <>
-      <div
-        onClick={() => setIsChatOpen(true)}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
-        style={{
-          position: "fixed",
-          bottom: 24,
-          right: 24,
-          zIndex: 999,
-          cursor: "pointer",
-          display: "inline-flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 4,
-        }}
-      >
-        <span style={{
-          fontFamily: "'Times New Roman', Times, serif",
-          fontSize: 13,
-          color: textColor,
-          textAlign: "center",
-          pointerEvents: "none",
-          userSelect: "none",
-        }}>
-          Ask RxBuddy Assistant more about your medication
-        </span>
-        <div
-          ref={mountRef}
-          style={{ width: CANVAS_W, height: CANVAS_H, pointerEvents: "none" }}
-        />
-      </div>
+    <AnimatePresence mode="wait">
+      {!isChatOpen && !isTransitioning && (
+        <motion.div
+          key="pill"
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 1.15 }}
+          transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
+          onClick={handleOpen}
+          onMouseEnter={() => setIsHovered(true)}
+          onMouseLeave={() => setIsHovered(false)}
+          style={{
+            position: "fixed",
+            bottom: 24,
+            right: 24,
+            zIndex: 999,
+            cursor: "pointer",
+            display: "inline-flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 6,
+            boxShadow: isHovered ? "0 0 30px rgba(74,158,255,0.2)" : "none",
+            borderRadius: 16,
+            padding: "10px 14px 6px",
+            transition: "box-shadow 0.3s ease",
+          }}
+        >
+          <span style={{
+            fontFamily: FONT,
+            fontSize: 14,
+            fontWeight: 500,
+            letterSpacing: "-0.01em",
+            color: textColor,
+            textAlign: "center",
+            pointerEvents: "none",
+            userSelect: "none",
+          }}>
+            Ask RxBuddy about your medication
+          </span>
+          <div
+            ref={mountRef}
+            style={{ width: CANVAS_W, height: CANVAS_H, pointerEvents: "none" }}
+          />
+        </motion.div>
+      )}
 
       {isChatOpen && (
         <DrugChatWidget
+          key="chat"
           drugName={drugName}
           isVisible
+          onClose={handleClose}
         />
       )}
-    </>
+    </AnimatePresence>
   );
 }
