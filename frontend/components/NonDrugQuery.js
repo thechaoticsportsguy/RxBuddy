@@ -1,19 +1,25 @@
 /**
- * NonDrugQuery — Rainbow chromatic 3D spinning pill for non-drug searches.
+ * NonDrugQuery — Premium 3D pill with rainbow chromatic animation.
  *
- * Uses Three.js to render a glossy pharmaceutical capsule with animated
- * rainbow HSL colors, sparkle particles, glow aura, and hover effects.
- * The pill is built from two hemispheres + two half-cylinders with an
- * "RxBuddy" engraving via canvas texture.
+ * Renders a realistic pharmaceutical capsule using Three.js with:
+ *   - MeshPhysicalMaterial clearcoat for glossy finish
+ *   - Rainbow HSL color cycling on both halves
+ *   - Mouse-tracking rotation (follows cursor)
+ *   - Idle floating animation + hover scale
+ *   - 60 orbiting sparkle particles with twinkle
+ *   - Soft glow sprites behind pill
+ *   - "RxBuddy" canvas texture engraving
+ *   - CSS overlay text (pointer-events: none)
  *
  * Props:
  *   query     — the user's original search string
- *   isIllegal — if true, shows SAMHSA helpline instead of drug suggestions
+ *   isIllegal — if true, shows SAMHSA helpline
+ *   message   — optional custom message override
  */
 
 import { useEffect, useRef } from "react";
 
-export default function NonDrugQuery({ query, isIllegal = false }) {
+export default function NonDrugQuery({ query, isIllegal = false, message }) {
   const mountRef = useRef(null);
   const cleanupRef = useRef(null);
 
@@ -54,89 +60,25 @@ export default function NonDrugQuery({ query, isIllegal = false }) {
       const pillGroup = new THREE.Group();
       scene.add(pillGroup);
 
-      const capsuleRadius = 0.7;
-      const capsuleLength = 1.6;
-      const halfLen = capsuleLength / 2;
-      const quarterLen = capsuleLength / 4;
-
-      // Left-half material (will animate rainbow)
+      // Left-half material (pink → rainbow)
       const leftMat = new THREE.MeshPhysicalMaterial({
-        color: 0x1a3fd4,
-        roughness: 0.08,
-        metalness: 0.1,
-        transmission: 0.15,
-        thickness: 0.5,
+        color: 0xe8a0bf,
+        roughness: 0.1,
+        metalness: 0.05,
         clearcoat: 1.0,
         clearcoatRoughness: 0.05,
-        envMapIntensity: 1.5,
       });
 
-      // Right-half material (will animate complementary rainbow)
+      // Right-half material (dark → rainbow)
       const rightMat = new THREE.MeshPhysicalMaterial({
-        color: 0xf0f4ff,
-        roughness: 0.05,
-        metalness: 0.05,
-        transmission: 0.2,
-        thickness: 0.5,
-        clearcoat: 1.0,
-        clearcoatRoughness: 0.03,
-        envMapIntensity: 1.5,
-      });
-
-      // ── Left hemisphere (cap) ────────────────────────────────────────
-      const leftHemiGeo = new THREE.SphereGeometry(
-        capsuleRadius, 64, 32, 0, Math.PI * 2, 0, Math.PI / 2
-      );
-      const leftHemi = new THREE.Mesh(leftHemiGeo, leftMat);
-      leftHemi.rotation.z = Math.PI / 2;
-      leftHemi.position.x = -halfLen;
-      leftHemi.castShadow = true;
-      pillGroup.add(leftHemi);
-
-      // ── Left cylinder (barrel) ───────────────────────────────────────
-      const leftCylGeo = new THREE.CylinderGeometry(
-        capsuleRadius, capsuleRadius, capsuleLength / 2, 64
-      );
-      const leftCyl = new THREE.Mesh(leftCylGeo, leftMat);
-      leftCyl.rotation.z = Math.PI / 2;
-      leftCyl.position.x = -quarterLen;
-      leftCyl.castShadow = true;
-      pillGroup.add(leftCyl);
-
-      // ── Right hemisphere (cap) ───────────────────────────────────────
-      const rightHemiGeo = new THREE.SphereGeometry(
-        capsuleRadius, 64, 32, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2
-      );
-      const rightHemi = new THREE.Mesh(rightHemiGeo, rightMat);
-      rightHemi.rotation.z = -Math.PI / 2;
-      rightHemi.position.x = halfLen;
-      rightHemi.castShadow = true;
-      pillGroup.add(rightHemi);
-
-      // ── Right cylinder (barrel) ──────────────────────────────────────
-      const rightCylGeo = new THREE.CylinderGeometry(
-        capsuleRadius, capsuleRadius, capsuleLength / 2, 64
-      );
-      const rightCyl = new THREE.Mesh(rightCylGeo, rightMat);
-      rightCyl.rotation.z = Math.PI / 2;
-      rightCyl.position.x = quarterLen;
-      rightCyl.castShadow = true;
-      pillGroup.add(rightCyl);
-
-      // ── Seam ring between halves ─────────────────────────────────────
-      const seamGeo = new THREE.TorusGeometry(capsuleRadius + 0.002, 0.012, 16, 128);
-      const seamMat = new THREE.MeshPhysicalMaterial({
-        color: 0x8899ff,
+        color: 0x1a1a2e,
         roughness: 0.1,
-        metalness: 0.6,
-        emissive: 0x3355ff,
-        emissiveIntensity: 0.4,
+        metalness: 0.1,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.05,
       });
-      const seam = new THREE.Mesh(seamGeo, seamMat);
-      seam.rotation.y = Math.PI / 2;
-      pillGroup.add(seam);
 
-      // ── "RxBuddy" engraving on right half ────────────────────────────
+      // ── "RxBuddy" engraving texture ──────────────────────────────────
       const rxCanvas = document.createElement("canvas");
       rxCanvas.width = 512;
       rxCanvas.height = 512;
@@ -148,13 +90,88 @@ export default function NonDrugQuery({ query, isIllegal = false }) {
       rxCtx.fillStyle = "rgba(255, 255, 255, 0.45)";
       rxCtx.fillText("RxBuddy", 256, 256);
       const rxTex = new THREE.CanvasTexture(rxCanvas);
+
       const rightMatEngrave = rightMat.clone();
       rightMatEngrave.map = rxTex;
-      rightHemi.material = rightMatEngrave;
-      rightCyl.material = rightMatEngrave;
+
+      // ── Build pill geometry ──────────────────────────────────────────
+      // Try CapsuleGeometry first (Three.js r128+), fall back to manual
+      let usedCapsule = false;
+      if (THREE.CapsuleGeometry) {
+        try {
+          const leftCapsuleGeo = new THREE.CapsuleGeometry(0.5, 1.2, 16, 32);
+          const leftCapsule = new THREE.Mesh(leftCapsuleGeo, leftMat);
+          leftCapsule.rotation.z = Math.PI / 2;
+          leftCapsule.position.x = -0.6;
+          leftCapsule.castShadow = true;
+          pillGroup.add(leftCapsule);
+
+          const rightCapsuleGeo = new THREE.CapsuleGeometry(0.5, 1.2, 16, 32);
+          const rightCapsule = new THREE.Mesh(rightCapsuleGeo, rightMatEngrave);
+          rightCapsule.rotation.z = Math.PI / 2;
+          rightCapsule.position.x = 0.6;
+          rightCapsule.castShadow = true;
+          pillGroup.add(rightCapsule);
+
+          usedCapsule = true;
+        } catch {
+          usedCapsule = false;
+        }
+      }
+
+      if (!usedCapsule) {
+        // ── Left hemisphere (cap) ──────────────────────────────────────
+        const leftHemiGeo = new THREE.SphereGeometry(
+          0.5, 64, 32, 0, Math.PI * 2, 0, Math.PI / 2
+        );
+        const leftHemi = new THREE.Mesh(leftHemiGeo, leftMat);
+        leftHemi.rotation.z = Math.PI / 2;
+        leftHemi.position.x = -0.6;
+        leftHemi.castShadow = true;
+        pillGroup.add(leftHemi);
+
+        // ── Left cylinder (barrel) ─────────────────────────────────────
+        const leftCylGeo = new THREE.CylinderGeometry(0.5, 0.5, 1.2, 64, 1, false);
+        const leftCyl = new THREE.Mesh(leftCylGeo, leftMat);
+        leftCyl.rotation.z = Math.PI / 2;
+        leftCyl.position.x = 0;
+        leftCyl.castShadow = true;
+        pillGroup.add(leftCyl);
+
+        // ── Right hemisphere (cap) ─────────────────────────────────────
+        const rightHemiGeo = new THREE.SphereGeometry(
+          0.5, 64, 32, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2
+        );
+        const rightHemi = new THREE.Mesh(rightHemiGeo, rightMatEngrave);
+        rightHemi.rotation.z = Math.PI / 2;
+        rightHemi.position.x = 0.6;
+        rightHemi.castShadow = true;
+        pillGroup.add(rightHemi);
+
+        // ── Right cylinder (barrel) ────────────────────────────────────
+        const rightCylGeo = new THREE.CylinderGeometry(0.5, 0.5, 1.2, 64, 1, false);
+        const rightCyl = new THREE.Mesh(rightCylGeo, rightMatEngrave);
+        rightCyl.rotation.z = Math.PI / 2;
+        rightCyl.position.x = 0;
+        rightCyl.castShadow = true;
+        pillGroup.add(rightCyl);
+      }
+
+      // ── Seam ring between halves ─────────────────────────────────────
+      const seamGeo = new THREE.TorusGeometry(0.502, 0.008, 16, 128);
+      const seamMat = new THREE.MeshPhysicalMaterial({
+        color: 0x8899ff,
+        roughness: 0.1,
+        metalness: 0.6,
+        emissive: 0x3355ff,
+        emissiveIntensity: 0.4,
+      });
+      const seam = new THREE.Mesh(seamGeo, seamMat);
+      seam.rotation.y = Math.PI / 2;
+      pillGroup.add(seam);
 
       // Tilt the pill
-      pillGroup.rotation.z = 0.3;
+      pillGroup.rotation.z = 0.2;
 
       // ── Grid Background ──────────────────────────────────────────────
       const gridCanvas = document.createElement("canvas");
@@ -214,8 +231,8 @@ export default function NonDrugQuery({ query, isIllegal = false }) {
       const glowOuter = makeGlow("40,70,220", 9, 0.2);
       scene.add(glowOuter);
 
-      // ── Sparkle Particles ────────────────────────────────────────────
-      const sparkleCount = 80;
+      // ── Sparkle Particles (60) ───────────────────────────────────────
+      const sparkleCount = 60;
       const sparkleGeo = new THREE.BufferGeometry();
       const sparklePos = new Float32Array(sparkleCount * 3);
       const sparklePhases = new Float32Array(sparkleCount);
@@ -268,83 +285,92 @@ export default function NonDrugQuery({ query, isIllegal = false }) {
       scene.add(sparkles);
 
       // ── Lighting ─────────────────────────────────────────────────────
-      scene.add(new THREE.AmbientLight(0x1a2a6c, 0.8));
+      scene.add(new THREE.AmbientLight(0xffffff, 0.4));
 
-      const keyLight = new THREE.DirectionalLight(0xffffff, 3.5);
-      keyLight.position.set(3, 3, 4);
-      keyLight.castShadow = true;
-      scene.add(keyLight);
+      const dirLight = new THREE.DirectionalLight(0xffffff, 2);
+      dirLight.position.set(3, 3, 5);
+      dirLight.castShadow = true;
+      scene.add(dirLight);
 
-      const fillLight = new THREE.DirectionalLight(0xffffff, 1.5);
-      fillLight.position.set(-3, -1, 2);
-      scene.add(fillLight);
-
-      const rimLight = new THREE.DirectionalLight(0x3366ff, 2);
-      rimLight.position.set(0, 2, -4);
-      scene.add(rimLight);
-
-      const pointLight = new THREE.PointLight(0x2244ff, 4, 8);
-      pointLight.position.set(-2, 1, 2);
+      const pointLight = new THREE.PointLight(0x8888ff, 1.5);
+      pointLight.position.set(-2, 2, 2);
       scene.add(pointLight);
 
-      // ── Hover Detection ──────────────────────────────────────────────
-      const raycaster = new THREE.Raycaster();
-      const mouse = new THREE.Vector2();
+      // RectAreaLight if available
+      try {
+        if (THREE.RectAreaLight) {
+          const rectLight = new THREE.RectAreaLight(0xffffff, 1, 4, 4);
+          rectLight.position.set(0, 2, 3);
+          rectLight.lookAt(0, 0, 0);
+          scene.add(rectLight);
+        }
+      } catch {
+        // RectAreaLight not available — skip
+      }
+
+      // ── Mouse Tracking ───────────────────────────────────────────────
+      let targetX = 0;
+      let targetY = 0;
       let isHovered = false;
-      let hoverT = 0;
-      const pillMeshes = [leftHemi, leftCyl, rightHemi, rightCyl];
+      let hoverScale = 1;
 
       const onMouseMove = (e) => {
         const rect = container.getBoundingClientRect();
-        mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-        mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-        raycaster.setFromCamera(mouse, camera);
-        isHovered = raycaster.intersectObjects(pillMeshes).length > 0;
-        renderer.domElement.style.cursor = isHovered ? "pointer" : "default";
+        const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        const ny = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        targetY = nx * 0.5;
+        targetX = ny * 0.3;
+
+        // Check hover on pill bounding area
+        const cx = (e.clientX - rect.left) / rect.width;
+        const cy = (e.clientY - rect.top) / rect.height;
+        isHovered = (Math.abs(cx - 0.5) < 0.2 && Math.abs(cy - 0.5) < 0.2);
       };
-      const onMouseLeave = () => { isHovered = false; };
-      renderer.domElement.addEventListener("mousemove", onMouseMove);
-      renderer.domElement.addEventListener("mouseleave", onMouseLeave);
+
+      const onMouseLeave = () => {
+        targetX = 0;
+        targetY = 0;
+        isHovered = false;
+      };
+
+      window.addEventListener("mousemove", onMouseMove);
+      container.addEventListener("mouseleave", onMouseLeave);
 
       // ── Animation Loop ───────────────────────────────────────────────
       const clock = new THREE.Clock();
+      let animId;
 
       function animate() {
+        animId = requestAnimationFrame(animate);
         const t = clock.getElapsedTime();
 
-        // Smooth hover transition
-        hoverT += ((isHovered ? 1 : 0) - hoverT) * 0.06;
-        const spinSpeed = 0.4 + (2.2 - 0.4) * hoverT;
+        // Mouse-following rotation (smooth lerp)
+        pillGroup.rotation.y += (targetY - pillGroup.rotation.y) * 0.05;
+        pillGroup.rotation.x += (targetX - pillGroup.rotation.x) * 0.05;
 
-        // Spin + float
-        pillGroup.rotation.y += spinSpeed * 0.016;
-        pillGroup.position.y = Math.sin(t * 0.8) * 0.12;
-        pillGroup.scale.setScalar(1 + Math.sin(t * 6) * 0.025 * hoverT);
+        // Idle float
+        pillGroup.position.y = Math.sin(t * 0.8) * 0.15;
+
+        // Hover scale (smooth lerp to 1.08)
+        const targetScale = isHovered ? 1.08 : 1.0;
+        hoverScale += (targetScale - hoverScale) * 0.05;
+        pillGroup.scale.setScalar(hoverScale);
 
         // ── Rainbow color cycling ────────────────────────────────────
-        const hue = (t * 30) % 360;
-        leftMat.color.setHSL(hue / 360, 0.85, 0.5);
-        leftMat.emissive.setHSL(hue / 360, 0.9, 0.15);
-        leftMat.emissiveIntensity = 0.15 + hoverT * 0.2;
+        leftMat.color.setHSL((t * 0.1) % 1, 0.8, 0.65);
+        rightMat.color.setHSL(((t * 0.1) + 0.5) % 1, 0.8, 0.3);
+        rightMatEngrave.color.setHSL(((t * 0.1) + 0.5) % 1, 0.8, 0.3);
 
-        rightMat.color.setHSL(((hue + 180) % 360) / 360, 0.7, 0.7);
-        rightMatEngrave.color.setHSL(((hue + 180) % 360) / 360, 0.7, 0.7);
-        rightMatEngrave.emissive.setHSL(((hue + 180) % 360) / 360, 0.5, 0.1);
-        rightMatEngrave.emissiveIntensity = 0.05 + hoverT * 0.1;
-
-        // Seam follows the rainbow too
-        seamMat.color.setHSL(((hue + 90) % 360) / 360, 1, 0.6);
-        seamMat.emissive.setHSL(((hue + 90) % 360) / 360, 1, 0.3);
-        seamMat.emissiveIntensity = 0.4 + hoverT * 0.8 + Math.sin(t * 5) * 0.2 * hoverT;
-
-        // Key light color follows the primary hue
-        keyLight.color.setHSL(hue / 360, 0.6, 0.7);
+        // Seam follows rainbow
+        const seamHue = ((t * 0.1) + 0.25) % 1;
+        seamMat.color.setHSL(seamHue, 1, 0.6);
+        seamMat.emissive.setHSL(seamHue, 1, 0.3);
 
         // Sparkle color shifts
-        sparkleMat.color.setHSL(((hue + 120) % 360) / 360, 0.8, 0.8);
+        sparkleMat.color.setHSL(((t * 0.1) + 0.33) % 1, 0.8, 0.8);
 
         // Glow pulse
-        const glowPulse = 1 + Math.sin(t * 3) * 0.15 * (0.5 + hoverT * 0.5);
+        const glowPulse = 1 + Math.sin(t * 3) * 0.15;
         glowA.scale.setScalar(6.5 * glowPulse);
         glowB.scale.setScalar(5.5 * glowPulse);
         glowOuter.scale.setScalar(9 * (1 + Math.sin(t * 1.5) * 0.08));
@@ -352,25 +378,26 @@ export default function NonDrugQuery({ query, isIllegal = false }) {
         glowB.position.y = pillGroup.position.y;
         glowOuter.position.y = pillGroup.position.y;
 
-        // Animate sparkle orbits
+        // Animate sparkle orbits + twinkling opacity
         const pos = sparkleGeo.attributes.position.array;
         for (let i = 0; i < sparkleCount; i++) {
           const orb = sparkleOrbits[i];
-          orb.theta += orb.speed * 0.008 * (1 + hoverT * 1.5);
+          orb.theta += orb.speed * 0.008;
           pos[i * 3] = orb.r * Math.sin(orb.phi) * Math.cos(orb.theta);
           pos[i * 3 + 1] = orb.r * Math.sin(orb.phi) * Math.sin(orb.theta) + pillGroup.position.y * 0.3;
           pos[i * 3 + 2] = orb.r * Math.cos(orb.phi);
         }
         sparkleGeo.attributes.position.needsUpdate = true;
-        sparkleMat.opacity = 0.7 + 0.3 * Math.sin(t * 1.8);
+        // Twinkling: each particle oscillates at its own phase
+        sparkleMat.opacity = 0.5 + 0.5 * Math.sin(t * 2.5);
 
         // Point light pulses
-        pointLight.intensity = 3 + Math.sin(t * 2) + hoverT * 2;
+        pointLight.intensity = 1.5 + Math.sin(t * 2) * 0.5;
 
         renderer.render(scene, camera);
       }
 
-      renderer.setAnimationLoop(animate);
+      animate();
 
       // ── Resize ───────────────────────────────────────────────────────
       const onResize = () => {
@@ -385,9 +412,9 @@ export default function NonDrugQuery({ query, isIllegal = false }) {
 
       // ── Cleanup ──────────────────────────────────────────────────────
       cleanupRef.current = () => {
-        renderer.setAnimationLoop(null);
-        renderer.domElement.removeEventListener("mousemove", onMouseMove);
-        renderer.domElement.removeEventListener("mouseleave", onMouseLeave);
+        cancelAnimationFrame(animId);
+        window.removeEventListener("mousemove", onMouseMove);
+        container.removeEventListener("mouseleave", onMouseLeave);
         window.removeEventListener("resize", onResize);
         scene.traverse((obj) => {
           if (obj.geometry) obj.geometry.dispose();
@@ -421,7 +448,7 @@ export default function NonDrugQuery({ query, isIllegal = false }) {
         overflow: "hidden",
       }}
     >
-      {/* Text overlay */}
+      {/* ── UI Overlay (CSS over canvas, pointer-events: none) ───── */}
       <div style={{
         position: "absolute",
         inset: 0,
@@ -434,9 +461,10 @@ export default function NonDrugQuery({ query, isIllegal = false }) {
         fontFamily: "'Inter', system-ui, sans-serif",
         zIndex: 1,
       }}>
+        {/* Top center heading */}
         <h2 style={{
           marginTop: 48,
-          fontSize: "clamp(20px, 3vw, 40px)",
+          fontSize: "2.5rem",
           fontWeight: 800,
           color: "#ffffff",
           letterSpacing: "-0.01em",
@@ -450,6 +478,7 @@ export default function NonDrugQuery({ query, isIllegal = false }) {
             : "Oops! That\u2019s not in our formulary \uD83D\uDE05"}
         </h2>
 
+        {/* Search query display */}
         <p style={{
           marginTop: 12,
           fontSize: "clamp(13px, 1.4vw, 18px)",
@@ -461,11 +490,25 @@ export default function NonDrugQuery({ query, isIllegal = false }) {
         }}>
           {query
             ? "You searched: \u201c" + query + "\u201d"
-            : "Try searching a real medication like \u2018lisinopril side effects\u2019"}
+            : ""}
         </p>
+
+        {/* Custom message if provided */}
+        {message && (
+          <p style={{
+            marginTop: 8,
+            fontSize: "clamp(12px, 1.2vw, 16px)",
+            fontWeight: 400,
+            color: "rgba(160, 180, 220, 0.6)",
+            textAlign: "center",
+            padding: "0 24px",
+          }}>
+            {message}
+          </p>
+        )}
       </div>
 
-      {/* Bottom bar */}
+      {/* ── Bottom bar ──────────────────────────────────────────── */}
       <div style={{
         position: "absolute",
         bottom: 0,
@@ -478,6 +521,7 @@ export default function NonDrugQuery({ query, isIllegal = false }) {
         alignItems: "center",
         gap: 10,
         zIndex: 1,
+        pointerEvents: "none",
       }}>
         {isIllegal ? (
           <div style={{
@@ -498,7 +542,7 @@ export default function NonDrugQuery({ query, isIllegal = false }) {
             border: "1px solid rgba(130,160,255,0.2)",
           }}>
             <span>{"\u2728"}</span>
-            <span>Try: &quot;lisinopril side effects&quot; or &quot;metformin dosage&quot;</span>
+            <span>Try searching a real drug like &quot;lisinopril side effects&quot;</span>
           </div>
         )}
 

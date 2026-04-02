@@ -235,7 +235,18 @@ async def run_pipeline(query: str) -> dict:
     except Exception:
         pass  # import failure → fall through to full pipeline
 
-    if classify_fast(cleaned_query, drug_count=len(_fast_drugs)).value == "general" and not _fast_drugs:
+    _fast_intent = classify_fast(cleaned_query, drug_count=len(_fast_drugs))
+
+    # Guard 1: intent=general + no drugs found → NON_DRUG
+    _is_non_drug = (_fast_intent.value == "general" and not _fast_drugs)
+
+    # Guard 2: intent=side_effects but no drugs found in local tables.
+    # Catches queries like "obama side effects", "pizza side effects" where
+    # the classifier sees "side effects" but the non-drug word isn't a medication.
+    if not _is_non_drug and _fast_intent.value == "side_effects" and not _fast_drugs:
+        _is_non_drug = True
+
+    if _is_non_drug:
         elapsed = (time.monotonic() - start_time) * 1000
         logger.info("[Pipeline] NON_DRUG fast path (%.0fms) — no network calls made", elapsed)
         return {
