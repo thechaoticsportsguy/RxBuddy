@@ -1,14 +1,13 @@
 /**
  * RxPillButton — Large 3D spinning pill that opens DrugChatWidget.
  *
- * 320x110 Three.js canvas with a black/white capsule, Inter font,
- * framer-motion transitions between pill and chat states. Clicking
- * the pill smoothly transitions to the chat drawer; closing the
- * chat brings the pill back.
+ * 400x140 Three.js canvas with a black/white capsule, Inter font,
+ * framer-motion transitions. No borders/backgrounds — pill floats
+ * freely. Hover shows animated tooltip above pill.
  *
  * Props:
  *   drugName  — passed through to DrugChatWidget
- *   textColor — label text color (default "white")
+ *   textColor — tooltip text color (default "white")
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -17,9 +16,10 @@ import dynamic from "next/dynamic";
 
 const DrugChatWidget = dynamic(() => import("./DrugChatWidget"), { ssr: false });
 
-const CANVAS_W = 320;
-const CANVAS_H = 110;
+const CANVAS_W = 400;
+const CANVAS_H = 140;
 const FONT = "'Inter', system-ui, sans-serif";
+const PILL_WRAPPER_ID = "rx-pill-wrapper";
 
 export default function RxPillButton({ drugName, textColor = "white" }) {
   const mountRef = useRef(null);
@@ -44,7 +44,7 @@ export default function RxPillButton({ drugName, textColor = "white" }) {
   }
 
   useEffect(() => {
-    if (isChatOpen) return; // don't init Three.js while chat is open
+    if (isChatOpen) return;
 
     let cancelled = false;
 
@@ -57,7 +57,6 @@ export default function RxPillButton({ drugName, textColor = "white" }) {
       }
       if (cancelled || !mountRef.current) return;
 
-      // Wait for Inter font to load before drawing canvas texture
       if (document.fonts && document.fonts.ready) {
         await document.fonts.ready;
       }
@@ -169,7 +168,6 @@ export default function RxPillButton({ drugName, textColor = "white" }) {
       ptLight.position.set(-2, 1, 2);
       scene.add(ptLight);
 
-      // Blue rim light for accent glow
       const rimLight = new THREE.PointLight(0x4a9eff, 0.3);
       rimLight.position.set(0, 0, -2);
       scene.add(rimLight);
@@ -225,6 +223,7 @@ export default function RxPillButton({ drugName, textColor = "white" }) {
       {!isChatOpen && !isTransitioning && (
         <motion.div
           key="pill"
+          id={PILL_WRAPPER_ID}
           initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 1.15 }}
@@ -241,28 +240,53 @@ export default function RxPillButton({ drugName, textColor = "white" }) {
             display: "inline-flex",
             flexDirection: "column",
             alignItems: "center",
-            gap: 6,
-            boxShadow: isHovered ? "0 0 30px rgba(74,158,255,0.2)" : "none",
-            borderRadius: 16,
-            padding: "10px 14px 6px",
-            transition: "box-shadow 0.3s ease",
+            background: "transparent",
+            border: "none",
+            boxShadow: "none",
+            padding: 0,
+            margin: 0,
           }}
         >
-          <span style={{
-            fontFamily: FONT,
-            fontSize: 14,
-            fontWeight: 500,
-            letterSpacing: "-0.01em",
-            color: textColor,
-            textAlign: "center",
-            pointerEvents: "none",
-            userSelect: "none",
-          }}>
-            Ask RxBuddy about your medication
-          </span>
+          {/* Hover tooltip — floats above pill */}
+          <AnimatePresence>
+            {isHovered && (
+              <motion.span
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: -8 }}
+                exit={{ opacity: 0, y: 10 }}
+                transition={{ duration: 0.3, ease: "easeOut" }}
+                style={{
+                  fontFamily: FONT,
+                  fontSize: 13,
+                  color: textColor,
+                  textAlign: "center",
+                  pointerEvents: "none",
+                  userSelect: "none",
+                  position: "absolute",
+                  top: -28,
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Ask RxBuddy Assistant more about your medication
+              </motion.span>
+            )}
+          </AnimatePresence>
+
+          {/* Three.js canvas — no wrapper styling */}
           <div
             ref={mountRef}
-            style={{ width: CANVAS_W, height: CANVAS_H, pointerEvents: "none" }}
+            style={{
+              width: CANVAS_W,
+              height: CANVAS_H,
+              pointerEvents: "none",
+              background: "transparent",
+              border: "none",
+              boxShadow: "none",
+              padding: 0,
+              margin: 0,
+            }}
           />
         </motion.div>
       )}

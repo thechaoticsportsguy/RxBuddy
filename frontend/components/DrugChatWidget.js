@@ -1,15 +1,14 @@
 /**
  * DrugChatWidget — Premium dark-glass AI chat drawer.
  *
- * Renders a fixed-position chat panel with rounded corners, Inter font,
- * RxBuddyRobot mascot header, and smooth framer-motion entrance/exit.
- * Parent controls visibility via isVisible prop; onClose fires when
- * the user clicks the close button.
+ * Click-outside closes the drawer but conversation persists in a ref.
+ * Reopening restores previous messages. Parent controls visibility
+ * via isVisible; onClose fires on close button or click-outside.
  *
  * Props:
  *   drugName  — the drug being discussed
  *   isVisible — whether to render the drawer
- *   onClose   — callback when close button is clicked
+ *   onClose   — callback when close button is clicked or click-outside
  */
 
 import { useState, useRef, useEffect, useCallback } from "react";
@@ -29,15 +28,26 @@ const TEXT = "#e2e8f0";
 const TEXT_MUTED = "#94a3b8";
 const ACCENT = "#4a9eff";
 const INPUT_BG = "#0f172a";
+const CHAT_DRAWER_ID = "rx-chat-drawer";
+
+// Persistent conversation memory (survives open/close cycles)
+const _messageStore = {};
 
 export default function DrugChatWidget({ drugName, isVisible, onClose }) {
-  const [messages, setMessages] = useState([]);
+  const storeKey = drugName || "__default__";
+  const [messages, setMessages] = useState(() => _messageStore[storeKey] || []);
   const [inputText, setInputText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const drawerRef = useRef(null);
+
+  // Sync messages to persistent store on every change
+  useEffect(() => {
+    _messageStore[storeKey] = messages;
+  }, [messages, storeKey]);
 
   // Mobile detection
   useEffect(() => {
@@ -47,7 +57,7 @@ export default function DrugChatWidget({ drugName, isVisible, onClose }) {
     return () => window.removeEventListener("resize", check);
   }, []);
 
-  // Seed opening message
+  // Seed opening message (only if no stored messages)
   useEffect(() => {
     if (isVisible && messages.length === 0) {
       setMessages([{
@@ -68,6 +78,36 @@ export default function DrugChatWidget({ drugName, isVisible, onClose }) {
       setTimeout(() => inputRef.current?.focus(), 300);
     }
   }, [isVisible]);
+
+  // Click-outside detection
+  useEffect(() => {
+    if (!isVisible) return;
+
+    function handleClickOutside(e) {
+      const drawer = drawerRef.current;
+      if (!drawer) return;
+
+      // If click is inside the drawer, ignore
+      if (drawer.contains(e.target)) return;
+
+      // If click is on the pill wrapper, ignore (pill handles its own click)
+      const pillWrapper = document.getElementById("rx-pill-wrapper");
+      if (pillWrapper && pillWrapper.contains(e.target)) return;
+
+      // Click is outside — close
+      if (onClose) onClose();
+    }
+
+    // Small delay so the opening click doesn't immediately close
+    const timer = setTimeout(() => {
+      document.addEventListener("mousedown", handleClickOutside);
+    }, 100);
+
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isVisible, onClose]);
 
   const sendMessage = useCallback(async () => {
     const text = inputText.trim();
@@ -125,6 +165,8 @@ export default function DrugChatWidget({ drugName, isVisible, onClose }) {
 
   return (
     <motion.div
+      ref={drawerRef}
+      id={CHAT_DRAWER_ID}
       initial={{ opacity: 0, y: 30, scale: 0.95 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 20, scale: 0.98 }}
@@ -330,7 +372,6 @@ export default function DrugChatWidget({ drugName, isVisible, onClose }) {
             flexShrink: 0,
           }}
         >
-          {/* Arrow SVG */}
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <line x1="12" y1="19" x2="12" y2="5" />
             <polyline points="5 12 12 5 19 12" />

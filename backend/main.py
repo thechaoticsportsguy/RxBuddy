@@ -24,7 +24,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import json
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import Boolean, DateTime, Integer, MetaData, Table, Text, create_engine, select
+from sqlalchemy import Boolean, Column, DateTime, Integer, MetaData, String, Table, Text, create_engine, insert, select
 from sqlalchemy.dialects.postgresql import ARRAY, VARCHAR
 
 # ── Answer Engine v2 ──────────────────────────────────────────────────────────
@@ -1746,6 +1746,23 @@ def _check_parse_rate_limit(drug_name: str, max_per_hour: int = 2) -> None:
 # ---------- 2) Connect to PostgreSQL with SQLAlchemy ----------
 engine = create_engine(_database_url(), future=True, pool_pre_ping=True)
 metadata = MetaData()
+
+# ── Drug chat cache table (created on startup) ─────────────────────────────
+drug_chat_cache = Table(
+    "drug_chat_cache",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("drug_name", Text, nullable=False),
+    Column("question", Text, nullable=False),
+    Column("answer", Text, nullable=False),
+    Column("created_at", DateTime, server_default="now()"),
+)
+
+try:
+    drug_chat_cache.create(engine, checkfirst=True)
+    logger.info("[DB] drug_chat_cache table ready")
+except Exception as _cache_tbl_exc:
+    logger.warning("[DB] Could not create drug_chat_cache: %s", _cache_tbl_exc)
 
 # We define the tables in code so we can query/insert easily.
 # (The tables are created by `data/seed_db.py`.)
@@ -4544,6 +4561,17 @@ async def search_v2_stream(req: SearchRequest) -> StreamingResponse:
 # ── Chat widget endpoint ────────────────────────────────────────────────────
 
 
+import re as _re_chat
+
+
+def _normalize_chat_question(text: str) -> str:
+    """Lowercase, strip punctuation and extra spaces for cache matching."""
+    text = text.lower().strip()
+    text = _re_chat.sub(r"[^\w\s]", "", text)
+    text = _re_chat.sub(r"\s+", " ", text)
+    return text
+
+
 class ChatMessage(BaseModel):
     role: str
     content: str
@@ -4570,7 +4598,25 @@ async def chat_v2(req: ChatRequest):
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY is not configured.")
 
     drug = req.drug_name.strip() or "this medication"
+    normalized_q = _normalize_chat_question(req.message)
+    normalized_drug = drug.lower().strip()
 
+    # ── Cache check: exact (drug_name + normalized question) match ────
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(
+                select(drug_chat_cache.c.answer).where(
+                    drug_chat_cache.c.drug_name == normalized_drug,
+                    drug_chat_cache.c.question == normalized_q,
+                )
+            ).first()
+            if row:
+                logger.info("[Chat] Cache HIT for %s / %s", normalized_drug, normalized_q[:40])
+                return ChatResponse(reply=row[0])
+    except Exception as _cache_exc:
+        logger.warning("[Chat] Cache lookup failed: %s", _cache_exc)
+
+    # ── Cache miss — call Claude ─────────────────────────────────────
     system_prompt = (
         f"You are RxBuddy, a friendly medication assistant. The user is asking about {drug}.\n\n"
         f"Your job: Answer every question like the user is 15 years old.\n\n"
@@ -4616,5 +4662,20 @@ async def chat_v2(req: ChatRequest):
     except Exception as exc:
         logger.error("[Chat] Claude API error: %s", exc)
         reply_text = "I'm having trouble connecting right now. Please try again in a moment."
+        return ChatResponse(reply=reply_text)
+
+    # ── Store in cache ───────────────────────────────────────────────
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                insert(drug_chat_cache).values(
+                    drug_name=normalized_drug,
+                    question=normalized_q,
+                    answer=reply_text,
+                )
+            )
+        logger.info("[Chat] Cached response for %s / %s", normalized_drug, normalized_q[:40])
+    except Exception as _cache_store_exc:
+        logger.warning("[Chat] Cache store failed: %s", _cache_store_exc)
 
     return ChatResponse(reply=reply_text)
