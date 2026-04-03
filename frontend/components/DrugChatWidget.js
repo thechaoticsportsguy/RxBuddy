@@ -301,7 +301,7 @@ export default function DrugChatWidget({ drugName, isVisible, onClose }) {
           </motion.div>
         ))}
 
-        {/* Typing indicator */}
+        {/* Typing indicator — sequential bouncing dots */}
         {isLoading && (
           <div style={{ alignSelf: "flex-start", maxWidth: "85%" }}>
             <div style={{
@@ -311,11 +311,12 @@ export default function DrugChatWidget({ drugName, isVisible, onClose }) {
               border: `1px solid ${BORDER}`,
               display: "flex",
               gap: 5,
-              alignItems: "center",
+              alignItems: "flex-end",
+              height: 32,
             }}>
-              <span className="rxchat-dot" style={{ animationDelay: "0s" }} />
-              <span className="rxchat-dot" style={{ animationDelay: "0.15s" }} />
-              <span className="rxchat-dot" style={{ animationDelay: "0.3s" }} />
+              <span className="rxchat-bounce-dot" style={{ animationDelay: "0s" }} />
+              <span className="rxchat-bounce-dot" style={{ animationDelay: "0.15s" }} />
+              <span className="rxchat-bounce-dot" style={{ animationDelay: "0.3s" }} />
             </div>
           </div>
         )}
@@ -387,16 +388,16 @@ export default function DrugChatWidget({ drugName, isVisible, onClose }) {
           background: rgba(74,158,255,0.25);
           border-radius: 3px;
         }
-        .rxchat-dot {
-          width: 6px;
-          height: 6px;
+        .rxchat-bounce-dot {
+          width: 7px;
+          height: 7px;
           border-radius: 50%;
           background: ${ACCENT};
-          animation: rxDotPulse 1.2s infinite;
+          animation: rxDotBounce 1.2s ease-in-out infinite;
         }
-        @keyframes rxDotPulse {
-          0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); }
-          40% { opacity: 1; transform: scale(1); }
+        @keyframes rxDotBounce {
+          0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+          30% { transform: translateY(-8px); opacity: 1; }
         }
         @keyframes statusPulse {
           0%, 100% { opacity: 1; }
