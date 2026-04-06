@@ -13,7 +13,6 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
-import RxBuddyRobot from "./ui/RxBuddyRobot";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
@@ -198,7 +197,13 @@ export default function DrugChatWidget({ drugName, isVisible, onClose }) {
           zIndex: 1,
           pointerEvents: "none",
         }}>
-          <RxBuddyRobot size={70} glowColor={ACCENT} />
+          <img
+            src="/rxbuddy-robot.png"
+            alt="RxBuddy"
+            width="70"
+            height="70"
+            style={{ objectFit: "contain", mixBlendMode: "multiply" }}
+          />
         </div>
       )}
 
