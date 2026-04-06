@@ -187,8 +187,9 @@ export default function DrugChatWidget({ drugName, isVisible, onClose }) {
         overflow: "visible",
       }}
     >
-      {/* ── Robot mascot (above drawer) ───────────────────────── */}
+      {/* ── Robot mascot (peeking over top edge) ────────────────── */}
       {!isMobile && (
+<<<<<<< HEAD
         <div style={{
           position: "absolute",
           top: -45,
@@ -203,13 +204,35 @@ export default function DrugChatWidget({ drugName, isVisible, onClose }) {
             width="70"
             height="70"
             style={{ objectFit: "contain", mixBlendMode: "multiply" }}
+=======
+        <div
+          className="rxchat-robot-peek"
+          style={{
+            position: "absolute",
+            top: -38,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 10,
+            pointerEvents: "none",
+          }}
+        >
+          <img
+            src="/rxbuddy-robot.png"
+            alt="RxBuddy"
+            width="80"
+            height="80"
+            style={{
+              objectFit: "contain",
+              filter: "drop-shadow(0 4px 8px rgba(0,0,0,0.35))",
+            }}
+>>>>>>> claude/condescending-engelbart
           />
         </div>
       )}
 
       {/* ── Header ────────────────────────────────────────────── */}
       <div style={{
-        padding: "22px 20px 14px",
+        padding: isMobile ? "22px 20px 14px" : "34px 20px 14px",
         borderBottom: `1px solid ${BORDER}`,
         flexShrink: 0,
         display: "flex",
@@ -407,6 +430,14 @@ export default function DrugChatWidget({ drugName, isVisible, onClose }) {
         @keyframes statusPulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.5; }
+        }
+        .rxchat-robot-peek {
+          animation: rxRobotFloat 3s ease-in-out infinite;
+        }
+        @keyframes rxRobotFloat {
+          0%   { transform: translate(-50%, 0px); }
+          50%  { transform: translate(-50%, -6px); }
+          100% { transform: translate(-50%, 0px); }
         }
       `}</style>
     </motion.div>
