@@ -189,22 +189,6 @@ export default function DrugChatWidget({ drugName, isVisible, onClose }) {
     >
       {/* ── Robot mascot (peeking over top edge) ────────────────── */}
       {!isMobile && (
-<<<<<<< HEAD
-        <div style={{
-          position: "absolute",
-          top: -45,
-          left: "50%",
-          transform: "translateX(-50%)",
-          zIndex: 1,
-          pointerEvents: "none",
-        }}>
-          <img
-            src="/rxbuddy-robot.png"
-            alt="RxBuddy"
-            width="70"
-            height="70"
-            style={{ objectFit: "contain", mixBlendMode: "multiply" }}
-=======
         <div
           className="rxchat-robot-peek"
           style={{
@@ -225,7 +209,6 @@ export default function DrugChatWidget({ drugName, isVisible, onClose }) {
               objectFit: "contain",
               filter: "drop-shadow(0 4px 8px rgba(0,0,0,0.35))",
             }}
->>>>>>> claude/condescending-engelbart
           />
         </div>
       )}
