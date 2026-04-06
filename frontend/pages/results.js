@@ -15,7 +15,7 @@ const NonDrugQuery = dynamic(() => import("../components/NonDrugQuery"), {
   ),
 });
 
-const RxPillButton = dynamic(() => import("../components/RxPillButton"), {
+const RxBuddyRobot = dynamic(() => import("../components/RxBuddyRobot"), {
   ssr: false,
 });
 
@@ -1020,7 +1020,7 @@ export default function ResultsPage() {
         const isNonDrug = s.intent === "non_drug_query" || s.verdict === "NON_DRUG";
         const drugName = s.drug || s.drugs?.[0] || s.generic_name || "";
         if (drugName && !isNonDrug) {
-          return <RxPillButton drugName={drugName} />;
+          return <RxBuddyRobot drugName={drugName} />;
         }
         return null;
       })()}
