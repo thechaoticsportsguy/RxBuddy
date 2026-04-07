@@ -1,9 +1,8 @@
 /**
- * RxBuddyRobot — Floating pill badge button that opens DrugChatWidget.
+ * RxBuddyRobot — Chat CTA card button (bottom-right, fixed).
  *
- * Shows a custom pill icon badge with a gentle floating animation.
- * On click, opens the chat drawer. When chat is open the badge hides;
- * when chat closes it reappears.
+ * Renders as a rounded dark-gradient card with the robot image on the
+ * left and two-line text on the right. Hides when chat is open.
  *
  * Props:
  *   drugName — passed through to DrugChatWidget
@@ -19,138 +18,111 @@ const FONT = "'Inter', system-ui, sans-serif";
 
 export default function RxBuddyRobot({ drugName }) {
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
 
   return (
     <>
-      {/* ── Robot button (hidden when chat is open) ───────────── */}
+      {/* ── Chat CTA card (hidden when chat is open) ───────────── */}
       <AnimatePresence>
         {!isChatOpen && (
           <motion.div
-            key="robot"
+            key="cta-card"
             id="rx-pill-wrapper"
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.8 }}
-            transition={{ duration: 0.25, ease: "easeOut" }}
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 20, opacity: 0 }}
+            transition={{ duration: 0.3, ease: "easeOut" }}
             onClick={() => setIsChatOpen(true)}
+            onMouseEnter={() => setIsHovered(true)}
+            onMouseLeave={() => setIsHovered(false)}
             style={{
               position: "fixed",
               bottom: 24,
               right: 24,
               zIndex: 999,
               cursor: "pointer",
+              width: 240,
+              height: 72,
+              borderRadius: 16,
+              background: "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)",
+              border: "1px solid rgba(74,158,255,0.25)",
+              boxShadow: isHovered
+                ? "0 12px 36px rgba(0,0,0,0.55), 0 0 0 1px rgba(74,158,255,0.4)"
+                : "0 8px 24px rgba(0,0,0,0.4)",
               display: "flex",
-              flexDirection: "column",
               alignItems: "center",
+              gap: 12,
+              padding: "0 16px",
+              userSelect: "none",
+              transform: isHovered ? "scale(1.03)" : "scale(1)",
+              transition: "transform 0.15s ease, box-shadow 0.15s ease",
             }}
           >
-            {/* Speech bubble — always visible */}
-            <motion.div
-              animate={{ scale: [1, 1.03, 1] }}
-              transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+            {/* Robot image */}
+            <div
               style={{
-                position: "absolute",
-                bottom: "100%",
-                marginBottom: 12,
-                background: "#fff",
-                border: "2px solid #222",
-                borderRadius: 12,
-                padding: "8px 14px",
-                whiteSpace: "nowrap",
-                pointerEvents: "none",
-              }}
-            >
-              <span style={{
-                fontFamily: FONT,
-                fontSize: 13,
-                color: "#222",
-                fontWeight: 500,
-              }}>
-                {"Ask me more about \u201C" + (drugName || "your medication") + "\u201D"}
-              </span>
-              {/* Triangle pointer */}
-              <div style={{
-                position: "absolute",
-                bottom: -8,
-                left: "50%",
-                transform: "translateX(-50%)",
-                width: 0,
-                height: 0,
-                borderLeft: "8px solid transparent",
-                borderRight: "8px solid transparent",
-                borderTop: "8px solid #222",
-              }} />
-              <div style={{
-                position: "absolute",
-                bottom: -6,
-                left: "50%",
-                transform: "translateX(-50%)",
-                width: 0,
-                height: 0,
-                borderLeft: "7px solid transparent",
-                borderRight: "7px solid transparent",
-                borderTop: "7px solid #fff",
-              }} />
-            </motion.div>
-
-            {/* Pill badge icon */}
-            <motion.div
-              animate={{
-                y: [0, -6, 0],
-              }}
-              transition={{
-                y: { duration: 2, repeat: Infinity, ease: "easeInOut" },
-              }}
-              style={{
-                width: 88,
-                height: 88,
-                borderRadius: "50%",
-                background: "#0a0f1e",
-                border: "2px solid rgba(255,255,255,0.15)",
-                boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
+                width: 44,
+                height: 44,
+                flexShrink: 0,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                userSelect: "none",
               }}
             >
-              <div
+              <img
+                src="/rxbuddy-robot.png"
+                alt="RxBuddy"
+                draggable={false}
                 style={{
-                  width: 56,
-                  height: 22,
-                  borderRadius: 11,
-                  overflow: "hidden",
-                  display: "flex",
-                  boxShadow: "0 2px 8px rgba(0,0,0,0.5)",
-                  border: "1px solid rgba(255,255,255,0.2)",
+                  width: 44,
+                  height: 44,
+                  objectFit: "contain",
+                  display: "block",
+                }}
+              />
+            </div>
+
+            {/* Text */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span
+                style={{
+                  fontFamily: FONT,
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: "white",
+                  lineHeight: 1.2,
                 }}
               >
-                <div style={{ width: "50%", height: "100%", background: "#111111" }} />
-                <div
-                  style={{
-                    width: "50%",
-                    height: "100%",
-                    background: "#ffffff",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: 7,
-                      fontWeight: 800,
-                      color: "#000",
-                      fontFamily: "Inter, system-ui, sans-serif",
-                      letterSpacing: "-0.3px",
-                      lineHeight: 1,
-                    }}
-                  >
-                    Rx
-                  </span>
-                </div>
-              </div>
-            </motion.div>
+                Ask me any questions
+              </span>
+              <span
+                style={{
+                  fontFamily: FONT,
+                  fontSize: 13,
+                  fontWeight: 400,
+                  color: "rgba(255,255,255,0.65)",
+                  lineHeight: 1.2,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  maxWidth: 140,
+                }}
+              >
+                about {drugName || "your medication"}
+              </span>
+            </div>
+
+            {/* Arrow indicator */}
+            <div
+              style={{
+                marginLeft: "auto",
+                color: "rgba(74,158,255,0.8)",
+                fontSize: 18,
+                flexShrink: 0,
+              }}
+            >
+              &#x2192;
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

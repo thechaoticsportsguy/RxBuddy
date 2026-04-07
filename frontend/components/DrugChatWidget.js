@@ -147,73 +147,7 @@ export default function DrugChatWidget({ drugName, isVisible, onClose }) {
         pointerEvents: "auto",
       }}
     >
-      {/* ── CHILD 1: Pill badge anchor (desktop only) ────────────── */}
-      <div
-        style={{
-          position: "absolute",
-          top: -50,
-          left: "50%",
-          transform: "translateX(-50%)",
-          zIndex: 1001,
-          pointerEvents: "none",
-          display: isMobile ? "none" : "block",
-        }}
-      >
-        <div style={{ animation: "robotFloat 3s ease-in-out infinite" }}>
-          <div
-            style={{
-              width: 88,
-              height: 88,
-              borderRadius: "50%",
-              background: "#0a0f1e",
-              border: "2px solid rgba(255,255,255,0.15)",
-              boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <div
-              style={{
-                width: 56,
-                height: 22,
-                borderRadius: 11,
-                overflow: "hidden",
-                display: "flex",
-                boxShadow: "0 2px 8px rgba(0,0,0,0.5)",
-                border: "1px solid rgba(255,255,255,0.2)",
-              }}
-            >
-              <div style={{ width: "50%", height: "100%", background: "#111111" }} />
-              <div
-                style={{
-                  width: "50%",
-                  height: "100%",
-                  background: "#ffffff",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 7,
-                    fontWeight: 800,
-                    color: "#000",
-                    fontFamily: "Inter, system-ui, sans-serif",
-                    letterSpacing: "-0.3px",
-                    lineHeight: 1,
-                  }}
-                >
-                  Rx
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── CHILD 2: Chat shell ──────────────────────────────────── */}
+      {/* ── Chat shell ──────────────────────────────────────────── */}
       <div
         style={{
           background: "#0a0f1e",
@@ -224,7 +158,6 @@ export default function DrugChatWidget({ drugName, isVisible, onClose }) {
           display: "flex",
           flexDirection: "column",
           height: isMobile ? "100vh" : 520,
-          paddingTop: isMobile ? 0 : 44,
         }}
       >
         {/* ── Header ──────────────────────────────────────────────── */}
@@ -243,57 +176,6 @@ export default function DrugChatWidget({ drugName, isVisible, onClose }) {
             <div
               style={{ display: "flex", alignItems: "center", gap: 8 }}
             >
-              {/* Tiny pill badge */}
-              <div
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: "50%",
-                  background: "#0a0f1e",
-                  border: "1.5px solid rgba(255,255,255,0.15)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                }}
-              >
-                <div
-                  style={{
-                    width: 20,
-                    height: 9,
-                    borderRadius: 5,
-                    overflow: "hidden",
-                    display: "flex",
-                    boxShadow: "0 1px 4px rgba(0,0,0,0.4)",
-                    border: "0.5px solid rgba(255,255,255,0.2)",
-                  }}
-                >
-                  <div style={{ width: "50%", height: "100%", background: "#111111" }} />
-                  <div
-                    style={{
-                      width: "50%",
-                      height: "100%",
-                      background: "#ffffff",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: 3.5,
-                        fontWeight: 800,
-                        color: "#000",
-                        fontFamily: "Inter, system-ui, sans-serif",
-                        letterSpacing: "-0.2px",
-                        lineHeight: 1,
-                      }}
-                    >
-                      Rx
-                    </span>
-                  </div>
-                </div>
-              </div>
               <div
                 style={{
                   width: 8,
@@ -500,10 +382,6 @@ export default function DrugChatWidget({ drugName, isVisible, onClose }) {
 
       {/* ── CSS keyframes ─────────────────────────────────────────── */}
       <style>{`
-        @keyframes robotFloat {
-          0%, 100% { transform: translateY(0px); }
-          50%      { transform: translateY(-8px); }
-        }
         @keyframes dotPulse {
           0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
           40%           { transform: scale(1);   opacity: 1;   }
