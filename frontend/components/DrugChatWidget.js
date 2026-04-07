@@ -147,7 +147,7 @@ export default function DrugChatWidget({ drugName, isVisible, onClose }) {
         pointerEvents: "auto",
       }}
     >
-      {/* ── CHILD 1: Robot anchor (desktop only) ─────────────────── */}
+      {/* ── CHILD 1: Pill badge anchor (desktop only) ────────────── */}
       <div
         style={{
           position: "absolute",
@@ -162,26 +162,53 @@ export default function DrugChatWidget({ drugName, isVisible, onClose }) {
         <div style={{ animation: "robotFloat 3s ease-in-out infinite" }}>
           <div
             style={{
-              background: "white",
-              borderRadius: "9999px",
-              padding: 4,
-              border: "2px solid rgba(100,150,255,0.25)",
-              boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
               width: 88,
               height: 88,
+              borderRadius: "50%",
+              background: "#0a0f1e",
+              border: "2px solid rgba(255,255,255,0.15)",
+              boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              overflow: "hidden",
             }}
           >
-            <img
-              src="/rxbuddy-robot.png"
-              alt="RxBuddy"
-              width={80}
-              height={80}
-              style={{ objectFit: "contain", display: "block" }}
-            />
+            <div
+              style={{
+                width: 56,
+                height: 22,
+                borderRadius: 11,
+                overflow: "hidden",
+                display: "flex",
+                boxShadow: "0 2px 8px rgba(0,0,0,0.5)",
+                border: "1px solid rgba(255,255,255,0.2)",
+              }}
+            >
+              <div style={{ width: "50%", height: "100%", background: "#111111" }} />
+              <div
+                style={{
+                  width: "50%",
+                  height: "100%",
+                  background: "#ffffff",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 7,
+                    fontWeight: 800,
+                    color: "#000",
+                    fontFamily: "Inter, system-ui, sans-serif",
+                    letterSpacing: "-0.3px",
+                    lineHeight: 1,
+                  }}
+                >
+                  Rx
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -216,6 +243,57 @@ export default function DrugChatWidget({ drugName, isVisible, onClose }) {
             <div
               style={{ display: "flex", alignItems: "center", gap: 8 }}
             >
+              {/* Tiny pill badge */}
+              <div
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: "50%",
+                  background: "#0a0f1e",
+                  border: "1.5px solid rgba(255,255,255,0.15)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <div
+                  style={{
+                    width: 20,
+                    height: 9,
+                    borderRadius: 5,
+                    overflow: "hidden",
+                    display: "flex",
+                    boxShadow: "0 1px 4px rgba(0,0,0,0.4)",
+                    border: "0.5px solid rgba(255,255,255,0.2)",
+                  }}
+                >
+                  <div style={{ width: "50%", height: "100%", background: "#111111" }} />
+                  <div
+                    style={{
+                      width: "50%",
+                      height: "100%",
+                      background: "#ffffff",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 3.5,
+                        fontWeight: 800,
+                        color: "#000",
+                        fontFamily: "Inter, system-ui, sans-serif",
+                        letterSpacing: "-0.2px",
+                        lineHeight: 1,
+                      }}
+                    >
+                      Rx
+                    </span>
+                  </div>
+                </div>
+              </div>
               <div
                 style={{
                   width: 8,
