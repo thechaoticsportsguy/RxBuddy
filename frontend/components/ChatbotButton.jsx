@@ -23,13 +23,7 @@ function RobotIcon() {
       src="/rxbuddy-robot1.png"
       alt=""
       aria-hidden="true"
-      style={{
-        width: "100%",
-        height: "100%",
-        borderRadius: "50%",
-        objectFit: "cover",
-        display: "block",
-      }}
+      style={{ width: "90px", height: "90px", display: "block" }}
     />
   );
 }
@@ -130,10 +124,7 @@ export default function ChatbotButton({ drugName }) {
   return (
     <div className={styles.container}>
 
-      {/* Pulse ring — only visible when modal is closed */}
-      {!isOpen && <div className={styles.pulseRing} aria-hidden="true" />}
-
-      {/* ── Circular trigger button ──────────────────────── */}
+      {/* ── Trigger button ───────────────────────────────── */}
       <button
         className={styles.button}
         onClick={() => setIsOpen((o) => !o)}
