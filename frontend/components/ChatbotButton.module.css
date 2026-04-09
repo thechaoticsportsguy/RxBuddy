@@ -10,7 +10,7 @@
   --cb-teal:        #1dd1a1;
   --cb-teal-dark:   #00b894;
   --cb-dark-bg:     #0a0f1e;
-  --cb-btn-size:    70px;
+  --cb-btn-size:    82px;
   --cb-modal-w:     380px;
   --cb-modal-h:     520px;
 
@@ -42,12 +42,6 @@
 @keyframes cb-slideUp {
   0%   { opacity: 0; transform: translateY(16px) scale(0.96); }
   100% { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-/* ── Keyframe: eyeBlink ────────────────────────────────────── */
-@keyframes cb-eyeBlink {
-  0%, 88%, 100% { transform: scaleY(1); }
-  93%            { transform: scaleY(0.08); }
 }
 
 /* ── Keyframe: badgePulse ──────────────────────────────────── */
@@ -104,13 +98,6 @@
 .button:focus-visible {
   outline: 3px solid rgba(29, 209, 161, 0.6);
   outline-offset: 4px;
-}
-
-/* Eye blink on hover — targets the .robotEye elements inside SVG */
-.button:hover .robotEye {
-  animation: cb-eyeBlink 2.2s ease-in-out infinite;
-  transform-box: fill-box;
-  transform-origin: center;
 }
 
 /* ── Notification badge ────────────────────────────────────── */
@@ -347,7 +334,7 @@
 /* ── Responsive: mobile ────────────────────────────────────── */
 @media (max-width: 480px) {
   .container {
-    --cb-btn-size: 60px;
+    --cb-btn-size: 68px;
     bottom: 20px;
     right: 20px;
   }
@@ -372,10 +359,6 @@
   .pulseRing,
   .badge,
   .modal {
-    animation: none;
-  }
-
-  .button:hover .robotEye {
     animation: none;
   }
 

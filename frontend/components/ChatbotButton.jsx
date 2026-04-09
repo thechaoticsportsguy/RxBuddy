@@ -16,92 +16,71 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 // Persistent conversation store — survives open/close cycles within the page
 const _msgStore = {};
 
-/* ── Inline SVG robot pharmacist icon ─────────────────────── */
-function RobotIcon({ hovered }) {
+/* ── Inline SVG robot pharmacist icon (matches reference design) ─ */
+function RobotIcon() {
   return (
     <svg
-      width="42"
-      height="44"
-      viewBox="0 0 44 46"
+      width="48"
+      height="52"
+      viewBox="0 0 48 54"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden="true"
     >
       {/* ── Antenna ── */}
-      <circle cx="22" cy="2.5" r="2.2" fill="white" />
-      <line
-        x1="22" y1="4.6"
-        x2="22" y2="9"
-        stroke="white" strokeWidth="1.8" strokeLinecap="round"
-      />
+      <circle cx="24" cy="2.5" r="2.8" fill="white" />
+      <line x1="24" y1="5.2" x2="24" y2="10" stroke="white" strokeWidth="2.2" strokeLinecap="round" />
 
-      {/* ── Head ── */}
-      <rect
-        x="8" y="9" width="28" height="16" rx="7"
-        fill="white" fillOpacity="0.95"
-      />
+      {/* ── Head (large rounded rect) ── */}
+      <rect x="8" y="10" width="32" height="21" rx="9" fill="white" fillOpacity="0.96" />
 
-      {/* ── Earpieces / headset ── */}
-      <rect x="4"  y="12" width="5" height="8" rx="2.5" fill="white" fillOpacity="0.8" />
-      <rect x="35" y="12" width="5" height="8" rx="2.5" fill="white" fillOpacity="0.8" />
+      {/* ── Left earpiece ── */}
+      <circle cx="6"  cy="20.5" r="4.2" fill="white" fillOpacity="0.85" />
+      {/* ── Right earpiece ── */}
+      <circle cx="42" cy="20.5" r="4.2" fill="white" fillOpacity="0.85" />
 
-      {/* ── Left eye ── */}
-      <circle
-        className={styles.robotEye}
-        cx="16" cy="16" r="3.2"
-        fill="#1dd1a1"
-      />
-      {/* left eye shine */}
-      <circle cx="17.1" cy="14.7" r="1.1" fill="white" fillOpacity="0.75" />
+      {/* ── Headset mic arm (right side) ── */}
+      <path d="M44.5 23 Q47.5 27.5 44 30" stroke="white" strokeWidth="1.8" fill="none" strokeLinecap="round" />
+      <circle cx="43.8" cy="30.5" r="2.2" fill="white" />
 
-      {/* ── Right eye ── */}
-      <circle
-        className={styles.robotEye}
-        cx="28" cy="16" r="3.2"
-        fill="#1dd1a1"
-      />
-      {/* right eye shine */}
-      <circle cx="29.1" cy="14.7" r="1.1" fill="white" fillOpacity="0.75" />
+      {/* ── Visor eyes — wide dark bar with horizontal slats ── */}
+      <rect x="12" y="14" width="24" height="9.5" rx="4" fill="rgba(5,18,12,0.92)" />
+      {/* slat lines give the venetian-blind effect */}
+      <line x1="13.2" y1="16.5" x2="34.8" y2="16.5" stroke="white" strokeOpacity="0.38" strokeWidth="1" />
+      <line x1="13.2" y1="19"   x2="34.8" y2="19"   stroke="white" strokeOpacity="0.38" strokeWidth="1" />
+      <line x1="13.2" y1="21.5" x2="34.8" y2="21.5" stroke="white" strokeOpacity="0.38" strokeWidth="1" />
 
       {/* ── Smile ── */}
-      <path
-        d="M14 21 Q22 25.5 30 21"
-        stroke="#1dd1a1" strokeWidth="1.6" strokeLinecap="round" fill="none"
-      />
+      <path d="M17 27.5 Q24 32 31 27.5" stroke="white" strokeWidth="1.8" strokeLinecap="round" fill="none" />
 
       {/* ── Body / lab coat ── */}
-      <rect
-        x="11" y="26" width="22" height="14" rx="3.5"
-        fill="white" fillOpacity="0.9"
-      />
+      <rect x="12" y="32" width="24" height="22" rx="4.5" fill="white" fillOpacity="0.92" />
 
-      {/* Collar V-lines */}
-      <path d="M22 26 L19 29 L22 28 L25 29 Z" fill="#d0d0d0" />
+      {/* ── Collar V-lapels ── */}
+      <path d="M24 32 L19.5 37 L24 35.5 L28.5 37 Z" fill="#d4d4d4" />
+
+      {/* ── Coat button ── */}
+      <circle cx="23.5" cy="41" r="1.5" fill="#c0c0c0" />
 
       {/* ── Medical cross badge (right breast) ── */}
-      <rect x="26" y="28" width="5.5" height="5.5" rx="1.2" fill="#ff6b6b" />
-      {/* horizontal bar */}
-      <rect x="27.1" y="30" width="3.3" height="1.5" rx="0.4" fill="white" />
-      {/* vertical bar */}
-      <rect x="28.5" y="28.7" width="1.5" height="4.1" rx="0.4" fill="white" />
+      <rect x="27.5" y="34" width="7" height="7" rx="1.4" fill="#ff6b6b" />
+      {/* horizontal */}
+      <rect x="28.8" y="36.3" width="4.4" height="2.4" rx="0.5" fill="white" />
+      {/* vertical */}
+      <rect x="30.3" y="34.8" width="1.9" height="5.5" rx="0.5" fill="white" />
 
-      {/* ── Left arm ── */}
-      <rect x="6" y="26" width="6" height="11" rx="3" fill="white" fillOpacity="0.85" />
+      {/* ── Left arm raised toward upper-left ── */}
+      {/* thick rounded stroke = sleeve */}
+      <line x1="13" y1="34" x2="4.5" y2="18" stroke="white" strokeWidth="8" strokeLinecap="round" strokeOpacity="0.9" />
 
-      {/* ── Right arm ── */}
-      <rect x="32" y="26" width="6" height="11" rx="3" fill="white" fillOpacity="0.85" />
+      {/* ── Capsule / pill held in raised hand ── */}
+      {/* body */}
+      <rect x="1" y="7" width="7" height="14" rx="3.5" fill="white" fillOpacity="0.96" />
+      {/* capsule mid-line (two-tone pharmaceutical look) */}
+      <line x1="1" y1="14" x2="8" y2="14" stroke="#00b894" strokeWidth="1.4" strokeOpacity="0.75" />
 
-      {/* ── Pill bottle in right hand ── */}
-      {/* cap */}
-      <rect x="33.5" y="34" width="4.5" height="2.5" rx="0.8" fill="#00b894" />
-      {/* bottle body */}
-      <rect x="33" y="36" width="5.5" height="6" rx="1.5" fill="#1dd1a1" />
-      {/* label stripe */}
-      <rect x="33" y="38" width="5.5" height="1.5" rx="0.5" fill="white" fillOpacity="0.5" />
-
-      {/* ── Feet ── */}
-      <rect x="13" y="39" width="7" height="4" rx="2" fill="white" fillOpacity="0.8" />
-      <rect x="24" y="39" width="7" height="4" rx="2" fill="white" fillOpacity="0.8" />
+      {/* ── Right arm (resting at side) ── */}
+      <rect x="35" y="33" width="7.5" height="14" rx="3.8" fill="white" fillOpacity="0.88" />
     </svg>
   );
 }
@@ -215,7 +194,7 @@ export default function ChatbotButton({ drugName }) {
         aria-expanded={isOpen}
         aria-haspopup="dialog"
       >
-        <RobotIcon hovered={isHovered} />
+        <RobotIcon />
 
         {/* Notification badge */}
         {!isOpen && (
