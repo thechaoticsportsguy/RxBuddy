@@ -13,3 +13,10 @@ plotly
 anthropic
 google-genai
 pyspellchecker
+sentence-transformers
+aiohttp
+slowapi
+httpx
+redis
+pydantic-settings
+asyncpg
