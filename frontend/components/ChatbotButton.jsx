@@ -23,7 +23,7 @@ function RobotIcon() {
       src="/rxbuddy-robot1.png"
       alt=""
       aria-hidden="true"
-      style={{ width: "200px", height: "200px", display: "block" }}
+      style={{ width: "200px", height: "200px", display: "block", borderRadius: "50%", objectFit: "cover" }}
     />
   );
 }
