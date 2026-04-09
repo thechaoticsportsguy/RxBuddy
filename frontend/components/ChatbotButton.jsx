@@ -205,6 +205,7 @@ export default function ChatbotButton({ drugName = "your medication" }) {
           height: 120px;
           object-fit: cover;
           display: block;
+          transform: scale(1.15);
           transition: transform 180ms ease;
           pointer-events: none;
           user-select: none;
@@ -213,7 +214,7 @@ export default function ChatbotButton({ drugName = "your medication" }) {
 
         /* Subtle scale on hover when closed */
         .rxb-shell:not(.open):hover .rxb-btn img {
-          transform: scale(1.08);
+          transform: scale(1.22);
         }
 
         /* ── Chat panel ──────────────────────────────────── */
