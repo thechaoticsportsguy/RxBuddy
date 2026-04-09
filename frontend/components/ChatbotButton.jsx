@@ -143,9 +143,7 @@ export default function ChatbotButton({ drugName = "your medication" }) {
           height: 120px;
           border-radius: 50%;
           background: transparent;
-          box-shadow:
-            0 4px 24px rgba(0,0,0,0.14),
-            0 1px 6px  rgba(0,0,0,0.10);
+          box-shadow: none;
           cursor: pointer;
           overflow: hidden;
           transform-origin: bottom right;
@@ -201,20 +199,23 @@ export default function ChatbotButton({ drugName = "your medication" }) {
         }
 
         .rxb-btn img {
-          width: 120px;
-          height: 120px;
+          /* Fill the shell 100%, then zoom past the white padding ring
+             so the robot's own black border aligns with the button edge.
+             overflow:hidden on .rxb-shell clips the excess. */
+          width: 100%;
+          height: 100%;
           object-fit: cover;
           display: block;
-          transform: scale(1.15);
+          transform: scale(1.68);
           transition: transform 180ms ease;
           pointer-events: none;
           user-select: none;
           -webkit-user-drag: none;
         }
 
-        /* Subtle scale on hover when closed */
+        /* Hover: nudge scale up from the new baseline */
         .rxb-shell:not(.open):hover .rxb-btn img {
-          transform: scale(1.22);
+          transform: scale(1.76);
         }
 
         /* ── Chat panel ──────────────────────────────────── */
