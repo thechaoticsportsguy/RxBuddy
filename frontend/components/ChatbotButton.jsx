@@ -139,10 +139,10 @@ export default function ChatbotButton({ drugName = "your medication" }) {
         */
         .rxb-shell {
           position: relative;
-          width: 82px;
-          height: 82px;
+          width: 120px;
+          height: 120px;
           border-radius: 50%;
-          background: #fff;
+          background: transparent;
           box-shadow:
             0 4px 24px rgba(0,0,0,0.14),
             0 1px 6px  rgba(0,0,0,0.10);
@@ -201,10 +201,9 @@ export default function ChatbotButton({ drugName = "your medication" }) {
         }
 
         .rxb-btn img {
-          width: 82px;
-          height: 82px;
+          width: 120px;
+          height: 120px;
           object-fit: cover;
-          border-radius: 50%;
           display: block;
           transition: transform 180ms ease;
           pointer-events: none;
