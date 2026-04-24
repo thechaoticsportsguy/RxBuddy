@@ -1,3 +1,0 @@
-[phases.install]
-cmds = ["python -m pip install -r requirements-railway.txt"]
-

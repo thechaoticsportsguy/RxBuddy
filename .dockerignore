@@ -23,9 +23,10 @@ frontend/.next/
 *.swp
 *.swo
 
-# Environment files (Railway uses its own env vars)
+# Environment files
 .env
 .env.local
+file.env
 
 # Documentation
 *.md
@@ -34,7 +35,7 @@ frontend/.next/
 .pytest_cache
 tests/
 
-# Build configs (using Dockerfile instead)
+# Build configs not used by Fly Dockerfile
 railpack.json
 nixpacks.toml
 
@@ -45,3 +46,4 @@ data/questions.csv
 *.log
 .DS_Store
 Thumbs.db
+.~lock.*#
