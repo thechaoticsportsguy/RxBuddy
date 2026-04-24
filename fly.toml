@@ -1,10 +1,10 @@
-# fly.toml app configuration file generated for rxbuddy-socqha on 2026-04-10T20:46:15Z
+# fly.toml app configuration file generated for rxbuddy-xu1foq on 2026-04-24T20:51:38Z
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'rxbuddy-socqha'
-primary_region = 'ams'
+app = 'rxbuddy-xu1foq'
+primary_region = 'ewr'
 
 [build]
 
