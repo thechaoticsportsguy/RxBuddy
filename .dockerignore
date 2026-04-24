@@ -16,6 +16,7 @@ env
 frontend/
 frontend/node_modules/
 frontend/.next/
+dashboard/
 
 # IDE
 .cursor
@@ -34,6 +35,7 @@ file.env
 # Testing
 .pytest_cache
 tests/
+backend/tests/
 
 # Build configs not used by Fly Dockerfile
 railpack.json
@@ -44,6 +46,7 @@ data/questions.csv
 
 # Misc
 *.log
+*.xlsx
 .DS_Store
 Thumbs.db
 .~lock.*#

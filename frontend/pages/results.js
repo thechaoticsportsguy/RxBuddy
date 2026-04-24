@@ -19,7 +19,10 @@ const ChatbotButton = dynamic(() => import("../components/ChatbotButton"), {
   ssr: false,
 });
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  "http://127.0.0.1:8000";
 
 // BUG 3 FIX: DrugImage component with category-based SVG pills
 function DrugImage({ drugName, className = "" }) {
@@ -1027,4 +1030,3 @@ export default function ResultsPage() {
     </>
   );
 }
-              

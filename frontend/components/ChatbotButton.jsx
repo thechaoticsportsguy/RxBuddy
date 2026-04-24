@@ -16,7 +16,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
 const ROBOT_IMAGE = "/rxbuddy-robot1.png";
-const API_BASE    = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+const API_BASE    =
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  "http://127.0.0.1:8000";
 const _msgStore   = {};
 
 /** Pull the most likely drug name out of a free-text search query. */
