@@ -1,0 +1,51 @@
+id,drug,question,expected_answer_keywords,expected_citation_source,category
+met-001,metformin,What is the typical starting dose of metformin for type 2 diabetes?,500 mg|twice daily|with meals|titrate|maximum 2550 mg,DailyMed,dose
+met-002,metformin,what are the most common side effects of metformin,diarrhea|nausea|abdominal pain|flatulence|gi,DailyMed,side_effect
+met-003,metformin,Should metformin be held before iodinated contrast imaging?,iodinated contrast|hold|lactic acidosis|temporarily discontinue|renal,DailyMed,interaction
+met-004,metformin,is metformin safe if my kidneys are not great,egfr|30|contraindicated|severe renal impairment|lactic acidosis,DailyMed,contraindication
+met-005,metformin,How does metformin lower blood sugar?,hepatic glucose|gluconeogenesis|insulin sensitivity|biguanide|peripheral,DailyMed,mechanism
+lis-001,lisinopril,What is the typical starting dose of lisinopril for hypertension in adults?,10 mg|once daily|titrate|maximum 80 mg|hypertension,DailyMed,dose
+lis-002,lisinopril,does lisinopril make you cough,dry cough|persistent|ace inhibitor|discontinue|nonproductive,DailyMed,side_effect
+lis-003,lisinopril,Can I take potassium supplements while on lisinopril?,potassium|hyperkalemia|monitor|potassium-sparing|salt substitute,DailyMed,interaction
+lis-004,lisinopril,is lisinopril ok if i'm pregnant,contraindicated|fetal harm|second trimester|third trimester|discontinue,DailyMed,contraindication
+lis-005,lisinopril,How does lisinopril lower blood pressure?,ace|angiotensin-converting enzyme|angiotensin ii|vasodilation|inhibitor,DailyMed,mechanism
+ato-001,atorvastatin,What is the usual starting dose of atorvastatin for high cholesterol?,10 mg|20 mg|40 mg|once daily|maximum 80 mg,DailyMed,dose
+ato-002,atorvastatin,does atorvastatin cause muscle pain,myalgia|myopathy|rhabdomyolysis|muscle|creatine kinase,DailyMed,side_effect
+ato-003,atorvastatin,can i drink grapefruit juice with atorvastatin,grapefruit|cyp3a4|increased|avoid|myopathy,DailyMed,interaction
+ato-004,atorvastatin,Is atorvastatin safe with active liver disease?,active liver|hepatic|contraindicated|elevated transaminases|unexplained,DailyMed,contraindication
+ato-005,atorvastatin,How does atorvastatin lower cholesterol?,hmg-coa reductase|cholesterol synthesis|ldl|liver|inhibitor,DailyMed,mechanism
+lev-001,levothyroxine,What is the typical full replacement dose of levothyroxine for hypothyroidism?,1.6 mcg/kg|once daily|empty stomach|titrate|tsh,DailyMed,dose
+lev-002,levothyroxine,what happens if i take too much levothyroxine,hyperthyroidism|palpitations|tremor|weight loss|tachycardia,DailyMed,side_effect
+lev-003,levothyroxine,can i take levothyroxine with my calcium or iron supplement,calcium|iron|4 hours|separate|absorption,DailyMed,interaction
+lev-004,levothyroxine,Is levothyroxine contraindicated in untreated adrenal insufficiency?,untreated adrenal|adrenal crisis|contraindicated|cortisol|thyrotoxicosis,DailyMed,contraindication
+lev-005,levothyroxine,How does levothyroxine treat hypothyroidism?,t4|levothyroxine sodium|t3|synthetic|thyroid hormone,DailyMed,mechanism
+aml-001,amlodipine,What is the typical dose of amlodipine for hypertension?,5 mg|10 mg|once daily|titrate|maximum,DailyMed,dose
+aml-002,amlodipine,why do my ankles swell on amlodipine,peripheral edema|ankle|dose-related|calcium channel|common,DailyMed,side_effect
+aml-003,amlodipine,does grapefruit juice affect amlodipine,grapefruit|cyp3a4|increased|exposure|avoid,DailyMed,interaction
+aml-004,amlodipine,Is amlodipine safe with severe aortic stenosis?,severe aortic stenosis|hypotension|caution|symptomatic|hemodynamic,DailyMed,contraindication
+aml-005,amlodipine,How does amlodipine lower blood pressure?,calcium channel|smooth muscle|vasodilation|peripheral|dihydropyridine,DailyMed,mechanism
+mto-001,metoprolol,What is the starting dose of metoprolol succinate for heart failure?,25 mg|once daily|titrate|extended-release|target dose,DailyMed,dose
+mto-002,metoprolol,does metoprolol make you tired,fatigue|tiredness|bradycardia|dizziness|beta-blocker,DailyMed,side_effect
+mto-003,metoprolol,can i take metoprolol with verapamil,bradycardia|av block|hypotension|caution|cardiac depression,DailyMed,interaction
+mto-004,metoprolol,is metoprolol safe if i have asthma,bronchospasm|caution|copd|asthma|beta-2,DailyMed,contraindication
+mto-005,metoprolol,How does metoprolol lower blood pressure?,beta-1|cardioselective|heart rate|cardiac output|adrenergic,DailyMed,mechanism
+ome-001,omeprazole,What is the typical adult dose of omeprazole for GERD?,20 mg|once daily|before meal|4 weeks|gerd,DailyMed,dose
+ome-002,omeprazole,can omeprazole cause vitamin or mineral problems,b12|vitamin b12|magnesium|long-term|hypomagnesemia,DailyMed,side_effect
+ome-003,omeprazole,Can I take omeprazole with clopidogrel?,clopidogrel|reduced|cyp2c19|avoid|active metabolite,DailyMed,interaction
+ome-004,omeprazole,is omeprazole ok with rilpivirine,rilpivirine|contraindicated|reduced absorption|ppi|antiretroviral,DailyMed,contraindication
+ome-005,omeprazole,How does omeprazole reduce stomach acid?,proton pump|h+/k+ atpase|gastric|acid secretion|parietal,DailyMed,mechanism
+ser-001,sertraline,What is the typical starting dose of sertraline for major depression?,50 mg|once daily|titrate|maximum 200 mg|weekly,DailyMed,dose
+ser-002,sertraline,does sertraline cause sexual side effects,sexual dysfunction|decreased libido|delayed ejaculation|anorgasmia|common,DailyMed,side_effect
+ser-003,sertraline,can i take sertraline with an maoi,maoi|serotonin syndrome|14 days|contraindicated|wait,DailyMed,interaction
+ser-004,sertraline,is sertraline safe with linezolid,linezolid|serotonin syndrome|methylene blue|contraindicated|intravenous,DailyMed,contraindication
+ser-005,sertraline,How does sertraline treat depression?,serotonin reuptake|ssri|selective|5-ht|presynaptic,DailyMed,mechanism
+ibu-001,ibuprofen,What is the typical adult dose of ibuprofen for pain?,200 mg|400 mg|every 4|every 6|maximum 3200 mg,DailyMed,dose
+ibu-002,ibuprofen,does ibuprofen hurt your stomach,gi bleeding|ulcer|dyspepsia|abdominal pain|nsaid,DailyMed,side_effect
+ibu-003,ibuprofen,can i take ibuprofen with low-dose aspirin,aspirin|antiplatelet|cardioprotective|interfere|space,DailyMed,interaction
+ibu-004,ibuprofen,is ibuprofen safe late in pregnancy,third trimester|30 weeks|ductus arteriosus|avoid|premature closure,DailyMed,contraindication
+ibu-005,ibuprofen,How does ibuprofen relieve pain and inflammation?,cox|cyclooxygenase|prostaglandin|nsaid|inhibits,DailyMed,mechanism
+amx-001,amoxicillin,What is the typical adult dose of amoxicillin for a sinus infection?,500 mg|every 8|875 mg|every 12|10 days,DailyMed,dose
+amx-002,amoxicillin,does amoxicillin give you diarrhea,diarrhea|c. difficile|nausea|rash|antibiotic-associated,DailyMed,side_effect
+amx-003,amoxicillin,can amoxicillin make birth control less effective,oral contraceptive|hormonal|effectiveness|backup|reduced,DailyMed,interaction
+amx-004,amoxicillin,is amoxicillin safe if i'm allergic to penicillin,penicillin|hypersensitivity|anaphylaxis|contraindicated|cross-reactivity,DailyMed,contraindication
+amx-005,amoxicillin,How does amoxicillin kill bacteria?,cell wall|penicillin-binding protein|beta-lactam|bactericidal|peptidoglycan,DailyMed,mechanism
