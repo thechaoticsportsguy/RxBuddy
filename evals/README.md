@@ -48,4 +48,33 @@ Requires `ANTHROPIC_API_KEY` and `RXBUDDY_API_URL` in your `.env`. The runner em
 
 ## Nightly CI
 
-GitHub Actions runs `make eval` every night at 06:00 UTC and again on demand. See `.github/workflows/eval.yml` and the *Nightly CI* section that the Phase 1.5 prompt adds to this file.
+GitHub Actions runs `make eval` every night and fails loudly if quality regresses. The workflow lives at [.github/workflows/eval.yml](../.github/workflows/eval.yml).
+
+### Schedule
+- **Cron**: `0 6 * * *` — runs at 06:00 UTC daily.
+- **On-demand**: trigger via the *Actions → Nightly Eval → Run workflow* button in GitHub.
+
+### Required secrets
+Set both of these under **Settings → Secrets and variables → Actions**:
+- `ANTHROPIC_API_KEY` — used by the judge.
+- `RXBUDDY_API_URL` — production base URL (e.g. `https://rxbuddy.fly.dev`).
+
+### What it does
+1. Checks out `main` with full history.
+2. Restores prior `evals/results_*.csv` files from the `eval-results` branch into the working tree (no-op on the very first run).
+3. Installs Python dependencies and runs `make eval`.
+4. Runs `evals/check_regression.py` against the new CSV. **Fails the job** if hallucination rate rose by more than 1.0 percentage points compared to the previous run.
+5. If no regression: opens or updates a PR titled `chore: nightly eval results YYYY-MM-DD` from the `eval-results` branch into `main`. The PR body contains the eval summary line. Each run accumulates one new CSV on the PR branch.
+
+### Branch choice: regular, not orphan
+`eval-results` is a regular branch (forked from `main`), not an orphan branch. We need the rest of the source tree present alongside the CSVs so the resulting PR diff is reviewable, and the regression check needs prior CSVs in `evals/` from the same branch each run.
+
+### Manually triggering the first run
+After the first push of this workflow, go to **Actions → Nightly Eval → Run workflow** and pick the `phase-1-eval-harness` (or `main`) branch. Watch the run end-to-end. If the production API isn't reachable from GitHub's IP range, the eval will retry 3× and then mark rows as failed — the run still publishes a CSV.
+
+### Local dry-run
+You can rehearse the regression check end-to-end with two synthetic CSVs:
+```bash
+python evals/check_regression.py evals/results_<NEW_TIMESTAMP>.csv
+```
+Exit code 1 with a `REGRESSION:` message means the alarm fired.

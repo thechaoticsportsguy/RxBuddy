@@ -1,0 +1,94 @@
+# Nightly eval — runs the goldset against production every night at 06:00 UTC,
+# fails the job if hallucination rate rose by more than 1.0pp vs the previous
+# run, and otherwise opens or updates a PR from eval-results -> main with
+# the new results CSV.
+#
+# Branch strategy: `eval-results` is a *regular* (non-orphan) branch. It
+# tracks main + accumulated results_*.csv files. We use a regular branch
+# (not orphan) because peter-evans/create-pull-request needs the rest of
+# the source tree to live alongside the CSVs for the resulting PR diff to
+# be meaningful and reviewable. The action force-updates the branch each
+# run, so we restore prior CSVs from origin/eval-results into the working
+# tree before the action commits — that way the branch keeps full history.
+
+name: Nightly Eval
+
+on:
+  schedule:
+    # 06:00 UTC daily.
+    - cron: '0 6 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout main (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore prior result CSVs from eval-results branch
+        run: |
+          if git ls-remote --exit-code --heads origin eval-results >/dev/null 2>&1; then
+            git fetch origin eval-results
+            git checkout origin/eval-results -- 'evals/results_*.csv' || true
+            count=$(ls evals/results_*.csv 2>/dev/null | wc -l | tr -d ' ')
+            echo "Restored $count prior results CSV(s)"
+          else
+            echo "eval-results branch does not exist yet — first run."
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run eval (writes new evals/results_*.csv)
+        id: run_eval
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          RXBUDDY_API_URL: ${{ secrets.RXBUDDY_API_URL }}
+        run: |
+          set -euo pipefail
+          # Capture the summary line printed to stdout by run_eval.py.
+          make eval | tee /tmp/eval_full_output.txt
+          summary=$(grep -E '^Accuracy:' /tmp/eval_full_output.txt | tail -1)
+          new_csv=$(ls -t evals/results_*.csv | head -1)
+          echo "summary=$summary" >> "$GITHUB_OUTPUT"
+          echo "new_csv=$new_csv" >> "$GITHUB_OUTPUT"
+          echo "run_date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Check for hallucination regression (> 1.0pp)
+        run: python evals/check_regression.py "${{ steps.run_eval.outputs.new_csv }}"
+
+      - name: Build PR body
+        run: |
+          {
+            echo "${{ steps.run_eval.outputs.summary }}"
+            echo
+            echo "Results CSV: \`${{ steps.run_eval.outputs.new_csv }}\`"
+            echo "Run date (UTC): ${{ steps.run_eval.outputs.run_date }}"
+          } > /tmp/pr_body.txt
+
+      - name: Open or update eval-results PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: main
+          branch: eval-results
+          title: "chore: nightly eval results ${{ steps.run_eval.outputs.run_date }}"
+          body-path: /tmp/pr_body.txt
+          commit-message: "chore: nightly eval results ${{ steps.run_eval.outputs.run_date }}"
+          add-paths: |
+            evals/results_*.csv
