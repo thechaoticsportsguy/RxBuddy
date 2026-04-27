@@ -1,8 +1,27 @@
 import Head from "next/head";
+import Link from "next/link";
 import { useRouter } from "next/router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BackgroundGradientAnimation } from "../components/ui/background-gradient-animation";
 import Disclaimer from "../components/Disclaimer";
+
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  "http://127.0.0.1:8000";
+
+export async function getStaticProps() {
+  let trust = { hallucination_rate_pct: null, status: "no_eval_run_yet" };
+  try {
+    const res = await fetch(`${API_BASE}/api/eval/latest`, { cache: "no-store" });
+    if (res.ok) {
+      trust = await res.json();
+    }
+  } catch (e) {
+    // empty state is acceptable
+  }
+  return { props: { trust }, revalidate: 86400 };
+}
 
 const CATEGORIES = [
   "Drug Interactions",
@@ -209,7 +228,7 @@ function Pill3D() {
 /* ──────────────────────────────────────────────
    Main Page
    ────────────────────────────────────────────── */
-export default function HomePage() {
+export default function HomePage({ trust }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [listening, setListening] = useState(false);
@@ -555,8 +574,21 @@ export default function HomePage() {
             </div>
           </div>
 
+          {/* ---- Trust link ---- */}
+          <div className="mt-16 anim-fade-up" style={{ animationDelay: "0.7s" }}>
+            <Link
+              href="/trust"
+              className="text-xs font-medium underline-offset-4 hover:underline"
+              style={{ color: "rgba(183, 228, 199, 0.85)" }}
+            >
+              {trust && typeof trust.hallucination_rate_pct === "number"
+                ? `Hallucination rate: ${trust.hallucination_rate_pct}%`
+                : "How accurate is RxBuddy?"}
+            </Link>
+          </div>
+
           {/* ---- Footer Disclaimer ---- */}
-          <div className="mt-16 mb-10 anim-fade-up" style={{ animationDelay: "0.75s" }}>
+          <div className="mt-6 mb-10 anim-fade-up" style={{ animationDelay: "0.75s" }}>
             <Disclaimer variant="short" />
           </div>
         </div>

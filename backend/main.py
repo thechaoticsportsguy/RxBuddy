@@ -28,6 +28,7 @@ from fastapi.responses import JSONResponse, Response
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
+from api.eval import router as eval_router
 from api.search import init_spell_checker, limiter, router
 from core.config import settings
 from core.db import ensure_tables
@@ -214,6 +215,7 @@ async def health_check() -> dict[str, str]:
 
 
 app.include_router(router)
+app.include_router(eval_router)
 
 
 @app.exception_handler(RequestValidationError)
