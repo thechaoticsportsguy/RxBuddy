@@ -24,25 +24,37 @@ from core.config import settings
 logger = logging.getLogger("rxbuddy.db")
 
 # ── Engines ──────────────────────────────────────────────────────────────────
+# When DATABASE_URL is unset the URLs are empty strings; we leave the engines as
+# None so importing this module never crashes. DB-backed routes handle None.
 
-async_engine = create_async_engine(
-    settings.async_database_url,
-    pool_pre_ping=True,
-)
+_async_url = settings.async_database_url
+_sync_url = settings.sync_database_url
 
-async_session_factory = async_sessionmaker(
-    async_engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
+if _async_url:
+    async_engine = create_async_engine(
+        _async_url,
+        pool_pre_ping=True,
+    )
+    async_session_factory = async_sessionmaker(
+        async_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+else:
+    async_engine = None
+    async_session_factory = None
+    logger.warning("DATABASE_URL not set — DB disabled; DB-backed routes will be unavailable.")
 
 # Sync engine — required by ML modules (tfidf_search, knn_search) and
 # legacy pipeline code that hasn't been converted to async yet.
-sync_engine = _create_sync_engine(
-    settings.sync_database_url,
-    future=True,
-    pool_pre_ping=True,
-)
+if _sync_url:
+    sync_engine = _create_sync_engine(
+        _sync_url,
+        future=True,
+        pool_pre_ping=True,
+    )
+else:
+    sync_engine = None
 
 # ── Table definitions ────────────────────────────────────────────────────────
 
@@ -86,6 +98,9 @@ drug_chat_cache = Table(
 
 async def ensure_tables() -> None:
     """Create tables that don't exist yet (best-effort, non-blocking)."""
+    if async_engine is None:
+        logger.warning("[DB] No database configured — skipping table creation.")
+        return
     try:
         async with async_engine.begin() as conn:
             await conn.run_sync(drug_chat_cache.create, checkfirst=True)
