@@ -21,6 +21,23 @@
   --animate-fifth: moveInCircle 20s ease infinite;
 }
 
+/* ── RxBuddy design tokens — "calm clinical trust" ── */
+:root {
+  --bg-base: #07221b;
+  --bg-elev: #0e2e25;
+  --surface: #ffffff;
+  --accent: #1fbf75;
+  --accent-600: #15a063;
+  --text-hi: #f2f7f5;
+  --text-mid: #a9c4bb;
+  --text-dark: #0e2e25;
+  --r-pill: 9999px;
+  --r-lg: 20px;
+  --r-md: 12px;
+  --shadow-soft: 0 10px 30px -12px rgba(0, 0, 0, 0.45);
+  --shadow-search: 0 20px 50px -20px rgba(0, 0, 0, 0.55);
+}
+
 @keyframes moveInCircle {
   0%   { transform: rotate(0deg); }
   50%  { transform: rotate(180deg); }
