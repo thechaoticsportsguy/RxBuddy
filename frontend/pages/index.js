@@ -2,7 +2,6 @@ import Head from "next/head";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BackgroundGradientAnimation } from "../components/ui/background-gradient-animation";
 import Disclaimer from "../components/Disclaimer";
 
 const API_BASE =
@@ -104,13 +103,10 @@ function Pill3D() {
           transform: isClicked
             ? `rotateX(${rotation.x}deg) rotateY(360deg)`
             : `rotateX(${rotation.x}deg) rotateY(${rotation.y}deg)`,
-          transition: isClicked ? "transform 0.6s ease" : "transform 0.1s ease-out",
-          animation: isHovered
-            ? "glowPulse 2s ease-in-out infinite"
-            : "pillFloat 3s ease-in-out infinite, glowPulse 2s ease-in-out infinite",
+          transition: isClicked ? "transform 0.6s ease" : "transform 0.1s ease-out, box-shadow 0.3s ease",
           boxShadow: isHovered
-            ? "0 30px 70px rgba(0,0,0,0.5), 0 0 50px rgba(82,183,136,0.5), inset 0 2px 4px rgba(255,255,255,0.4), inset 0 -2px 4px rgba(0,0,0,0.2)"
-            : "0 25px 60px rgba(0,0,0,0.5), inset 0 2px 4px rgba(255,255,255,0.4), inset 0 -2px 4px rgba(0,0,0,0.2)",
+            ? "0 22px 55px -18px rgba(0,0,0,0.6), inset 0 2px 4px rgba(255,255,255,0.4), inset 0 -2px 4px rgba(0,0,0,0.2)"
+            : "var(--shadow-soft), inset 0 2px 4px rgba(255,255,255,0.4), inset 0 -2px 4px rgba(0,0,0,0.2)",
           border: "2px solid #2D6A4F",
           overflow: "hidden",
           position: "relative",
@@ -318,20 +314,10 @@ export default function HomePage({ trust }) {
         <meta name="description" content="RxBuddy helps you understand medication questions using drug label data from DailyMed and Drugs@FDA. Not a substitute for professional medical advice." />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" />
       </Head>
 
       <style jsx global>{`
-        /* ---- Pill 3D animations ---- */
-        @keyframes pillFloat {
-          0%, 100% { transform: translateY(0px) rotateX(10deg) rotateY(-5deg); }
-          50%      { transform: translateY(-15px) rotateX(10deg) rotateY(-5deg); }
-        }
-        @keyframes glowPulse {
-          0%, 100% { box-shadow: 0 20px 60px rgba(0,0,0,0.4), 0 0 30px rgba(82,183,136,0.3), inset 0 2px 4px rgba(255,255,255,0.4), inset 0 -2px 4px rgba(0,0,0,0.2); }
-          50%      { box-shadow: 0 20px 60px rgba(0,0,0,0.4), 0 0 60px rgba(82,183,136,0.6), inset 0 2px 4px rgba(255,255,255,0.4), inset 0 -2px 4px rgba(0,0,0,0.2); }
-        }
-
         /* Mobile: scale pill down */
         @media (max-width: 640px) {
           .pill3d-wrapper {
@@ -340,81 +326,96 @@ export default function HomePage({ trust }) {
           }
         }
 
-        /* ---- Page animations ---- */
+        /* ---- Entrance + placeholder caret ---- */
         @keyframes fadeUp {
-          0%   { opacity: 0; transform: translateY(24px); }
+          0%   { opacity: 0; transform: translateY(20px); }
           100% { opacity: 1; transform: translateY(0); }
         }
         @keyframes cursorBlink {
           0%, 100% { opacity: 1; }
           50%      { opacity: 0; }
         }
-        .anim-fade-up {
-          animation: fadeUp 0.6s ease-out both;
-        }
+        .anim-fade-up { animation: fadeUp 0.5s ease-out both; }
         .cursor-blink::after {
           content: "|";
           animation: cursorBlink 1s step-end infinite;
-          color: #52B788;
-        }
-        .category-pill {
-          transition: all 0.2s ease;
-        }
-        .category-pill:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 4px 16px rgba(82, 183, 136, 0.3);
-          background: rgba(255, 255, 255, 0.25) !important;
-        }
-        .search-glow:focus-within {
-          box-shadow: 0 0 0 4px rgba(82, 183, 136, 0.25), 0 8px 30px rgba(82, 183, 136, 0.2);
-          border-color: #52B788 !important;
-        }
-        .step-card {
-          transition: all 0.2s ease;
-        }
-        .step-card:hover {
-          transform: translateY(-4px);
-          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-        }
-        .example-btn {
-          transition: all 0.2s ease;
-        }
-        .example-btn:hover {
-          background: rgba(255, 255, 255, 0.15) !important;
-          border-color: rgba(82, 183, 136, 0.5) !important;
+          color: var(--accent);
         }
 
+        /* ---- Search bar focus ring (accessibility) ---- */
+        .search-glow { transition: box-shadow 180ms ease, border-color 180ms ease; }
+        .search-glow:focus-within {
+          border-color: var(--accent) !important;
+          box-shadow: var(--shadow-search), 0 0 0 4px rgba(31, 191, 117, 0.3);
+        }
+
+        /* ---- Buttons ---- */
+        .btn-accent { transition: transform 180ms ease, background-color 180ms ease, box-shadow 180ms ease; }
+        .btn-accent:hover { background: var(--accent-600) !important; transform: scale(1.02); box-shadow: 0 10px 22px -10px rgba(0, 0, 0, 0.55); }
+        .btn-accent:active { transform: scale(0.98); }
+        .icon-btn { transition: color 160ms ease, background-color 160ms ease; }
+        .icon-btn:hover { color: var(--accent) !important; background: rgba(31, 191, 117, 0.1) !important; }
+
+        /* ---- Chips & cards ---- */
+        .category-pill { transition: transform 0.18s ease, border-color 0.18s ease, background-color 0.18s ease; }
+        .category-pill:hover { transform: translateY(-2px); border-color: var(--accent) !important; background: rgba(31, 191, 117, 0.12) !important; }
+        .step-card { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+        .step-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-soft); }
+        .example-btn { transition: border-color 0.2s ease, background-color 0.2s ease; }
+        .example-btn:hover { border-color: rgba(31, 191, 117, 0.45) !important; background: rgba(31, 191, 117, 0.08) !important; }
+
+        /* ---- Visible keyboard focus ---- */
+        .btn-accent:focus-visible,
+        .icon-btn:focus-visible,
+        .category-pill:focus-visible,
+        .example-btn:focus-visible {
+          outline: 2px solid var(--accent);
+          outline-offset: 2px;
+        }
+
+        /* ---- Respect reduced motion ---- */
+        @media (prefers-reduced-motion: reduce) {
+          .anim-fade-up { animation: none !important; }
+          .cursor-blink::after { animation: none !important; }
+          .btn-accent:hover, .btn-accent:active,
+          .category-pill:hover, .step-card:hover { transform: none !important; }
+        }
       `}</style>
 
-      <BackgroundGradientAnimation
-        gradientBackgroundStart="rgb(20, 40, 20)"
-        gradientBackgroundEnd="rgb(10, 25, 15)"
-        firstColor="45, 106, 79"
-        secondColor="82, 183, 136"
-        thirdColor="27, 67, 50"
-        fourthColor="183, 228, 199"
-        fifthColor="52, 211, 153"
-        pointerColor="82, 183, 136"
-        containerClassName="min-h-screen"
-      >
+      <div className="relative min-h-screen overflow-hidden" style={{ background: "var(--bg-base)" }}>
+        {/* One calm, top-anchored accent glow — fades out before mid-page so the
+            bottom never washes out. */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 top-0"
+          style={{
+            height: "70vh",
+            background:
+              "radial-gradient(75% 60% at 50% -5%, rgba(31,191,117,0.16) 0%, rgba(31,191,117,0.05) 40%, rgba(7,34,27,0) 72%)",
+            zIndex: 0,
+          }}
+        />
         <div
           className="relative z-10 flex flex-col items-center min-h-screen px-4"
           style={{ fontFamily: "'Inter', system-ui, sans-serif" }}
         >
           {/* ---- Title ---- */}
-          <div className="mt-14 sm:mt-20 text-center anim-fade-up">
+          <div className="mt-12 sm:mt-16 text-center anim-fade-up">
             <h1
-              className="font-extrabold tracking-tight text-white"
+              className="font-extrabold tracking-tight"
               style={{
-                fontSize: "clamp(40px, 8vw, 64px)",
-                textShadow: "0 2px 20px rgba(82, 183, 136, 0.4)",
+                fontFamily: "'Sora', 'Inter', system-ui, sans-serif",
+                fontSize: "clamp(44px, 8vw, 56px)",
+                color: "var(--text-hi)",
+                letterSpacing: "-0.02em",
+                textShadow: "0 1px 2px rgba(0, 0, 0, 0.35)",
               }}
             >
               RxBuddy
             </h1>
             <p
-              className="mt-2 font-medium uppercase"
-              style={{ color: "#B7E4C7", fontSize: 15, letterSpacing: "4px" }}
+              className="mt-3 font-semibold uppercase"
+              style={{ color: "var(--text-mid)", fontSize: 13, letterSpacing: "0.18em" }}
             >
               Medication Information Helper
             </p>
@@ -429,14 +430,14 @@ export default function HomePage({ trust }) {
           <div className="mt-4 w-full max-w-xl anim-fade-up" style={{ animationDelay: "0.2s" }}>
             <form
               onSubmit={(e) => { e.preventDefault(); goSearch(query); }}
-              className="search-glow flex items-center w-full rounded-full bg-white px-5 py-3.5 transition-all"
+              className="search-glow flex items-center w-full bg-white px-5 py-4"
               style={{
-                border: "2px solid rgba(45, 106, 79, 0.4)",
-                boxShadow: "0 16px 48px rgba(0, 0, 0, 0.25)",
-                borderRadius: 50,
+                border: "1px solid rgba(14, 46, 37, 0.10)",
+                boxShadow: "var(--shadow-search)",
+                borderRadius: "var(--r-pill)",
               }}
             >
-              <svg className="h-5 w-5 shrink-0 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg className="h-5 w-5 shrink-0" style={{ color: "var(--text-mid)" }} aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
 
@@ -444,11 +445,12 @@ export default function HomePage({ trust }) {
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  className="w-full bg-transparent text-base text-slate-900 outline-none placeholder:text-transparent"
+                  className="w-full bg-transparent text-base outline-none placeholder:text-transparent"
+                  style={{ color: "var(--text-dark)" }}
                   placeholder={PLACEHOLDER_TEXT}
                 />
                 {!query && (
-                  <span className="absolute inset-0 flex items-center text-slate-400 text-base pointer-events-none cursor-blink">
+                  <span className="absolute inset-0 flex items-center text-base pointer-events-none cursor-blink" style={{ color: "#5b6b66" }}>
                     {typedText}
                   </span>
                 )}
@@ -457,10 +459,10 @@ export default function HomePage({ trust }) {
               <button
                 type="button"
                 onClick={toggleMic}
-                className="shrink-0 flex h-9 w-9 items-center justify-center rounded-full transition-all"
+                className="icon-btn shrink-0 mr-1 flex h-9 w-9 items-center justify-center rounded-full"
                 style={{
-                  background: listening ? "#52B788" : "transparent",
-                  color: listening ? "#fff" : "#2D6A4F",
+                  background: listening ? "var(--accent)" : "transparent",
+                  color: listening ? "var(--text-dark)" : "var(--text-mid)",
                 }}
                 aria-label="Voice input"
               >
@@ -475,8 +477,8 @@ export default function HomePage({ trust }) {
 
               <button
                 type="submit"
-                className="shrink-0 ml-1 flex h-9 items-center gap-1.5 rounded-full px-5 text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
-                style={{ background: "#2D6A4F" }}
+                className="btn-accent shrink-0 ml-2 flex h-10 items-center gap-1.5 px-6 text-sm font-bold"
+                style={{ background: "var(--accent)", color: "var(--text-dark)", borderRadius: "var(--r-pill)" }}
               >
                 Search
               </button>
@@ -488,18 +490,22 @@ export default function HomePage({ trust }) {
           </div>
 
           {/* ---- Stats Bar ---- */}
-          <div className="mt-10 flex justify-center gap-8 sm:gap-14 anim-fade-up" style={{ animationDelay: "0.35s" }}>
-            {STATS.map((s) => (
-              <div key={s.label} className="text-center">
-                <p className="text-3xl font-bold text-white">{s.value}</p>
-                <p className="text-xs font-medium mt-0.5" style={{ color: "#B7E4C7" }}>{s.label}</p>
+          <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-5 sm:gap-0 anim-fade-up" style={{ animationDelay: "0.35s" }}>
+            {STATS.map((s, i) => (
+              <div
+                key={s.label}
+                className={`text-center sm:px-10 ${i > 0 ? "sm:border-l" : ""}`}
+                style={i > 0 ? { borderColor: "rgba(169, 196, 187, 0.18)" } : undefined}
+              >
+                <p className="text-2xl sm:text-3xl font-bold" style={{ color: "var(--text-hi)" }}>{s.value}</p>
+                <p className="mt-1 text-xs font-medium" style={{ color: "var(--text-mid)" }}>{s.label}</p>
               </div>
             ))}
           </div>
 
           {/* ---- Category Pills ---- */}
           <div className="mt-10 anim-fade-up" style={{ animationDelay: "0.45s" }}>
-            <p className="text-center text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: "#B7E4C7" }}>
+            <p className="text-center text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: "var(--text-mid)" }}>
               Popular Topics
             </p>
             <div className="flex flex-wrap justify-center gap-2 max-w-lg">
@@ -508,11 +514,12 @@ export default function HomePage({ trust }) {
                   key={c}
                   type="button"
                   onClick={() => goSearch(c)}
-                  className="category-pill rounded-full px-4 py-2 text-sm font-medium text-white"
+                  className="category-pill px-4 py-2 text-sm font-medium"
                   style={{
-                    background: "rgba(255, 255, 255, 0.1)",
-                    border: "1px solid rgba(255, 255, 255, 0.2)",
-                    backdropFilter: "blur(4px)",
+                    background: "var(--bg-elev)",
+                    border: "1px solid rgba(169, 196, 187, 0.15)",
+                    color: "var(--text-hi)",
+                    borderRadius: "var(--r-pill)",
                   }}
                 >
                   {c}
@@ -523,28 +530,28 @@ export default function HomePage({ trust }) {
 
           {/* ---- How It Works ---- */}
           <div className="mt-16 w-full max-w-2xl anim-fade-up" style={{ animationDelay: "0.55s" }}>
-            <p className="text-center text-xs font-semibold uppercase tracking-widest mb-6" style={{ color: "#B7E4C7" }}>
+            <p className="text-center text-xs font-semibold uppercase tracking-widest mb-6" style={{ color: "var(--text-mid)" }}>
               How It Works
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {STEPS.map((s) => (
                 <div
                   key={s.num}
-                  className="step-card text-center rounded-xl p-5"
+                  className="step-card text-center p-5"
                   style={{
-                    background: "rgba(255, 255, 255, 0.08)",
-                    border: "1px solid rgba(255, 255, 255, 0.12)",
-                    backdropFilter: "blur(8px)",
+                    background: "var(--bg-elev)",
+                    border: "1px solid rgba(169, 196, 187, 0.12)",
+                    borderRadius: "var(--r-lg)",
                   }}
                 >
                   <div
                     className="mx-auto flex h-10 w-10 items-center justify-center rounded-full text-lg font-bold text-white"
-                    style={{ background: "#52B788" }}
+                    style={{ background: "var(--accent)" }}
                   >
                     {s.num}
                   </div>
-                  <p className="mt-3 text-sm font-semibold text-white">{s.title}</p>
-                  <p className="mt-1 text-xs leading-relaxed" style={{ color: "#B7E4C7" }}>{s.desc}</p>
+                  <p className="mt-3 text-sm font-semibold" style={{ color: "var(--text-hi)" }}>{s.title}</p>
+                  <p className="mt-1 text-xs leading-relaxed" style={{ color: "var(--text-mid)" }}>{s.desc}</p>
                 </div>
               ))}
             </div>
@@ -552,7 +559,7 @@ export default function HomePage({ trust }) {
 
           {/* ---- Example Questions ---- */}
           <div className="mt-14 w-full max-w-xl anim-fade-up" style={{ animationDelay: "0.65s" }}>
-            <p className="text-center text-xs font-semibold uppercase tracking-widest mb-4" style={{ color: "#B7E4C7" }}>
+            <p className="text-center text-xs font-semibold uppercase tracking-widest mb-4" style={{ color: "var(--text-mid)" }}>
               Try Asking
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -561,13 +568,15 @@ export default function HomePage({ trust }) {
                   key={eq}
                   type="button"
                   onClick={() => goSearch(eq)}
-                  className="example-btn text-left rounded-lg px-4 py-3 text-sm text-white/90"
+                  className="example-btn text-left px-4 py-3 text-sm"
                   style={{
-                    background: "rgba(255, 255, 255, 0.06)",
-                    border: "1px solid rgba(255, 255, 255, 0.1)",
+                    background: "var(--bg-elev)",
+                    border: "1px solid rgba(169, 196, 187, 0.12)",
+                    borderRadius: "var(--r-md)",
+                    color: "var(--text-hi)",
                   }}
                 >
-                  <span style={{ color: "#52B788" }} className="mr-1.5 font-semibold">Q:</span>
+                  <span style={{ color: "var(--accent)" }} className="mr-1.5 font-semibold">Q:</span>
                   {eq}
                 </button>
               ))}
@@ -579,7 +588,7 @@ export default function HomePage({ trust }) {
             <Link
               href="/trust"
               className="text-xs font-medium underline-offset-4 hover:underline"
-              style={{ color: "rgba(183, 228, 199, 0.85)" }}
+              style={{ color: "var(--text-mid)" }}
             >
               {trust && typeof trust.hallucination_rate_pct === "number"
                 ? `Hallucination rate: ${trust.hallucination_rate_pct}%`
@@ -592,7 +601,7 @@ export default function HomePage({ trust }) {
             <Disclaimer variant="short" />
           </div>
         </div>
-      </BackgroundGradientAnimation>
+      </div>
     </>
   );
 }
