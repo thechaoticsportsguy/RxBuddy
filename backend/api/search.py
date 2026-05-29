@@ -55,6 +55,28 @@ limiter = Limiter(key_func=get_remote_address)
 router = APIRouter()
 
 
+# ── Disclaimer footer (rides along on every structured answer + chat reply) ──
+DISCLAIMER_FOOTER = (
+    "⚠️ RxBuddy provides general information only and is not a substitute for "
+    "professional medical advice. Always consult a licensed pharmacist or physician."
+)
+
+
+# ── PHI redaction (applied ONLY to values written to logs / the DB) ──────────
+_EMAIL = re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b")
+_PHONE = re.compile(r"\b(?:\+?\d[\d\-\s().]{7,}\d)\b")
+
+
+def redact_phi(text: str) -> str:
+    """Redact emails / phone numbers before a query is stored. Live search and
+    the text sent to Claude are never passed through this."""
+    if not text:
+        return text
+    text = _EMAIL.sub("[redacted-email]", text)
+    text = _PHONE.sub("[redacted-phone]", text)
+    return text
+
+
 # ── Utility ──────────────────────────────────────────────────────────────────
 
 def _utc_now() -> datetime:
@@ -383,6 +405,7 @@ class StructuredAnswer(BaseModel):
     boxed_warnings: list[str] = Field(default_factory=list)
     mechanism_of_action: dict = Field(default_factory=dict)
     structured_sources: list[dict] = Field(default_factory=list)
+    disclaimer: str = DISCLAIMER_FOOTER
 
 
 class QuestionMatch(BaseModel):
@@ -557,7 +580,7 @@ async def _log_search(query: str, matched_question_id: int | None) -> None:
             await conn.execute(
                 search_logs_table.insert(),
                 {
-                    "query": query,
+                    "query": redact_phi(query),
                     "matched_question_id": matched_question_id,
                     "clicked": False,
                     "session_id": None,
@@ -1160,7 +1183,8 @@ async def search_stream(req: SearchRequest) -> StreamingResponse:
 
 
 @router.post("/answer", response_model=AnswerResponse)
-async def answer(req: AnswerRequest) -> AnswerResponse:
+@limiter.limit("30/minute")
+async def answer(request: Request, req: AnswerRequest) -> AnswerResponse:
     q = req.question.strip()
     if not q:
         raise HTTPException(status_code=400, detail="question cannot be empty")
@@ -1270,7 +1294,7 @@ async def chat_v2(request: Request, req: ChatRequest) -> ChatResponse:
                 )
             )).first()
             if row:
-                return ChatResponse(reply=row[0])
+                return ChatResponse(reply=f"{row[0].rstrip()}\n\n{DISCLAIMER_FOOTER}")
     except Exception:
         pass
 
@@ -1289,13 +1313,13 @@ async def chat_v2(request: Request, req: ChatRequest) -> ChatResponse:
     messages.append({"role": "user", "content": req.message})
 
     try:
-        from services.claude_client import _get_client
+        from services.claude_client import _get_client, SAFETY_SYSTEM_PROMPT
 
         client = _get_client()
         response = await client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=300,
-            system=system_prompt,
+            system=f"{SAFETY_SYSTEM_PROMPT}\n\n{system_prompt}",
             messages=messages,
         )
         reply_text = response.content[0].text if response.content else "Sorry, I couldn't generate a response."
@@ -1311,7 +1335,7 @@ async def chat_v2(request: Request, req: ChatRequest) -> ChatResponse:
     except Exception:
         pass
 
-    return ChatResponse(reply=reply_text)
+    return ChatResponse(reply=f"{reply_text.rstrip()}\n\n{DISCLAIMER_FOOTER}")
 
 
 @router.get("/drug-image", response_model=DrugImageResponse)
@@ -1373,7 +1397,7 @@ async def log_search_endpoint(req: LogRequest) -> LogResponse:
         async with async_engine.begin() as conn:
             result = await conn.execute(
                 search_logs_table.insert().returning(search_logs_table.c.id),
-                {"query": q, "matched_question_id": req.matched_question_id,
+                {"query": redact_phi(q), "matched_question_id": req.matched_question_id,
                  "clicked": bool(req.clicked), "session_id": req.session_id,
                  "searched_at": _utc_now()},
             )

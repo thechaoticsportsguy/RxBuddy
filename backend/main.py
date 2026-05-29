@@ -23,7 +23,6 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse, Response
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -31,7 +30,7 @@ from slowapi.errors import RateLimitExceeded
 from api.eval import router as eval_router
 from api.search import init_spell_checker, limiter, router
 from core.config import settings
-from core.db import ensure_tables
+from core.db import async_engine, ensure_tables
 from services.fda_client import close_client as close_fda_client
 
 logging.basicConfig(
@@ -45,10 +44,10 @@ _RXNORM_JSON = _BACKEND_DIR / "data" / "rxnorm_terms.json"
 
 _EXTRA_ORIGINS = [
     "https://rxbuddy.vercel.app",
-    "https://rxbuddy-git-main-omgohel-3379s-projects.vercel.app",
     "http://localhost:3000",
-    "http://localhost:3001",
+    "http://localhost:5173",
     "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
 ]
 
 
@@ -173,19 +172,9 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(GZipMiddleware, minimum_size=500)
 app.add_middleware(
-    TrustedHostMiddleware,
-    allowed_hosts=[
-        "rxbuddy.fly.dev",
-        "*.fly.dev",
-        "localhost",
-        "127.0.0.1",
-        "testserver",
-    ],
-)
-app.add_middleware(
     CORSMiddleware,
     allow_origins=_combined_origins,
-    allow_origin_regex=r"https://.*\.vercel\.app$",
+    allow_origin_regex=r"https://.*\.(replit\.dev|repl\.co|vercel\.app)$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -212,6 +201,28 @@ async def request_context_middleware(
 async def health_check() -> dict[str, str]:
     """Fly health check endpoint."""
     return {"status": "ok"}
+
+
+@app.get("/healthz")
+async def healthz() -> dict[str, str]:
+    """Liveness probe — always 200 if the process is alive. Never touches the DB."""
+    return {"status": "ok"}
+
+
+@app.get("/readyz")
+async def readyz() -> dict[str, Any]:
+    """Readiness probe — reports DB reachability without crashing if the DB is down."""
+    db_ok = False
+    try:
+        if async_engine is not None:
+            from sqlalchemy import text
+
+            async with async_engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+            db_ok = True
+    except Exception:
+        db_ok = False
+    return {"status": "ok", "db": db_ok}
 
 
 app.include_router(router)

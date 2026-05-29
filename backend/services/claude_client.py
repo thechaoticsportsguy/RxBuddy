@@ -14,6 +14,16 @@ from exceptions import ClaudeError
 
 logger = logging.getLogger("rxbuddy.claude")
 
+# ── Safety system prompt (prepended to every user-facing Claude call) ────────
+SAFETY_SYSTEM_PROMPT = (
+    "You are RxBuddy, an informational pharmacy assistant. You provide general "
+    "medication and OTC information only. You do NOT diagnose conditions, do NOT "
+    "prescribe, and do NOT give specific personal dosage instructions. For anything "
+    "requiring medical judgment, tell the user to consult a licensed pharmacist or "
+    "physician. Be clear, concise, and never present information as a substitute "
+    "for professional advice."
+)
+
 # ── Singleton async client ───────────────────────────────────────────────────
 _client: anthropic.AsyncAnthropic | None = None
 
@@ -197,6 +207,8 @@ async def generate_ai_answer(
             drug_name=drug_name or "",
             fda_context=fda_context,
         )
+        # Merge in the RxBuddy safety rules ahead of the intent-specific prompt.
+        system_prompt = f"{SAFETY_SYSTEM_PROMPT}\n\n{system_prompt}"
 
         logger.info("[Claude] Intent=%s — generating answer for: %.80s...", intent_str, question)
 

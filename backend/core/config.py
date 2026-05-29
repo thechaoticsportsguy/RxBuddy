@@ -26,13 +26,10 @@ class Settings(BaseSettings):
 
     @property
     def async_database_url(self) -> str:
-        """Database URL for async SQLAlchemy (asyncpg driver)."""
+        """Database URL for async SQLAlchemy (asyncpg driver). Empty = no DB."""
         url = self.DATABASE_URL
         if not url:
-            raise RuntimeError(
-                "DATABASE_URL is missing. Create a .env file in the project root with:\n"
-                "DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:6767/rxbuddy"
-            )
+            return ""  # empty = no DB; caller must handle
         if url.startswith("postgresql://"):
             return url.replace("postgresql://", "postgresql+asyncpg://", 1)
         if url.startswith("postgresql+psycopg://"):
@@ -41,10 +38,10 @@ class Settings(BaseSettings):
 
     @property
     def sync_database_url(self) -> str:
-        """Database URL for sync SQLAlchemy (psycopg driver)."""
+        """Database URL for sync SQLAlchemy (psycopg driver). Empty = no DB."""
         url = self.DATABASE_URL
         if not url:
-            raise RuntimeError("DATABASE_URL is missing.")
+            return ""  # empty = no DB; caller must handle
         if url.startswith("postgresql://"):
             return url.replace("postgresql://", "postgresql+psycopg://", 1)
         return url
